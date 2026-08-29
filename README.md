@@ -13,8 +13,8 @@ A native macOS app for background-first meeting transcription. ScribeKit runs
 quietly while you work in other applications and writes timestamped Markdown
 transcripts to a folder you choose, on your machine.
 
-**Status: early development.** The foundation is in place; audio capture and
-transcription are not implemented yet.
+**Status: early development.** Audio capture from selected applications
+works; transcription and transcript writing are not implemented yet.
 
 ## Philosophy
 
@@ -33,6 +33,10 @@ transcription are not implemented yet.
 - Meeting configuration screen: title, audio retention mode, save location.
 - Discovery of running applications through ScreenCaptureKit, with selection of
   one or several of them as intended audio sources, and a manual Refresh.
+- Audio capture from the selected applications, started and stopped explicitly,
+  with the selection resolved against the applications running at that moment
+  and a clear failure when one of them has quit. Capture reports the format and
+  level it is actually receiving.
 - A save folder chosen in the system open panel and remembered across launches
   with a security-scoped bookmark, with honest reporting when the folder has
   been moved, deleted or had its access revoked, and controls to replace or
@@ -43,20 +47,22 @@ transcription are not implemented yet.
   session metadata, with unit tests.
 - Shared Xcode scheme and a macOS CI workflow that builds and runs unit tests.
 
-Discovery only enumerates applications; nothing is captured, transcribed or
-written to disk yet, and selecting an application does not record it. Choosing
-a save folder only remembers the folder — no session directory, transcript or
-audio file is created. The Start Meeting control is intentionally disabled.
+Captured audio is measured and discarded: nothing is transcribed, and no
+transcript, audio file or session directory is written. Choosing a save folder
+only remembers the folder. The Start Meeting control is intentionally disabled,
+because a meeting implies a transcript ScribeKit cannot yet produce.
 
-Listing applications requires Screen Recording permission, which macOS asks for
-the first time ScribeKit looks for sources. Without it the screen reports the
-missing permission instead of a list.
+Listing applications and capturing their audio require Screen & System Audio
+Recording permission, which macOS asks for the first time ScribeKit looks for
+sources. Without it the screen reports the missing permission instead of a list
+or a capture.
 
 ## Planned
 
 All of the following are *planned*, not available:
 
-- Start / Pause / Resume / Stop, with background operation and a menu bar presence.
+- Live transcription of captured audio.
+- Meeting lifecycle with background operation and a menu bar presence.
 - Timestamped Markdown transcripts with autosave and crash/session recovery.
 - Transcript search and history.
 - Post-meeting review of uncertain passages.
@@ -105,7 +111,7 @@ Unit tests use [Swift Testing](https://developer.apple.com/documentation/testing
 ```
 ScribeKit/
   App/                    App entry point
-  Capture/                Application source discovery
+  Capture/                Application source discovery and audio capture
   Features/MeetingSetup/  SwiftUI configuration screen and its state
   Models/                 Domain value types (no I/O)
   Persistence/            Save-location storage and session layout policy
@@ -117,10 +123,12 @@ persistence behaviour. Session lifecycle is a single `MeetingState` enum with
 explicit transition rules, so contradictory states are unrepresentable.
 Capture, speech, persistence and session coordination are separate layers
 behind that model: source discovery sits behind the `CaptureSourceProviding`
-protocol, and ScreenCaptureKit types are adapted at that boundary rather than
-reaching the UI. Save-location storage sits behind `SaveLocationPersisting`, so
-security-scoped bookmark data never reaches the setup screen, and session
-directory naming is a pure policy separate from any filesystem work.
+protocol and capture behind `AudioCapturing`, and ScreenCaptureKit types are
+adapted at those boundaries rather than reaching the UI. Audio buffers are
+described on the capture system's own queue and never cross the main actor.
+Save-location storage sits behind `SaveLocationPersisting`, so security-scoped
+bookmark data never reaches the setup screen, and session directory naming is a
+pure policy separate from any filesystem work.
 
 A future session will be laid out as a directory named from its date and title,
 holding `transcript.md` with ScribeKit's own metadata in a hidden `.scribekit`
@@ -130,18 +138,29 @@ subdirectory, so a transcript stays readable without this app.
 
 1. **Foundation** — domain models, configuration UI, tests, CI, docs.
 2. **Application audio source discovery and selection**.
-3. **Durable save location and session configuration** *(current)*.
-4. Audio capture and on-device transcription.
-5. Timestamped Markdown persistence, autosave and recovery.
-6. Background and menu bar operation.
-7. Transcript history, search and uncertainty review.
-8. Optional audio retention and, separately, derived notes.
+3. Durable save location and session configuration.
+4. **Audio capture from the selected applications** *(current)*.
+5. On-device transcription.
+6. Timestamped Markdown persistence, autosave and recovery.
+7. Background and menu bar operation.
+8. Transcript history, search and uncertainty review.
+9. Optional audio retention and, separately, derived notes.
 
 ## Known limitations
 
-- No audio capture, transcription, transcript writing or recovery yet. Selected
-  applications are recorded as a choice only.
-- Start Meeting is a disabled placeholder.
+- No transcription, transcript writing or recovery yet. Captured audio is
+  described and discarded; none of it is kept, played back or written anywhere.
+- Start Meeting is a disabled placeholder; capture has its own controls.
+- ScreenCaptureKit has no audio-only stream, so the capture filter names a
+  display as well as the selected applications. No screen output is added, so
+  no frame is delivered or processed, but the permission macOS asks for is the
+  screen recording one.
+- The captured set is fixed when capture starts. Changing the selection while
+  capture is running does not change what is being captured; stop and start
+  again.
+- If a captured application quits mid-capture, ScreenCaptureKit keeps the
+  stream alive and delivers silence for it. ScribeKit does not substitute
+  another source, and the next start reports the application as unavailable.
 - Only applications owning an ordinary on-screen window are listed, so a
   menu-bar-only or windowless application is not offered as a source.
 - The application list is refreshed on appearance and on demand, not

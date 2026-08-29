@@ -54,6 +54,11 @@ persistence, appropriate task priorities, and minimal work while the UI is
 hidden. Do not process video or screen content. Do not prematurely optimise;
 do not knowingly introduce a hot loop either.
 
+A live capture pipeline uses bounded memory and never routes high-frequency
+audio callbacks through the main actor. Buffers are handled on the capture
+system's own queue, whatever the interface shows is a coalesced summary, and no
+part of the pipeline accumulates a meeting's audio in memory.
+
 ## Documentation comments
 
 Use native Swift `///` comments on non-trivial public and internal types,
