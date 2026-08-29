@@ -52,6 +52,20 @@ rewriting. Derived artifacts (notes, key concepts, summaries) must be:
 
 Transcription uncertainty is surfaced, not hidden.
 
+`transcript.md` is the canonical transcript. It is plain Markdown, owned by
+the user, readable and useful without ScribeKit, and never dependent on
+ScribeKit metadata: losing or failing to parse anything else in a session
+directory must not make the transcript unusable.
+
+Finalised segments accepted for persistence are never silently discarded. Once
+the writer has accepted one, ScribeKit does not drop it, and a queue between
+recognition and the writer that cannot hold an entry fails the meeting rather
+than evicting transcript material. A normal Stop flushes and closes durable
+transcript output before it reports a finished meeting, and a persistence
+failure is reported as one — never papered over with a claim that the
+transcript was saved, and never left running so that recognised speech
+accumulates with nowhere to go.
+
 ## Privacy
 
 - Everything stays on the user's machine unless the user explicitly exports it.
