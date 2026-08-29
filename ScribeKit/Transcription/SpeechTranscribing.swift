@@ -26,6 +26,16 @@ nonisolated protocol SpeechTranscribing: AudioSampleConsuming {
     /// when the transcriber is released.
     var events: AsyncStream<TranscriptionEvent> { get }
 
+    /// How many events have been published on ``events``, and how many the
+    /// bounded event buffer could not hold.
+    ///
+    /// A stop uses the published count as a barrier: it has observed
+    /// everything the recogniser produced once it has handled that many
+    /// events, which is what lets a meeting finish without leaving a finalised
+    /// span unsaved in the stream. A non-zero dropped count is a reportable
+    /// failure, not a statistic.
+    var eventTally: TranscriptionEventTally { get }
+
     /// The locales the recogniser supports, and whether each one's on-device
     /// model is installed.
     ///

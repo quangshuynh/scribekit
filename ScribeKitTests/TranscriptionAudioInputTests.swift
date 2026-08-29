@@ -63,14 +63,40 @@ struct TranscriptionAudioInputTests {
     func reportsDroppedAudioInAggregate() {
         let input = TranscriptionAudioInput(outputFormat: recogniserFormat, capacity: 2)
 
-        var reports: [Double] = []
+        var reports: [TranscriptionAudioInput.DroppedAudio] = []
         for _ in 0..<100 {
             if let dropped = input.append(captured()) { reports.append(dropped) }
         }
 
         #expect(!reports.isEmpty)
         #expect(reports.count < 50)
-        #expect(reports.allSatisfy { $0 >= 0.5 })
+        #expect(reports.allSatisfy { $0.seconds >= 0.5 })
+    }
+
+    @Test("A reported drop says where in the run the audio was lost")
+    func reportsWhereAudioWasLost() {
+        let input = TranscriptionAudioInput(outputFormat: recogniserFormat, capacity: 1)
+
+        var first: TranscriptionAudioInput.DroppedAudio?
+        for _ in 0..<100 where first == nil {
+            first = input.append(captured())
+        }
+
+        // The first buffer evicted is the one that started the run, and the
+        // position comes from the buffer rather than from a clock.
+        #expect(first?.startTime == 0)
+        #expect((first?.seconds ?? 0) >= 0.5)
+    }
+
+    @Test("A drop taken at stop is reported once and then forgotten")
+    func unreportedDropIsTakenOnce() {
+        let input = TranscriptionAudioInput(outputFormat: recogniserFormat, capacity: 1)
+        for _ in 0..<3 { _ = input.append(captured()) }
+
+        let taken = input.takeUnreportedDrop()
+
+        #expect(taken?.seconds ?? 0 > 0)
+        #expect(input.takeUnreportedDrop() == nil)
     }
 
     @Test("Dropping audio leaves a real gap rather than sliding the timeline")
