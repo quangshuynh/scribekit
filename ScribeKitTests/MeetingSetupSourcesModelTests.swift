@@ -23,6 +23,13 @@ private final class StubSourceProvider: CaptureSourceProviding, @unchecked Senda
     }
 }
 
+/// Preferences held in memory, so remembered selections can be tested without
+/// touching the user's preference store.
+private nonisolated final class FakePreferences: MeetingSetupPreferencesStoring, @unchecked Sendable {
+    var audioRetention: AudioRetentionMode = .default
+    var rememberedSourceIDs: [String] = []
+}
+
 @MainActor
 @Suite("MeetingSetupSourcesModel")
 struct MeetingSetupSourcesModelTests {
@@ -119,5 +126,69 @@ struct MeetingSetupSourcesModelTests {
 
         #expect(model.selectedSourceIDs == [meet.id])
         #expect(model.unavailableSelectionNames.isEmpty)
+    }
+
+    @Test("Remembered applications are selected again once discovery finds them")
+    func appliesRememberedSelection() async {
+        let preferences = FakePreferences()
+        preferences.rememberedSourceIDs = [meet.id, browser.id]
+        let model = MeetingSetupSourcesModel(
+            provider: StubSourceProvider([.success([meet, browser])]),
+            preferences: preferences
+        )
+
+        await model.refresh()
+
+        #expect(model.selectedSourceIDs == [meet.id, browser.id])
+        #expect(model.unavailableSelectionNames.isEmpty)
+    }
+
+    @Test("A remembered application that is not running is simply not selected")
+    func ignoresRememberedApplicationsThatAreNotRunning() async {
+        let preferences = FakePreferences()
+        preferences.rememberedSourceIDs = [meet.id, browser.id]
+        let model = MeetingSetupSourcesModel(
+            provider: StubSourceProvider([.success([meet])]),
+            preferences: preferences
+        )
+
+        await model.refresh()
+
+        #expect(model.selectedSourceIDs == [meet.id])
+        #expect(model.unavailableSelectionNames.isEmpty)
+        #expect(preferences.rememberedSourceIDs == [meet.id, browser.id])
+    }
+
+    @Test("Changing the selection updates what is remembered")
+    func remembersSelectionChanges() async {
+        let preferences = FakePreferences()
+        let model = MeetingSetupSourcesModel(
+            provider: StubSourceProvider([.success([meet, browser])]),
+            preferences: preferences
+        )
+        await model.refresh()
+
+        model.setSelection(true, for: browser)
+        model.setSelection(true, for: meet)
+        #expect(preferences.rememberedSourceIDs == [meet.id, browser.id].sorted())
+
+        model.setSelection(false, for: browser)
+        #expect(preferences.rememberedSourceIDs == [meet.id])
+    }
+
+    @Test("Remembered identifiers seed the selection once, not on every refresh")
+    func appliesRememberedSelectionOnlyOnce() async {
+        let preferences = FakePreferences()
+        preferences.rememberedSourceIDs = [meet.id]
+        let model = MeetingSetupSourcesModel(
+            provider: StubSourceProvider([.success([meet, browser])]),
+            preferences: preferences
+        )
+        await model.refresh()
+        model.setSelection(false, for: meet)
+
+        await model.refresh()
+
+        #expect(model.selectedSourceIDs.isEmpty)
     }
 }
