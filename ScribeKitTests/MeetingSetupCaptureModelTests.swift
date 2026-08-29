@@ -587,7 +587,7 @@ struct MeetingSetupCaptureModelTests {
         await model.start(request([meet]))
 
         #expect(!persistence.isOpen)
-        #expect(persistence.entries.last == .finished)
+        #expect(persistence.entries.last == .finished(.completed))
     }
 
     @Test("Capture that will not start closes the transcript it had opened")
@@ -598,7 +598,7 @@ struct MeetingSetupCaptureModelTests {
         await model.start(request([meet]))
 
         #expect(!persistence.isOpen)
-        #expect(persistence.entries.last == .finished)
+        #expect(persistence.entries.last == .finished(.completed))
     }
 
     @Test("Finalised speech is written and partial guesses never are")
@@ -669,7 +669,7 @@ struct MeetingSetupCaptureModelTests {
         await model.stop()
 
         #expect(!persistence.isOpen)
-        #expect(persistence.entries.last == .finished)
+        #expect(persistence.entries.last == .finished(.completed))
         if case let .saved(layout) = model.persistenceState {
             #expect(layout.transcriptURL.lastPathComponent == "transcript.md")
         } else {
@@ -686,7 +686,7 @@ struct MeetingSetupCaptureModelTests {
         await model.stop()
 
         #expect(persistence.segments.map(\.text) == ["The last sentence of the meeting."])
-        #expect(persistence.entries.last == .finished)
+        #expect(persistence.entries.last == .finished(.completed))
     }
 
     @Test("A transcript that stops being writable fails the meeting instead of transcribing into nothing")
@@ -737,7 +737,7 @@ struct MeetingSetupCaptureModelTests {
         capturer.interrupt(.interrupted("The stream was stopped by the user"))
 
         #expect(await wait { !persistence.isOpen })
-        #expect(persistence.entries.last == .finished)
+        #expect(persistence.entries.last == .finished(.completed))
     }
 
     @Test("A second meeting writes a new session rather than reopening the last one")
@@ -752,6 +752,6 @@ struct MeetingSetupCaptureModelTests {
 
         #expect(persistence.isOpen)
         #expect(persistence.entries.filter { if case .started = $0 { true } else { false } }.count == 2)
-        #expect(persistence.entries.filter { $0 == .finished }.count == 1)
+        #expect(persistence.entries.filter { $0 == .finished(.completed) }.count == 1)
     }
 }
