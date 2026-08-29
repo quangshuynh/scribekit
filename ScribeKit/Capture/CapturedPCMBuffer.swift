@@ -1,5 +1,5 @@
 //
-//  CapturedAudioSample.swift
+//  CapturedPCMBuffer.swift
 //  ScribeKit
 //
 
@@ -35,15 +35,19 @@ nonisolated struct CapturedAudioFormat: Hashable, Sendable {
     }
 }
 
-/// One buffer of audio received from the capture system, described rather than
-/// carried.
+/// One buffer of audio received from the capture system, carried as ScribeKit's
+/// own owned pulse-code data.
 ///
-/// Interval 4 proves that audio arrives; nothing consumes the samples yet.
-/// The value therefore holds a bounded description — format, size, timing and
-/// a peak level — and never the pulse-code data itself, so capture memory
-/// stays constant no matter how long a meeting runs. The type is the boundary
-/// a later transcription consumer extends; it is not a substitute for one.
-nonisolated struct CapturedAudioSample: Hashable, Sendable {
+/// The capture system owns its `CMSampleBuffer` only for the duration of the
+/// callback that delivers it, so a transcriber that consumes audio on another
+/// thread cannot read that memory. The value therefore holds the smallest copy
+/// that makes safe asynchronous ownership possible: the frames of one buffer,
+/// as floating-point samples, in the layout they arrived in.
+///
+/// One buffer is 20 ms of audio in practice — a few kilobytes. Buffers are
+/// consumed and released as they arrive; nothing in ScribeKit accumulates them,
+/// so audio memory stays flat however long a meeting runs.
+nonisolated struct CapturedPCMBuffer: Equatable, Sendable {
     /// The format the buffer arrived in.
     let format: CapturedAudioFormat
 
@@ -52,14 +56,23 @@ nonisolated struct CapturedAudioSample: Hashable, Sendable {
 
     /// The buffer's presentation timestamp in seconds, when the capture system
     /// supplied a numeric one.
+    ///
+    /// This is the capture system's own clock, which does not start at zero for
+    /// a meeting. Session-relative time is derived by the transcription
+    /// pipeline from the frames it has received, not from this value.
     let presentationTime: Double?
 
-    /// The largest absolute sample value in the buffer, when it could be read.
+    /// The largest absolute sample value in the buffer.
     ///
-    /// Present only for floating-point audio, where it is a normalised
-    /// magnitude. It exists so capture can show that real, non-silent audio is
-    /// flowing without retaining or replaying any of it.
-    let peakAmplitude: Float?
+    /// A normalised magnitude, so the interface can show that real, non-silent
+    /// audio is flowing without replaying any of it.
+    let peakAmplitude: Float
+
+    /// The frames themselves, `frameCount * format.channelCount` values.
+    ///
+    /// Non-interleaved audio is stored channel by channel; interleaved audio
+    /// frame by frame, matching ``CapturedAudioFormat/isInterleaved``.
+    let samples: [Float]
 
     /// How much time the buffer represents, in seconds.
     var duration: Double {
