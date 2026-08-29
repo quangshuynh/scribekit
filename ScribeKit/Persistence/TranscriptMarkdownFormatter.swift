@@ -124,6 +124,36 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
         return text
     }
 
+    /// The note recovery appends to a transcript whose meeting never finished.
+    ///
+    /// Every clause is something ScribeKit knows. It does not state when the
+    /// meeting stopped, because a process that was killed observed nothing
+    /// about its own death, and it does not state how long the gap was,
+    /// because that would be the same invention with arithmetic on top. What
+    /// it does state is that the document ends where the last durable write
+    /// left it and that nothing was transcribed afterwards.
+    ///
+    /// The note is a blockquote, the same convention ``gap(_:)`` uses, so
+    /// ScribeKit's own structural remarks stay visibly distinct from
+    /// recognised speech in the rendered document as well as in the source.
+    ///
+    /// - Parameters:
+    ///   - date: When ScribeKit recorded the interruption, which is when the
+    ///     user was shown it — not when the meeting stopped.
+    ///   - timeZone: The zone the time is written in.
+    /// - Returns: Markdown ending in a blank line.
+    static func interruptionNotice(recordedAt date: Date, timeZone: TimeZone = .current) -> String {
+        let formatter = TranscriptMarkdownFormatter(startedAt: date, timeZone: timeZone)
+        var text = "---\n\n"
+        text += "> **Session interrupted.** ScribeKit stopped before this meeting was finished, "
+        text += "so the transcript ends at the last speech that reached the file. "
+        text += "When it stopped is not known, and nothing was transcribed after that point. "
+        text += "Interruption recorded by ScribeKit on "
+        text += "\(SessionDirectoryName.datePrefix(for: date, timeZone: timeZone)) "
+        text += "at \(formatter.clock(date, includingSeconds: false)).\n\n"
+        return text
+    }
+
     /// The wall-clock moment an audio-relative offset refers to.
     ///
     /// - Parameter offset: Seconds from the first captured frame of the run.
