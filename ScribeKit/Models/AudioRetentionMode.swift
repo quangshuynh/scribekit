@@ -9,7 +9,7 @@ import Foundation
 ///
 /// Retention is opt-in: the default mode keeps no audio at all, so a session
 /// produces only its transcript unless the user asks for more.
-enum AudioRetentionMode: String, Codable, Sendable, CaseIterable, Hashable, Identifiable {
+nonisolated enum AudioRetentionMode: String, Codable, Sendable, CaseIterable, Hashable, Identifiable {
     /// Keep no audio file; only the transcript is written.
     case none
 

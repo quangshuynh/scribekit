@@ -10,7 +10,7 @@ import Foundation
 /// The session owns descriptive state only. Transcript content, captured
 /// audio and their on-disk representation are deliberately kept outside this
 /// type so that the raw transcript is never coupled to session bookkeeping.
-struct MeetingSession: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct MeetingSession: Identifiable, Hashable, Codable, Sendable {
     /// Stable identity for the session, independent of its title.
     let id: UUID
 
