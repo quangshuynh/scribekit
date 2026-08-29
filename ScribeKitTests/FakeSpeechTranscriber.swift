@@ -29,14 +29,16 @@ nonisolated final class FakeSpeechTranscriber: SpeechTranscribing, @unchecked Se
     private(set) var configurations: [TranscriptionConfiguration] = []
     private(set) var isTranscribing = false
 
-    private let continuation: AsyncStream<TranscriptionEvent>.Continuation
+    private let publisher: TranscriptionEventPublisher
     private let received = Mutex<[CapturedPCMBuffer]>([])
 
     init() {
         var continuation: AsyncStream<TranscriptionEvent>.Continuation!
         events = AsyncStream { continuation = $0 }
-        self.continuation = continuation
+        publisher = TranscriptionEventPublisher(continuation: continuation)
     }
+
+    var eventTally: TranscriptionEventTally { publisher.tally }
 
     /// The buffers delivered through the capture boundary.
     var receivedBuffers: [CapturedPCMBuffer] { received.withLock { $0 } }
@@ -71,6 +73,6 @@ nonisolated final class FakeSpeechTranscriber: SpeechTranscribing, @unchecked Se
     ///
     /// - Parameter event: The event to publish.
     func emit(_ event: TranscriptionEvent) {
-        continuation.yield(event)
+        publisher.publish(event)
     }
 }
