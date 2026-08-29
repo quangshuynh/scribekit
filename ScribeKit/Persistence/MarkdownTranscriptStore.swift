@@ -27,6 +27,14 @@ import Foundation
 /// own flush, which is asked for every ``synchronizeInterval`` appends and
 /// once more when the session ends. There is no timer and no flush per audio
 /// buffer.
+///
+/// Beside the transcript the store keeps one small operational record,
+/// `.scribekit/session.json`, so a meeting that ends without ScribeKit is
+/// recognisable as unfinished the next time it launches. The record is written
+/// last when a session starts — a meeting that cannot establish one does not
+/// begin — and last again when a session ends, after the transcript has been
+/// flushed and closed, so nothing is ever recorded as completed ahead of the
+/// file it describes.
 actor MarkdownTranscriptStore: TranscriptPersisting {
 
     /// How many appends are made between flushes to the storage device.
@@ -41,11 +49,13 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         let lease: SecurityScopedLease
         let file: any TranscriptFileAppending
         let layout: SessionArtifactLayout
+        let metadata: SessionRecoveryMetadata
         var formatter: TranscriptMarkdownFormatter
         var appendsSinceSynchronize = 0
     }
 
     private let fileStore: any TranscriptFileStoring
+    private let recoveryStore: any SessionRecoveryStoring
     private let access: any SecurityScopedResourceAccessing
     private let timeZone: TimeZone
     private var current: OpenSession?
@@ -55,16 +65,20 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
     /// - Parameters:
     ///   - fileStore: How directories and files are created. The system by
     ///     default; tests substitute a double that can fail on demand.
+    ///   - recoveryStore: How the session record is written. The system by
+    ///     default; tests substitute a double that can fail on demand.
     ///   - access: How security-scoped access is started and stopped.
     ///   - timeZone: The zone session names and clock times are written in.
     ///     The current zone by default, so a meeting is filed and timed as the
     ///     user experienced it.
     init(
         fileStore: any TranscriptFileStoring = FileManagerTranscriptFileStore(),
+        recoveryStore: any SessionRecoveryStoring = FileManagerSessionRecoveryStore(),
         access: any SecurityScopedResourceAccessing = SystemSecurityScopedResourceAccess(),
         timeZone: TimeZone = .current
     ) {
         self.fileStore = fileStore
+        self.recoveryStore = recoveryStore
         self.access = access
         self.timeZone = timeZone
     }
@@ -116,7 +130,28 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
                 throw TranscriptPersistenceError(.writeFailed, underlying: error)
             }
 
-            current = OpenSession(lease: lease, file: file, layout: layout, formatter: formatter)
+            let metadata = SessionRecoveryMetadata(
+                sessionID: session.id,
+                title: session.displayTitle,
+                startedAt: startedAt,
+                sourceNames: session.selectedSources.map(\.displayName),
+                localeIdentifier: localeIdentifier,
+                status: .inProgress
+            )
+            do {
+                try recoveryStore.writeMetadata(metadata, to: layout)
+            } catch {
+                try? file.close()
+                throw TranscriptPersistenceError(.recoveryMetadataFailed, underlying: error)
+            }
+
+            current = OpenSession(
+                lease: lease,
+                file: file,
+                layout: layout,
+                metadata: metadata,
+                formatter: formatter
+            )
             return layout
         } catch {
             lease.release()
@@ -141,17 +176,30 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         current = session
     }
 
-    func finishSession(endedAt: Date) async throws {
+    func finishSession(endedAt: Date, outcome: SessionCompletionOutcome) async throws {
         guard let session = current else { throw TranscriptPersistenceError(.noSessionInProgress) }
         current = nil
         defer { session.lease.release() }
 
         var failure: Error?
-        do { try session.file.append(session.formatter.footer(endedAt: endedAt)) } catch { failure = error }
+        if outcome == .completed {
+            do { try session.file.append(session.formatter.footer(endedAt: endedAt)) } catch { failure = error }
+        }
         do { try session.file.synchronize() } catch { failure = failure ?? error }
         do { try session.file.close() } catch { failure = failure ?? error }
 
+        // The record is only allowed to claim completion once the transcript
+        // above has actually been flushed and closed. A transcript that failed
+        // to close is left recorded as in progress, so the next launch offers
+        // the meeting for recovery instead of believing a completion that
+        // never happened.
         if let failure { throw TranscriptPersistenceError(.flushFailed, underlying: failure) }
+
+        do {
+            try recoveryStore.writeMetadata(session.metadata.closed(outcome, at: endedAt), to: session.layout)
+        } catch {
+            throw TranscriptPersistenceError(.recoveryMetadataFailed, underlying: error)
+        }
     }
 
     /// Names the session's directory, stepping past names already in use.

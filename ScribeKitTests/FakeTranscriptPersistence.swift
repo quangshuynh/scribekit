@@ -20,7 +20,7 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         case started(directory: URL)
         case segment(TranscriptSegment)
         case gap(TranscriptGap)
-        case finished
+        case finished(SessionCompletionOutcome)
     }
 
     private struct State {
@@ -102,7 +102,7 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         try append(.gap(gap), isFinalized: true)
     }
 
-    func finishSession(endedAt: Date) async throws {
+    func finishSession(endedAt: Date, outcome: SessionCompletionOutcome) async throws {
         let delay = state.withLock { $0.startDelay }
         if delay > .zero { try? await Task.sleep(for: delay) }
 
@@ -110,10 +110,15 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
             defer { state.finishError = nil }
             guard state.isOpen else { return TranscriptPersistenceError(.noSessionInProgress) }
             state.isOpen = false
-            state.entries.append(.finished)
+            state.entries.append(.finished(outcome))
             return state.finishError
         }
         if let error { throw error }
+    }
+
+    /// How each closed session was reported as ending, in order.
+    var outcomes: [SessionCompletionOutcome] {
+        entries.compactMap { if case let .finished(outcome) = $0 { outcome } else { nil } }
     }
 
     /// Records one durable entry, applying the same refusals the real store

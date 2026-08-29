@@ -316,7 +316,7 @@ final class MeetingSetupCaptureModel {
         guard persistenceState.isActive else { return }
         let layout = persistenceState.layout
         do {
-            try await persistence.finishSession(endedAt: Date())
+            try await persistence.finishSession(endedAt: Date(), outcome: .completed)
             persistenceState = layout.map { .saved($0) } ?? .idle
         } catch {
             persistenceState = .failed(message: message(for: error, sources: []), layout: layout)
@@ -402,11 +402,17 @@ final class MeetingSetupCaptureModel {
     /// recognise speech that nothing is writing down would be exactly the
     /// false impression this state exists to prevent.
     ///
+    /// The session is closed as ``SessionCompletionOutcome/failed``, so its
+    /// record says the meeting ended because saving stopped working rather
+    /// than leaving it looking like a meeting that vanished. ScribeKit was
+    /// running and told the user at the time; the next launch should not
+    /// present it as a mystery.
+    ///
     /// - Parameter message: What to tell the user.
     private func failPersistence(message: String) async {
         guard persistenceState.isActive else { return }
         persistenceState = .failed(message: message, layout: persistenceState.layout)
-        try? await persistence.finishSession(endedAt: Date())
+        try? await persistence.finishSession(endedAt: Date(), outcome: .failed)
         stopSubsystemsAfterPersistenceFailure()
     }
 

@@ -58,17 +58,37 @@ nonisolated protocol TranscriptPersisting: Sendable {
     ///   or the write fails.
     func recordGap(_ gap: TranscriptGap) async throws
 
-    /// Writes the closing block, flushes everything accepted so far, closes
-    /// the file and releases access to the user's folder.
+    /// Flushes everything accepted so far, closes the file, records how the
+    /// session ended, and releases access to the user's folder.
     ///
     /// A caller may only report a meeting as complete once this has returned
-    /// without throwing.
+    /// without throwing. The ordering that makes that safe is part of the
+    /// contract: a session is never recorded as completed before its
+    /// transcript has been flushed and closed successfully, so a record
+    /// claiming completion is never ahead of the file it describes.
+    ///
+    /// - Parameters:
+    ///   - endedAt: The wall-clock moment the session finished.
+    ///   - outcome: Whether the meeting finished normally or was ended because
+    ///     the transcript could not be saved. ``SessionCompletionOutcome/failed``
+    ///     writes no closing block, because a meeting that stopped being saved
+    ///     has no honest end time to state in the document.
+    /// - Throws: ``TranscriptPersistenceError`` when no session is in progress,
+    ///   the transcript could not be flushed and closed, or the session record
+    ///   could not be updated. Resources are released either way, and a
+    ///   session whose record could not be updated is left recorded as
+    ///   unfinished rather than falsely as complete.
+    func finishSession(endedAt: Date, outcome: SessionCompletionOutcome) async throws
+}
+
+nonisolated extension TranscriptPersisting {
+    /// Finishes a session that ended normally.
     ///
     /// - Parameter endedAt: The wall-clock moment the session finished.
-    /// - Throws: ``TranscriptPersistenceError`` when no session is in progress
-    ///   or the transcript could not be flushed and closed. Resources are
-    ///   released either way.
-    func finishSession(endedAt: Date) async throws
+    /// - Throws: Whatever ``finishSession(endedAt:outcome:)`` throws.
+    func finishSession(endedAt: Date) async throws {
+        try await finishSession(endedAt: endedAt, outcome: .completed)
+    }
 }
 
 /// A reason durable transcript writing could not start, continue or finish.
@@ -103,6 +123,11 @@ struct TranscriptPersistenceError: Error {
 
         /// The transcript could not be flushed or closed.
         case flushFailed
+
+        /// The session record that makes a meeting recoverable could not be
+        /// written. A meeting does not start without one, and does not finish
+        /// as completed without one either.
+        case recoveryMetadataFailed
     }
 
     /// What went wrong.
@@ -143,6 +168,8 @@ extension TranscriptPersistenceError: LocalizedError {
             "The transcript could not be written to. Recognised speech is no longer being saved."
         case .flushFailed:
             "The transcript could not be completed. Some recognised speech may not have reached the file."
+        case .recoveryMetadataFailed:
+            "ScribeKit could not write the session record this meeting needs to be recoverable, so the meeting was not started or was not recorded as finished."
         }
     }
 }
