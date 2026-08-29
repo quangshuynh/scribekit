@@ -30,12 +30,13 @@ struct AudioCaptureActivityMonitorTests {
         isInterleaved: false
     )
 
-    private func sample(frames: Int, peak: Float = 0.5) -> CapturedAudioSample {
-        CapturedAudioSample(
+    private func sample(frames: Int, peak: Float = 0.5) -> CapturedPCMBuffer {
+        CapturedPCMBuffer(
             format: format,
             frameCount: frames,
             presentationTime: 1,
-            peakAmplitude: peak
+            peakAmplitude: peak,
+            samples: [Float](repeating: peak, count: frames)
         )
     }
 

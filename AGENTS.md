@@ -28,6 +28,19 @@ analytics, no stealth capture.
 
 ## Transcript integrity
 
+Partial recognition is ephemeral. Only text the recogniser has finalised may
+become transcript material; a partial hypothesis is displayed, replaced by the
+next one and discarded, never appended to a transcript or persisted.
+
+Speech recognition is local. It runs against a model installed on the user's
+Mac, and an unavailable or uninstalled model is reported so the user can act on
+it. Nothing may fall back to network or server-backed recognition, silently or
+otherwise.
+
+Gaps are reported. When audio is not transcribed — a full buffer, a recogniser
+being restarted — the lost time is surfaced rather than closed over, and the
+timeline of what was transcribed keeps its real offsets.
+
 The raw transcript is source material and is never silently rewritten — not by
 AI, LLMs, summarisation, grammar cleanup, inferred substitutions or semantic
 rewriting. Derived artifacts (notes, key concepts, summaries) must be:
@@ -58,6 +71,11 @@ A live capture pipeline uses bounded memory and never routes high-frequency
 audio callbacks through the main actor. Buffers are handled on the capture
 system's own queue, whatever the interface shows is a coalesced summary, and no
 part of the pipeline accumulates a meeting's audio in memory.
+
+Every queue between a producer of audio and a consumer of it is bounded, and
+overflow is measured and reported. An unbounded `AsyncStream` or array between
+capture and a slower consumer is a memory leak with a delay on it. Recognised
+text may grow with the meeting; raw audio may not.
 
 ## Documentation comments
 

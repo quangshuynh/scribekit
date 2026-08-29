@@ -55,8 +55,8 @@ private nonisolated final class FakeCapturer: AudioCapturing, @unchecked Sendabl
     }
 
     /// Delivers a synthetic buffer the way the real capture queue would.
-    func deliver(_ sample: CapturedAudioSample) {
-        consumer.consume(sample)
+    func deliver(_ buffer: CapturedPCMBuffer) {
+        consumer.consume(buffer)
     }
 }
 
@@ -75,17 +75,59 @@ struct MeetingSetupCaptureModelTests {
         isInterleaved: false
     )
 
-    /// Builds a model over a fake capturer, returning both.
-    private func makeModel() -> (MeetingSetupCaptureModel, FakeCapturer) {
+    /// Builds a model over a fake capturer and a fake transcriber, prepared as
+    /// the screen prepares it.
+    ///
+    /// - Parameter availability: What the recogniser reports about itself.
+    /// - Returns: The model and the two fakes behind it.
+    private func makeModel(
+        availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
+    ) async -> (MeetingSetupCaptureModel, FakeCapturer, FakeSpeechTranscriber) {
+        let transcriber = FakeSpeechTranscriber()
+        transcriber.availabilityResult = availability
         var capturer: FakeCapturer!
         let model = MeetingSetupCaptureModel(
             monitor: AudioCaptureActivityMonitor(minimumPublishInterval: .zero),
+            transcriber: transcriber,
             makeCapturer: { consumer in
                 capturer = FakeCapturer(consumer: consumer)
                 return capturer
             }
         )
-        return (model, capturer)
+        await model.prepare()
+        return (model, capturer, transcriber)
+    }
+
+    /// A synthetic buffer of the shape ScreenCaptureKit delivers.
+    ///
+    /// - Parameters:
+    ///   - frames: How many frames to carry.
+    ///   - peak: The level to report.
+    /// - Returns: A buffer ready to deliver.
+    private func buffer(frames: Int, peak: Float = 0.25) -> CapturedPCMBuffer {
+        CapturedPCMBuffer(
+            format: format,
+            frameCount: frames,
+            presentationTime: 12,
+            peakAmplitude: peak,
+            samples: [Float](repeating: peak, count: frames)
+        )
+    }
+
+    /// A finalised segment, as a recogniser would report one.
+    ///
+    /// - Parameters:
+    ///   - text: The recognised text.
+    ///   - start: Seconds from the start of the run.
+    /// - Returns: The segment.
+    private func segment(_ text: String, start: Double = 0) -> TranscriptSegment {
+        TranscriptSegment(
+            text: text,
+            startTime: start,
+            endTime: start + 1,
+            state: .final,
+            localeIdentifier: "en-US"
+        )
     }
 
     /// The state the model should reach when a capture error is reported.
@@ -110,13 +152,13 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("Starting from idle captures the selected applications")
     func startsFromIdle() async {
-        let (model, capturer) = makeModel()
-        #expect(model.state == .idle)
+        let (model, capturer, _) = await makeModel()
+        #expect(model.captureState == .idle)
         #expect(model.canStart(sources: [meet]))
 
         await model.start(sources: [meet, browser])
 
-        #expect(model.state == .capturing)
+        #expect(model.captureState == .capturing)
         #expect(capturer.startCount == 1)
         #expect(capturer.configurations.first?.sourceIDs == [meet.id, browser.id])
         #expect(capturer.configurations.first?.sampleRate == AudioCaptureConfiguration.defaultSampleRate)
@@ -125,144 +167,345 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("Starting is not offered without a selection")
     func startNeedsSelection() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
 
         #expect(!model.canStart(sources: []))
 
         await model.start(sources: [])
 
-        #expect(model.state == failure(.noSourcesSelected))
+        #expect(model.captureState == failure(.noSourcesSelected))
         #expect(capturer.isCapturing == false)
     }
 
     @Test("Starting again while capturing does not reach the capturer")
     func duplicateStartIsIgnored() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
 
         #expect(!model.canStart(sources: [meet]))
         await model.start(sources: [meet])
 
-        #expect(model.state == .capturing)
+        #expect(model.captureState == .capturing)
         #expect(capturer.startCount == 1)
     }
 
     @Test("Stopping while capturing returns to idle")
     func stopsFromCapturing() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
 
         #expect(model.canStop)
         await model.stop()
 
-        #expect(model.state == .idle)
+        #expect(model.captureState == .idle)
         #expect(capturer.stopCount == 1)
         #expect(capturer.isCapturing == false)
     }
 
     @Test("Stopping while idle does nothing")
     func stopWhileIdleIsHarmless() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
 
         #expect(!model.canStop)
         await model.stop()
         await model.stop()
 
-        #expect(model.state == .idle)
+        #expect(model.captureState == .idle)
         #expect(capturer.stopCount == 0)
     }
 
     @Test("Capture can be started again after being stopped")
     func restartsAfterStop() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
         await model.stop()
 
         await model.start(sources: [meet])
 
-        #expect(model.state == .capturing)
+        #expect(model.captureState == .capturing)
         #expect(capturer.startCount == 2)
     }
 
     @Test("A refused start is reported as a failure, not as capture")
     func startFailureIsReported() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
         capturer.startError = .permissionDenied
 
         await model.start(sources: [meet])
 
-        #expect(model.state == failure(.permissionDenied))
+        #expect(model.captureState == failure(.permissionDenied))
         #expect(!model.canStop)
         #expect(model.canStart(sources: [meet]))
     }
 
     @Test("A selected application that is gone is named in the failure")
     func missingSourceIsNamed() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
         capturer.startError = .sourcesUnavailable([meet.id])
 
         await model.start(sources: [meet, browser])
 
-        #expect(model.state == .failed(message: "No longer running, so capture did not start: Meet"))
+        #expect(model.captureState == .failed(message: "No longer running, so capture did not start: Meet"))
     }
 
     @Test("A stream that stops by itself moves capture into failure")
     func interruptionFailsCapture() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
 
         capturer.interrupt(.interrupted("The stream was stopped by the user"))
 
-        #expect(await wait { model.state != .capturing })
-        #expect(model.state == .failed(message: "Capture stopped: The stream was stopped by the user"))
+        #expect(await wait { model.captureState != .capturing })
+        #expect(model.captureState == .failed(message: "Capture stopped: The stream was stopped by the user"))
     }
 
     @Test("An interruption after a deliberate stop does not overwrite the idle state")
     func lateInterruptionIsIgnored() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
         await model.stop()
 
         capturer.interrupt(.interrupted("The stream was stopped by the user"))
         try? await Task.sleep(for: .milliseconds(50))
 
-        #expect(model.state == .idle)
+        #expect(model.captureState == .idle)
     }
 
     @Test("Delivered samples reach the published activity")
     func activityFollowsDeliveredSamples() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, transcriber) = await makeModel()
         await model.start(sources: [meet])
         #expect(model.activity == .none)
 
-        capturer.deliver(CapturedAudioSample(
-            format: format,
-            frameCount: 1_024,
-            presentationTime: 12,
-            peakAmplitude: 0.25
-        ))
+        capturer.deliver(buffer(frames: 1_024))
 
         #expect(await wait { model.activity.sampleCount == 1 })
         #expect(model.activity.frameCount == 1_024)
         #expect(model.activity.format == format)
         #expect(model.activity.peakAmplitude == 0.25)
+        #expect(transcriber.receivedBuffers.count == 1)
     }
 
     @Test("A new capture starts from empty activity")
     func activityResetsOnStart() async {
-        let (model, capturer) = makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
-        capturer.deliver(CapturedAudioSample(
-            format: format,
-            frameCount: 512,
-            presentationTime: 1,
-            peakAmplitude: 0.5
-        ))
+        capturer.deliver(buffer(frames: 512, peak: 0.5))
         #expect(await wait { model.activity.sampleCount == 1 })
 
         await model.stop()
         await model.start(sources: [meet])
 
         #expect(await wait { model.activity == .none })
+    }
+
+    // MARK: - Transcription
+
+    @Test("Recognition is started before capture, so no audio is captured unheard")
+    func startsRecognitionBeforeCapture() async {
+        let (model, capturer, transcriber) = await makeModel()
+
+        await model.start(sources: [meet])
+
+        #expect(model.transcriptionState == .transcribing)
+        #expect(model.captureState == .capturing)
+        #expect(transcriber.startCount == 1)
+        #expect(transcriber.configurations.first?.localeIdentifier == "en-US")
+        #expect(capturer.startCount == 1)
+    }
+
+    @Test("A recogniser that will not start stops the pipeline before capture begins")
+    func recognitionFailureStopsStart() async {
+        let (model, capturer, transcriber) = await makeModel()
+        transcriber.startError = .systemFailure("no model")
+
+        await model.start(sources: [meet])
+
+        #expect(model.transcriptionState == .failed(message: "Transcription could not start: no model"))
+        #expect(model.captureState == .idle)
+        #expect(capturer.startCount == 0)
+    }
+
+    @Test("Capture failing after recognition started tears the recogniser down again")
+    func captureFailureStopsRecognition() async {
+        let (model, capturer, transcriber) = await makeModel()
+        capturer.startError = .permissionDenied
+
+        await model.start(sources: [meet])
+
+        #expect(model.captureState == failure(.permissionDenied))
+        #expect(model.transcriptionState == .idle)
+        #expect(transcriber.stopCount == 1)
+    }
+
+    @Test("Unavailable recognition is reported instead of capturing audio nothing will read")
+    func unavailableRecognitionRefusesStart() async {
+        let (model, capturer, transcriber) = await makeModel(
+            availability: .modelNotInstalled(localeIdentifier: "de-DE")
+        )
+
+        #expect(!model.canStart(sources: [meet]))
+        await model.start(sources: [meet])
+
+        #expect(model.captureState == .idle)
+        #expect(transcriber.startCount == 0)
+        #expect(capturer.startCount == 0)
+        if case .failed = model.transcriptionState {} else {
+            Issue.record("Expected a failure explaining the missing model")
+        }
+    }
+
+    @Test("Stopping stops capture first and the recogniser afterwards")
+    func stopFinalisesRecognitionAfterCapture() async {
+        let (model, capturer, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+
+        await model.stop()
+
+        #expect(model.captureState == .idle)
+        #expect(model.transcriptionState == .idle)
+        #expect(capturer.stopCount == 1)
+        #expect(transcriber.stopCount == 1)
+    }
+
+    @Test("The pipeline can be started again after being stopped")
+    func restartsWholePipeline() async {
+        let (model, capturer, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+        await model.stop()
+
+        await model.start(sources: [meet])
+
+        #expect(model.captureState == .capturing)
+        #expect(model.transcriptionState == .transcribing)
+        #expect(transcriber.startCount == 2)
+        #expect(capturer.startCount == 2)
+    }
+
+    @Test("Repeated partials leave one live guess and no transcript entries")
+    func partialsDoNotAccumulate() async {
+        let (model, _, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+
+        for text in ["Today", "Today we", "Today we are"] {
+            transcriber.emit(.partial(TranscriptSegment(
+                text: text,
+                startTime: 0,
+                endTime: 2,
+                state: .partial,
+                localeIdentifier: "en-US"
+            )))
+        }
+
+        #expect(await wait { model.transcript.partialSegment?.text == "Today we are" })
+        #expect(model.transcript.finalizedSegments.isEmpty)
+    }
+
+    @Test("A finalised span replaces the live guess with exactly one entry")
+    func finalReplacesPartial() async {
+        let (model, _, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+        transcriber.emit(.partial(TranscriptSegment(
+            text: "Today we",
+            startTime: 0,
+            endTime: 2,
+            state: .partial,
+            localeIdentifier: "en-US"
+        )))
+        #expect(await wait { model.transcript.partialSegment != nil })
+
+        transcriber.emit(.final(segment("Today we are learning Swift.")))
+
+        #expect(await wait { model.transcript.finalizedSegments.count == 1 })
+        #expect(model.transcript.partialSegment == nil)
+        #expect(model.transcript.finalizedSegments.first?.text == "Today we are learning Swift.")
+    }
+
+    @Test("A recogniser that stops by itself is restarted while capture continues")
+    func recoversFromRecognitionInterruption() async {
+        let (model, capturer, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+
+        transcriber.emit(.interrupted(.recognitionFailed(message: "resources")))
+
+        #expect(await wait { transcriber.startCount == 2 })
+        #expect(model.transcriptionState == .transcribing)
+        #expect(model.captureState == .capturing)
+        #expect(capturer.stopCount == 0)
+        #expect(model.transcript.lastInterruption != nil)
+    }
+
+    @Test("A recogniser that keeps stopping is reported as failed rather than restarted forever")
+    func boundedRecoveryAttempts() async {
+        let (model, _, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+
+        for _ in 0...MeetingSetupCaptureModel.maximumRecoveryAttempts {
+            transcriber.emit(.interrupted(.recognitionFailed(message: "resources")))
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+
+        #expect(await wait {
+            if case .failed = model.transcriptionState { return true }
+            return false
+        })
+        #expect(transcriber.startCount <= MeetingSetupCaptureModel.maximumRecoveryAttempts + 1)
+    }
+
+    @Test("Dropped audio is recorded as a gap rather than passed over")
+    func droppedAudioIsRecorded() async {
+        let (model, _, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+
+        transcriber.emit(.interrupted(.audioDropped(seconds: 1.5)))
+
+        #expect(await wait { model.transcript.untranscribedSeconds == 1.5 })
+    }
+
+    @Test("Capture stopping by itself also stops recognition")
+    func captureInterruptionStopsRecognition() async {
+        let (model, capturer, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+
+        capturer.interrupt(.interrupted("The stream was stopped by the user"))
+
+        #expect(await wait { model.transcriptionState == .idle })
+        #expect(transcriber.stopCount == 1)
+        if case .failed = model.captureState {} else {
+            Issue.record("Expected capture to report the interruption")
+        }
+    }
+
+    @Test("A new run starts from an empty transcript")
+    func transcriptResetsOnStart() async {
+        let (model, _, transcriber) = await makeModel()
+        await model.start(sources: [meet])
+        transcriber.emit(.final(segment("First run.")))
+        #expect(await wait { model.transcript.finalizedSegments.count == 1 })
+        await model.stop()
+
+        await model.start(sources: [meet])
+
+        #expect(model.transcript.isEmpty)
+    }
+
+    @Test("The locale is explicit and only changes when it is chosen")
+    func localeSelectionIsExplicit() async {
+        let (model, _, transcriber) = await makeModel()
+        transcriber.locales = [
+            TranscriptionLocale(id: "en-US", isInstalled: true),
+            TranscriptionLocale(id: "fr-FR", isInstalled: true)
+        ]
+        await model.prepare()
+
+        await model.selectLocale("fr-FR")
+
+        #expect(model.localeIdentifier == "fr-FR")
+        #expect(model.availableLocales.map(\.id) == ["en-US", "fr-FR"])
+
+        await model.start(sources: [meet])
+        await model.selectLocale("en-US")
+
+        #expect(model.localeIdentifier == "fr-FR")
     }
 }
