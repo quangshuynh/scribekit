@@ -18,10 +18,20 @@ struct MeetingSetupView: View {
     /// Fixed to `false` until the capture and transcription pipeline exists.
     private static let isStartAvailable = false
 
+    @State private var sources: MeetingSetupSourcesModel
     @State private var title = ""
     @State private var audioRetention = AudioRetentionMode.default
     @State private var destination: URL?
     @State private var isChoosingDestination = false
+
+    /// Creates the setup screen.
+    ///
+    /// - Parameter sourceProvider: Discovery used to populate the application
+    ///   list. The default talks to ScreenCaptureKit; previews and tests can
+    ///   substitute their own.
+    init(sourceProvider: CaptureSourceProviding = ScreenCaptureKitSourceProvider()) {
+        _sources = State(initialValue: MeetingSetupSourcesModel(provider: sourceProvider))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -37,6 +47,7 @@ struct MeetingSetupView: View {
         }
         .padding(20)
         .frame(minWidth: 460, minHeight: 520)
+        .task { await sources.refresh() }
         .fileImporter(
             isPresented: $isChoosingDestination,
             allowedContentTypes: [.folder]
@@ -66,15 +77,76 @@ struct MeetingSetupView: View {
     }
 
     private var sourcesSection: some View {
-        Section("Audio Sources") {
-            LabeledContent("Applications") {
-                Text("Not available yet")
+        Section {
+            switch sources.discoveryState {
+            case .idle, .loading:
+                LabeledContent("Applications") {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Looking for applications…")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            case let .loaded(discovered) where discovered.isEmpty:
+                Text("No applications are available to capture.")
+                    .foregroundStyle(.secondary)
+            case let .loaded(discovered):
+                ForEach(discovered) { source in
+                    sourceRow(for: source)
+                }
+                selectionSummary
+            case let .failed(message):
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Application discovery failed. \(message)")
+            }
+
+            if !sources.unavailableSelectionNames.isEmpty {
+                Text("No longer running, so removed from your selection: "
+                     + sources.unavailableSelectionNames.formatted(.list(type: .and)))
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Text("Choosing which applications to capture arrives in a later release.")
+
+            Text("Selected applications are not captured yet; audio capture arrives in a later release.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        } header: {
+            HStack {
+                Text("Audio Sources")
+                Spacer()
+                Button("Refresh") {
+                    Task { await sources.refresh() }
+                }
+                .disabled(sources.isDiscovering)
+                .accessibilityHint("Look for running applications again")
+            }
         }
+    }
+
+    /// A selectable row for one discovered application.
+    ///
+    /// A checkbox carries the selection state, so it is exposed to
+    /// accessibility and visible without relying on colour.
+    ///
+    /// - Parameter source: The application to present.
+    /// - Returns: The row view.
+    private func sourceRow(for source: CaptureSource) -> some View {
+        Toggle(source.displayName, isOn: Binding(
+            get: { sources.isSelected(source) },
+            set: { sources.setSelection($0, for: source) }
+        ))
+        .toggleStyle(.checkbox)
+        .accessibilityHint("Include this application as a meeting audio source")
+    }
+
+    private var selectionSummary: some View {
+        Text(sources.selectedSources.isEmpty
+             ? "No applications selected."
+             : "\(sources.selectedSources.count) selected: "
+               + sources.selectedSources.map(\.displayName).formatted(.list(type: .and)))
+            .font(.footnote)
+            .foregroundStyle(.secondary)
     }
 
     private var audioRetentionSection: some View {
