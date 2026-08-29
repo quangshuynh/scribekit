@@ -66,6 +66,14 @@ failure is reported as one — never papered over with a claim that the
 transcript was saved, and never left running so that recognised speech
 accumulates with nowhere to go.
 
+Persisted session completion never precedes successful transcript
+finalisation. A stored record saying a meeting completed is a claim about a
+file, so it is written only once that file has been flushed and closed, and a
+completion that cannot be recorded leaves the session recorded as unfinished
+rather than falsely as finished. Reading such a record back may not invent what
+was never written: not the moment the process stopped, not the length of a gap,
+and not a word of speech.
+
 ## Privacy
 
 - Everything stays on the user's machine unless the user explicitly exports it.

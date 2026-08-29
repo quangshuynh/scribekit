@@ -64,6 +64,13 @@ crash recovery, background operation and audio retention do not.
   length alone when it does not.
 - Honest reporting when the transcript stops being writable: the meeting is
   stopped rather than left recognising speech that nothing is saving.
+- Session recovery after an interruption. Each session directory carries a
+  small `.scribekit/session.json` recording where the session stands, written
+  before a meeting begins and updated only after its transcript has been
+  flushed and closed. On launch, ScribeKit looks in the save folder for
+  sessions left marked in progress and offers to reveal the transcript, record
+  the interruption, or leave the finding for next time. It does not resume
+  capture, does not start recognition, and does not rewrite recognised speech.
 - A save folder chosen in the system open panel and remembered across launches
   with a security-scoped bookmark, with honest reporting when the folder has
   been moved, deleted or had its access revoked, and controls to replace or
@@ -74,9 +81,10 @@ crash recovery, background operation and audio retention do not.
   session metadata, with unit tests.
 - Shared Xcode scheme and a macOS CI workflow that builds and runs unit tests.
 
-No audio file is written in any mode yet, and no ScribeKit metadata file is
-written alongside the transcript: `transcript.md` is the only artifact a
-session produces.
+No audio file is written in any mode yet. A session produces the user-owned
+`transcript.md` and one small operational record in a hidden `.scribekit`
+folder beside it; losing or failing to read that record never makes the
+transcript unusable.
 
 Listing applications and capturing their audio require Screen & System Audio
 Recording permission, which macOS asks for the first time ScribeKit looks for
@@ -100,7 +108,7 @@ connection at all.
 All of the following are *planned*, not available:
 
 - Meeting lifecycle with background operation and a menu bar presence.
-- Crash and session recovery for a meeting that ended without stopping.
+- Continuing an interrupted meeting into the same session.
 - Transcript search and history.
 - Post-meeting review of uncertain passages.
 - Optional audio retention (none / raw / compressed).
@@ -171,11 +179,15 @@ bookmark data never reaches the setup screen, and session directory naming is a
 pure policy separate from any filesystem work.
 
 A session is laid out as a directory named from its date and title, holding
-`transcript.md`. `SessionArtifactLayout` also names a hidden `.scribekit`
-subdirectory for ScribeKit's own metadata and an optional audio file; neither
-is written yet. Durable writing sits behind `TranscriptPersisting`, with
-Markdown formatting separated from filesystem work and an actor owning one
-session's folder lease, open file and position in the document.
+`transcript.md` and a hidden `.scribekit/session.json`. `SessionArtifactLayout`
+also names an optional audio file, which is not written yet. Durable writing
+sits behind `TranscriptPersisting`, with Markdown formatting separated from
+filesystem work and an actor owning one session's folder lease, open file and
+position in the document. Recovery is built on the same separation:
+`SessionRecoveryStoring` is the filesystem, `SessionRecoveryMetadata` is the
+versioned record, and `SessionRecoveryService` is the policy that decides what
+counts as an unfinished meeting — so the setup screen displays recovery rather
+than implementing it.
 
 ## Roadmap
 
@@ -184,22 +196,33 @@ session's folder lease, open file and position in the document.
 3. Durable save location and session configuration.
 4. **Audio capture from the selected applications**.
 5. **On-device transcription**.
-6. **Timestamped Markdown persistence and autosave** *(current)*.
-7. Background and menu bar operation.
-8. Transcript history, search and uncertainty review.
-9. Optional audio retention and, separately, derived notes.
+6. **Timestamped Markdown persistence and autosave**.
+7. **Crash and session recovery** *(current)*.
+8. Background and menu bar operation.
+9. Optional audio retention.
+10. Transcript history, search and uncertainty review, and derived notes.
 
 ## Known limitations
 
-- No crash or session recovery. A meeting that ends without Stop leaves a
-  transcript holding everything already written and no closing footer;
-  ScribeKit will not reopen or resume it, and nothing repairs it.
+- Recovery preserves what was already durable and no more. ScribeKit detects
+  unfinished sessions and preserves finalised transcript content that reached
+  durable storage before the interruption; audio still in a system buffer, a
+  partial hypothesis that was never finalised, and speech that happened while
+  ScribeKit was not running are not recovered, because they were never written.
 - A finalised span reaches the file as soon as it is recognised, so it survives
   the app exiting. Surviving a power loss depends on the flush that happens
   every 25 appends and at Stop, so an abrupt power cut can cost the appends
   since the last one. ScribeKit does not claim to be crash-proof.
-- No session metadata file is written. `transcript.md` carries everything a
-  session records.
+- Recovery never resumes a meeting. It records the interruption and leaves the
+  transcript closed; continuing into the same session is a later interval.
+- A meeting that ended because its transcript stopped being saved is recorded
+  as failed rather than offered for recovery: ScribeKit was running and said so
+  at the time.
+- A session directory written by an earlier ScribeKit has no session record, so
+  it is not recognised as unfinished. Its transcript is unaffected.
+- A damaged or newer-format session record is reported and left exactly as it
+  is. ScribeKit never repairs, rewrites or deletes one, and never deletes a
+  transcript.
 - No audio is kept, played back or written anywhere, in any retention mode.
 - A start that fails after the transcript was created leaves that session
   folder behind, holding a transcript with a header and no speech. ScribeKit
@@ -233,7 +256,13 @@ session's folder lease, open file and position in the document.
   automatically as applications start and quit.
 - Access to the chosen folder is held for exactly as long as a meeting is
   being written and released when its transcript is closed; outside a meeting
-  it is taken only while the folder is being validated.
+  it is taken only while the folder is being validated or scanned for
+  unfinished sessions.
+- The scan for unfinished sessions looks only at the immediate children of the
+  chosen save folder, when the app launches or when a folder is chosen. There
+  is no recursive walk, no timer and no filesystem watcher.
+- If the save folder cannot be restored or opened, ScribeKit says it could not
+  check for an unfinished meeting rather than looking anywhere else.
 - The transcript's timeline starts when the meeting starts, and audio offsets
   are measured from the first captured frame, which arrives a moment later, so
   a timestamp can be under a second early.
