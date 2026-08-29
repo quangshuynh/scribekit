@@ -19,18 +19,32 @@ struct MeetingSetupView: View {
     private static let isStartAvailable = false
 
     @State private var sources: MeetingSetupSourcesModel
+    @State private var destination: MeetingSetupDestinationModel
     @State private var title = ""
-    @State private var audioRetention = AudioRetentionMode.default
-    @State private var destination: URL?
+    @State private var audioRetention: AudioRetentionMode
     @State private var isChoosingDestination = false
+
+    private let preferences: MeetingSetupPreferencesStoring
 
     /// Creates the setup screen.
     ///
-    /// - Parameter sourceProvider: Discovery used to populate the application
-    ///   list. The default talks to ScreenCaptureKit; previews and tests can
-    ///   substitute their own.
-    init(sourceProvider: CaptureSourceProviding = ScreenCaptureKitSourceProvider()) {
-        _sources = State(initialValue: MeetingSetupSourcesModel(provider: sourceProvider))
+    /// - Parameters:
+    ///   - sourceProvider: Discovery used to populate the application list. The
+    ///     default talks to ScreenCaptureKit; previews and tests can substitute
+    ///     their own.
+    ///   - saveLocation: Storage for the chosen save folder. The default keeps
+    ///     a security-scoped bookmark in the local preference store.
+    ///   - preferences: Store for the setup choices remembered between
+    ///     launches.
+    init(
+        sourceProvider: CaptureSourceProviding = ScreenCaptureKitSourceProvider(),
+        saveLocation: SaveLocationPersisting = SecurityScopedSaveLocationStore(),
+        preferences: MeetingSetupPreferencesStoring = UserDefaultsMeetingSetupPreferences()
+    ) {
+        self.preferences = preferences
+        _sources = State(initialValue: MeetingSetupSourcesModel(provider: sourceProvider, preferences: preferences))
+        _destination = State(initialValue: MeetingSetupDestinationModel(persistence: saveLocation))
+        _audioRetention = State(initialValue: preferences.audioRetention)
     }
 
     var body: some View {
@@ -47,13 +61,19 @@ struct MeetingSetupView: View {
         }
         .padding(20)
         .frame(minWidth: 460, minHeight: 520)
-        .task { await sources.refresh() }
+        .task {
+            destination.restore()
+            await sources.refresh()
+        }
+        .onChange(of: audioRetention) { _, mode in
+            preferences.audioRetention = mode
+        }
         .fileImporter(
             isPresented: $isChoosingDestination,
             allowedContentTypes: [.folder]
         ) { result in
             if case let .success(url) = result {
-                destination = url
+                destination.choose(url)
             }
         }
     }
@@ -168,13 +188,37 @@ struct MeetingSetupView: View {
     private var destinationSection: some View {
         Section("Save Location") {
             LabeledContent("Folder") {
-                Text(destination?.path(percentEncoded: false) ?? "No folder selected")
-                    .foregroundStyle(destination == nil ? .secondary : .primary)
+                Text(destination.pathDescription)
+                    .foregroundStyle(destination.url == nil ? .secondary : .primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Button("Choose Folder…") { isChoosingDestination = true }
+            .accessibilityLabel("Save location")
+            .accessibilityValue(destination.statusDescription)
+
+            if let warning = destination.warningMessage {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+
+            HStack {
+                Button(destination.url == nil ? "Choose Folder…" : "Change Folder…") {
+                    isChoosingDestination = true
+                }
                 .accessibilityHint("Choose where transcripts are saved")
+
+                Button("Forget Folder") { destination.clear() }
+                    .disabled(!destination.canClear)
+                    .accessibilityHint("Stop remembering the saved folder")
+            }
+
+            Text(destination.isRestored
+                 ? "Restored from your last launch. Nothing is written there yet; transcript files arrive in a later release."
+                 : "Nothing is written there yet; transcript files arrive in a later release.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 
