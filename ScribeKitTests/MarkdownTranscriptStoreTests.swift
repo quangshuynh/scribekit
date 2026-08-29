@@ -170,10 +170,16 @@ struct MarkdownTranscriptStoreTests {
 
     /// A store over doubles, with the fakes it writes through.
     private func makeStore(
-        access: FakeSecurityScopedAccess = FakeSecurityScopedAccess()
+        access: FakeSecurityScopedAccess = FakeSecurityScopedAccess(),
+        recoveryStore: FakeSessionRecoveryStore = FakeSessionRecoveryStore()
     ) -> (MarkdownTranscriptStore, FakeFileStore, FakeSecurityScopedAccess) {
         let fileStore = FakeFileStore()
-        let store = MarkdownTranscriptStore(fileStore: fileStore, access: access, timeZone: zone)
+        let store = MarkdownTranscriptStore(
+            fileStore: fileStore,
+            recoveryStore: recoveryStore,
+            access: access,
+            timeZone: zone
+        )
         return (store, fileStore, access)
     }
 
@@ -500,8 +506,144 @@ struct MarkdownTranscriptStoreTests {
         #expect(finished.hasPrefix(midMeeting))
         #expect(finished.contains("### 11:01 AM"))
         #expect(finished.contains("**Duration:** 2 min 0 s"))
-        #expect(!FileManager.default.fileExists(atPath: layout.metadataURL.path(percentEncoded: false)))
+        // The transcript is the user's document; the session record beside it is
+        // ScribeKit's own bookkeeping, and it is the only other thing written.
+        #expect(FileManager.default.fileExists(atPath: layout.metadataURL.path(percentEncoded: false)))
         #expect(try FileManager.default.contentsOfDirectory(atPath: layout.directory.path(percentEncoded: false))
-            == ["transcript.md"])
+            .sorted() == [".scribekit", "transcript.md"])
+    }
+
+    // MARK: - Session record
+
+    @Test("Starting a session records it as in progress, beside the transcript")
+    func startRecordsTheSessionAsInProgress() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+        let meeting = session
+
+        let layout = try await store.startSession(meeting, localeIdentifier: "en-US", startedAt: startedAt)
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+
+        #expect(record.schemaVersion == SessionRecoveryMetadata.currentSchemaVersion)
+        #expect(record.status == .inProgress)
+        #expect(record.sessionID == meeting.id)
+        #expect(record.title == "iOS Training - Day 2")
+        #expect(record.startedAt == startedAt)
+        #expect(record.sourceNames == ["Microsoft Teams"])
+        #expect(record.localeIdentifier == "en-US")
+        #expect(record.transcriptPath == "transcript.md")
+        #expect(record.endedAt == nil)
+        #expect(layout.metadataURL.path(percentEncoded: false).hasSuffix(".scribekit/session.json"))
+    }
+
+    @Test("A meeting whose session record cannot be written does not begin")
+    func startWithoutARecordIsRefused() async {
+        let recoveryStore = FakeSessionRecoveryStore()
+        recoveryStore.failWrites()
+        let access = FakeSecurityScopedAccess()
+        let (store, fileStore, _) = makeStore(access: access, recoveryStore: recoveryStore)
+
+        await #expect(throws: TranscriptPersistenceError.self) {
+            _ = try await start(store)
+        }
+
+        #expect(fileStore.file.closeCount == 1)
+        #expect(access.isBalanced)
+        #expect(await store.currentLayout == nil)
+    }
+
+    @Test("The reason a start without a record is refused names the record, not the transcript")
+    func startWithoutARecordNamesTheRecord() async {
+        let recoveryStore = FakeSessionRecoveryStore()
+        recoveryStore.failWrites()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+
+        do {
+            _ = try await start(store)
+            Issue.record("Expected the start to be refused")
+        } catch let error as TranscriptPersistenceError {
+            #expect(error.reason == .recoveryMetadataFailed)
+        } catch {
+            Issue.record("Expected a transcript persistence error")
+        }
+    }
+
+    @Test("The transcript is flushed and closed before completion is recorded")
+    func completionFollowsTheClosedTranscript() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, fileStore, _) = makeStore(recoveryStore: recoveryStore)
+        _ = try await start(store)
+        let observed = Mutex<[(status: SessionRecoveryStatus, closes: Int, flushes: Int, text: String)]>([])
+        recoveryStore.observeWrites { metadata in
+            observed.withLock {
+                $0.append((
+                    status: metadata.status,
+                    closes: fileStore.file.closeCount,
+                    flushes: fileStore.file.synchronizeCount,
+                    text: fileStore.file.text
+                ))
+            }
+        }
+
+        try await store.finishSession(endedAt: startedAt.addingTimeInterval(64))
+
+        let writes = observed.withLock { $0 }
+        #expect(writes.count == 1)
+        let completion = try #require(writes.first)
+        #expect(completion.status == .completed)
+        #expect(completion.closes == 1)
+        #expect(completion.flushes >= 1)
+        #expect(completion.text.contains("**Ended:**"))
+    }
+
+    @Test("A transcript that will not close is never recorded as completed")
+    func aTranscriptThatWillNotCloseStaysUnfinished() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, fileStore, access) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+        fileStore.file.failClose(with: CocoaError(.fileWriteUnknown))
+
+        await #expect(throws: TranscriptPersistenceError.self) {
+            try await store.finishSession(endedAt: startedAt.addingTimeInterval(64))
+        }
+
+        #expect(recoveryStore.storedMetadata(in: layout.directory)?.status == .inProgress)
+        #expect(recoveryStore.writes.map(\.status) == [.inProgress])
+        #expect(access.isBalanced)
+    }
+
+    @Test("A completion that cannot be recorded is reported instead of claimed")
+    func unrecordedCompletionIsReported() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, access) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+        recoveryStore.failWrites()
+
+        do {
+            try await store.finishSession(endedAt: startedAt.addingTimeInterval(64))
+            Issue.record("Expected the completion to be reported as unrecorded")
+        } catch let error as TranscriptPersistenceError {
+            #expect(error.reason == .recoveryMetadataFailed)
+        }
+
+        #expect(recoveryStore.storedMetadata(in: layout.directory)?.status == .inProgress)
+        #expect(access.isBalanced)
+    }
+
+    @Test("A meeting ended by a save failure is recorded as failed, with no closing block")
+    func aFailedMeetingIsRecordedAsFailed() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, fileStore, access) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+
+        try await store.finishSession(endedAt: startedAt.addingTimeInterval(64), outcome: .failed)
+
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+        #expect(record.status == .failed)
+        #expect(record.endedAt == startedAt.addingTimeInterval(64))
+        #expect(!fileStore.file.text.contains("**Ended:**"))
+        #expect(!fileStore.file.text.contains("**Duration:**"))
+        #expect(fileStore.file.closeCount == 1)
+        #expect(access.isBalanced)
     }
 }

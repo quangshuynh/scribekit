@@ -263,4 +263,54 @@ struct TranscriptMarkdownFormatterTests {
 
             """)
     }
+
+    // MARK: - Interruption note
+
+    @Test("The interruption note names the moment it was recorded, not the crash")
+    func interruptionNoteIsGolden() {
+        let recordedAt = startedAt.addingTimeInterval(3 * 3_600 + 7 * 60)
+
+        let note = TranscriptMarkdownFormatter.interruptionNotice(recordedAt: recordedAt, timeZone: zone)
+
+        #expect(note == """
+            ---
+
+            > **Session interrupted.** ScribeKit stopped before this meeting was finished, \
+            so the transcript ends at the last speech that reached the file. \
+            When it stopped is not known, and nothing was transcribed after that point. \
+            Interruption recorded by ScribeKit on 2026-08-31 at 2:07 PM.
+
+
+            """)
+    }
+
+    @Test("The interruption note is ScribeKit's own remark, not something anyone said")
+    func interruptionNoteIsStructuralNotSpeech() {
+        let note = TranscriptMarkdownFormatter.interruptionNotice(recordedAt: startedAt, timeZone: zone)
+
+        #expect(note.contains("> **Session interrupted.**"))
+        #expect(!note.contains("**11:00:00**"))
+    }
+
+    @Test("The note claims no duration and no end for the meeting")
+    func interruptionNoteClaimsNoTiming() {
+        let note = TranscriptMarkdownFormatter.interruptionNotice(recordedAt: startedAt, timeZone: zone)
+
+        #expect(!note.contains("Duration"))
+        #expect(!note.contains("**Ended:**"))
+        #expect(!note.contains("seconds"))
+    }
+
+    @Test("The note is appended, so a transcript keeps everything before it")
+    func interruptionNoteOnlyAdds() {
+        var formatter = makeFormatter()
+        let transcript = formatter.header(title: "A meeting", sourceNames: [], localeIdentifier: "en-US")
+            + formatter.finalSegment(segment("Recognised speech.", start: 0))
+
+        let annotated = transcript
+            + TranscriptMarkdownFormatter.interruptionNotice(recordedAt: startedAt, timeZone: zone)
+
+        #expect(annotated.hasPrefix(transcript))
+        #expect(annotated.contains("Recognised speech."))
+    }
 }
