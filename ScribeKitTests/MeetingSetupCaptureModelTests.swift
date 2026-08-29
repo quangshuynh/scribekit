@@ -152,7 +152,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("Starting from idle captures the selected applications")
     func startsFromIdle() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         #expect(model.captureState == .idle)
         #expect(model.canStart(sources: [meet]))
 
@@ -167,7 +167,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("Starting is not offered without a selection")
     func startNeedsSelection() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
 
         #expect(!model.canStart(sources: []))
 
@@ -179,7 +179,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("Starting again while capturing does not reach the capturer")
     func duplicateStartIsIgnored() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
 
         #expect(!model.canStart(sources: [meet]))
@@ -191,7 +191,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("Stopping while capturing returns to idle")
     func stopsFromCapturing() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
 
         #expect(model.canStop)
@@ -204,7 +204,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("Stopping while idle does nothing")
     func stopWhileIdleIsHarmless() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
 
         #expect(!model.canStop)
         await model.stop()
@@ -216,7 +216,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("Capture can be started again after being stopped")
     func restartsAfterStop() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
         await model.stop()
 
@@ -228,7 +228,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("A refused start is reported as a failure, not as capture")
     func startFailureIsReported() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         capturer.startError = .permissionDenied
 
         await model.start(sources: [meet])
@@ -240,7 +240,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("A selected application that is gone is named in the failure")
     func missingSourceIsNamed() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         capturer.startError = .sourcesUnavailable([meet.id])
 
         await model.start(sources: [meet, browser])
@@ -250,7 +250,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("A stream that stops by itself moves capture into failure")
     func interruptionFailsCapture() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
 
         capturer.interrupt(.interrupted("The stream was stopped by the user"))
@@ -261,7 +261,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("An interruption after a deliberate stop does not overwrite the idle state")
     func lateInterruptionIsIgnored() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
         await model.stop()
 
@@ -288,7 +288,7 @@ struct MeetingSetupCaptureModelTests {
 
     @Test("A new capture starts from empty activity")
     func activityResetsOnStart() async {
-        let (model, capturer, transcriber) = await makeModel()
+        let (model, capturer, _) = await makeModel()
         await model.start(sources: [meet])
         capturer.deliver(buffer(frames: 512, peak: 0.5))
         #expect(await wait { model.activity.sampleCount == 1 })
