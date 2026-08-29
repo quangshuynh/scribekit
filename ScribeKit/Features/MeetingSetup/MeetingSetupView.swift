@@ -9,17 +9,21 @@ import UniformTypeIdentifiers
 /// The configuration screen shown before a meeting starts.
 ///
 /// The screen collects the settings a session needs — title, audio sources,
-/// audio retention and save location — but does not start anything: capture
-/// and transcription are not implemented yet, so the start control is
-/// deliberately unavailable rather than simulated.
+/// audio retention and save location — and can start audio capture on its own,
+/// which is all that exists so far. Starting a *meeting* would imply
+/// transcription and a written transcript, neither of which is implemented, so
+/// that control stays deliberately unavailable rather than simulated.
 struct MeetingSetupView: View {
     /// Whether a meeting can be started.
     ///
-    /// Fixed to `false` until the capture and transcription pipeline exists.
+    /// Fixed to `false` until transcription and transcript writing exist. Audio
+    /// capture alone is offered under its own control, so nothing here claims a
+    /// session that ScribeKit cannot yet complete.
     private static let isStartAvailable = false
 
     @State private var sources: MeetingSetupSourcesModel
     @State private var destination: MeetingSetupDestinationModel
+    @State private var capture = MeetingSetupCaptureModel()
     @State private var title = ""
     @State private var audioRetention: AudioRetentionMode
     @State private var isChoosingDestination = false
@@ -53,6 +57,7 @@ struct MeetingSetupView: View {
             Form {
                 meetingSection
                 sourcesSection
+                captureSection
                 audioRetentionSection
                 destinationSection
             }
@@ -64,6 +69,9 @@ struct MeetingSetupView: View {
         .task {
             destination.restore()
             await sources.refresh()
+        }
+        .onDisappear {
+            Task { await capture.stop() }
         }
         .onChange(of: audioRetention) { _, mode in
             preferences.audioRetention = mode
@@ -128,7 +136,7 @@ struct MeetingSetupView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Selected applications are not captured yet; audio capture arrives in a later release.")
+            Text("Selected applications are the ones audio capture records.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } header: {
@@ -167,6 +175,85 @@ struct MeetingSetupView: View {
                + sources.selectedSources.map(\.displayName).formatted(.list(type: .and)))
             .font(.footnote)
             .foregroundStyle(.secondary)
+    }
+
+    private var captureSection: some View {
+        Section("Audio Capture") {
+            LabeledContent("Status") {
+                Text(captureStatusDescription)
+                    .foregroundStyle(capture.state == .idle ? .secondary : .primary)
+            }
+            .accessibilityLabel("Capture status")
+            .accessibilityValue(captureStatusDescription)
+
+            if case let .failed(message) = capture.state {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+
+            HStack {
+                Button("Start Capture") {
+                    Task { await capture.start(sources: sources.selectedSources) }
+                }
+                .disabled(!capture.canStart(sources: sources.selectedSources))
+                .accessibilityHint("Capture audio from the selected applications")
+
+                Button("Stop Capture") {
+                    Task { await capture.stop() }
+                }
+                .disabled(!capture.canStop)
+                .accessibilityHint("Stop capturing application audio")
+            }
+
+            if let activity = captureActivityDescription {
+                Text(activity)
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Captured audio: \(activity)")
+            }
+
+            Text("Capture proves audio reaches ScribeKit. Nothing is transcribed, and no audio or transcript is written to disk.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// A short description of what capture is doing.
+    private var captureStatusDescription: String {
+        switch capture.state {
+        case .idle: sources.selectedSources.isEmpty
+            ? "Not capturing. Select at least one application."
+            : "Not capturing. \(sources.selectedSources.count) application(s) selected."
+        case .preparing: "Starting…"
+        case .capturing: "Capturing \(sources.selectedSources.count) application(s)."
+        case .stopping: "Stopping…"
+        case .failed: "Capture failed."
+        }
+    }
+
+    /// What capture has delivered so far, or `nil` before anything arrives.
+    ///
+    /// The figures are aggregates published a few times a second; no audio is
+    /// drawn, played back or retained.
+    private var captureActivityDescription: String? {
+        let activity = capture.activity
+        guard activity.sampleCount > 0 || activity.unreadableSampleCount > 0 else { return nil }
+        var parts = ["\(activity.sampleCount) buffers"]
+        if let seconds = activity.capturedDuration {
+            parts.append(String(format: "%.1f s", seconds))
+        }
+        if let format = activity.format {
+            parts.append(format.summary)
+        }
+        if let peak = activity.peakAmplitude {
+            parts.append(String(format: "peak %.0f%%", min(peak, 1) * 100))
+        }
+        if activity.unreadableSampleCount > 0 {
+            parts.append("\(activity.unreadableSampleCount) unreadable")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var audioRetentionSection: some View {
