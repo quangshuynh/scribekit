@@ -47,12 +47,19 @@ final class MeetingSetupSourcesModel {
     private(set) var unavailableSelectionNames: [String] = []
 
     private let provider: CaptureSourceProviding
+    private let preferences: MeetingSetupPreferencesStoring?
+    private var hasAppliedRememberedSelection = false
 
     /// Creates a model backed by a discovery provider.
     ///
-    /// - Parameter provider: The source of application discovery results.
-    init(provider: CaptureSourceProviding) {
+    /// - Parameters:
+    ///   - provider: The source of application discovery results.
+    ///   - preferences: Store holding the applications the user selected last
+    ///     time. When given, those identifiers seed the selection on the first
+    ///     successful discovery. Pass `nil` for a model that starts empty.
+    init(provider: CaptureSourceProviding, preferences: MeetingSetupPreferencesStoring? = nil) {
         self.provider = provider
+        self.preferences = preferences
     }
 
     /// The sources from the most recent successful discovery.
@@ -89,10 +96,13 @@ final class MeetingSetupSourcesModel {
         } else {
             selectedSourceIDs.remove(source.id)
         }
+        preferences?.rememberedSourceIDs = selectedSourceIDs.sorted()
     }
 
     /// Runs discovery and reconciles the current selection with the result.
     ///
+    /// The first successful discovery also seeds the selection from the
+    /// remembered identifiers, keeping only those that were actually found.
     /// Selections for applications that are still available are preserved;
     /// selections for applications that disappeared are removed and reported
     /// through ``unavailableSelectionNames``. A failed discovery leaves the
@@ -105,11 +115,24 @@ final class MeetingSetupSourcesModel {
         do {
             let sources = try await provider.availableSources()
             discoveryState = .loaded(sources)
+            applyRememberedSelectionIfNeeded()
             reconcileSelection(with: sources, previousSources: previousSources)
         } catch {
             discoveryState = .failed(message(for: error))
             unavailableSelectionNames = []
         }
+    }
+
+    /// Seeds the selection from remembered identifiers, once.
+    ///
+    /// Remembered identifiers are preferences, not evidence: they are matched
+    /// against what discovery actually found, and the ones whose application is
+    /// not running are simply not selected. They stay remembered, so an
+    /// application that was merely closed today is selected again once it runs.
+    private func applyRememberedSelectionIfNeeded() {
+        guard !hasAppliedRememberedSelection, let preferences else { return }
+        hasAppliedRememberedSelection = true
+        selectedSourceIDs = Set(preferences.rememberedSourceIDs)
     }
 
     /// Drops selections that the latest discovery no longer contains.
