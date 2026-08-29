@@ -9,16 +9,16 @@ import UniformTypeIdentifiers
 /// The configuration screen shown before a meeting starts.
 ///
 /// The screen collects the settings a session needs — title, audio sources,
-/// audio retention and save location — and can start audio capture on its own,
-/// which is all that exists so far. Starting a *meeting* would imply
-/// transcription and a written transcript, neither of which is implemented, so
-/// that control stays deliberately unavailable rather than simulated.
+/// audio retention and save location — and can capture and transcribe the
+/// selected applications live. Starting a *meeting* would imply a written
+/// transcript, which is not implemented, so that control stays deliberately
+/// unavailable rather than simulated.
 struct MeetingSetupView: View {
     /// Whether a meeting can be started.
     ///
-    /// Fixed to `false` until transcription and transcript writing exist. Audio
-    /// capture alone is offered under its own control, so nothing here claims a
-    /// session that ScribeKit cannot yet complete.
+    /// Fixed to `false` until transcript writing exists. Live capture and
+    /// transcription are offered under their own control, so nothing here
+    /// claims a session that ScribeKit cannot yet complete.
     private static let isStartAvailable = false
 
     @State private var sources: MeetingSetupSourcesModel
@@ -58,6 +58,7 @@ struct MeetingSetupView: View {
                 meetingSection
                 sourcesSection
                 captureSection
+                transcriptSection
                 audioRetentionSection
                 destinationSection
             }
@@ -68,6 +69,7 @@ struct MeetingSetupView: View {
         .frame(minWidth: 460, minHeight: 520)
         .task {
             destination.restore()
+            await capture.prepare()
             await sources.refresh()
         }
         .onDisappear {
@@ -178,33 +180,49 @@ struct MeetingSetupView: View {
     }
 
     private var captureSection: some View {
-        Section("Audio Capture") {
-            LabeledContent("Status") {
+        Section("Capture & Transcription") {
+            LabeledContent("Audio") {
                 Text(captureStatusDescription)
-                    .foregroundStyle(capture.state == .idle ? .secondary : .primary)
+                    .foregroundStyle(capture.captureState == .idle ? .secondary : .primary)
             }
             .accessibilityLabel("Capture status")
             .accessibilityValue(captureStatusDescription)
 
-            if case let .failed(message) = capture.state {
+            if case let .failed(message) = capture.captureState {
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
 
+            LabeledContent("Recognition") {
+                Text(recognitionStatusDescription)
+                    .foregroundStyle(capture.transcriptionState == .idle ? .secondary : .primary)
+            }
+            .accessibilityLabel("Recognition status")
+            .accessibilityValue(recognitionStatusDescription)
+
+            if case let .failed(message) = capture.transcriptionState {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+
+            localePicker
+
             HStack {
-                Button("Start Capture") {
+                Button("Start Transcribing") {
                     Task { await capture.start(sources: sources.selectedSources) }
                 }
                 .disabled(!capture.canStart(sources: sources.selectedSources))
-                .accessibilityHint("Capture audio from the selected applications")
+                .accessibilityHint("Capture and transcribe audio from the selected applications")
 
-                Button("Stop Capture") {
+                Button("Stop") {
                     Task { await capture.stop() }
                 }
                 .disabled(!capture.canStop)
-                .accessibilityHint("Stop capturing application audio")
+                .accessibilityHint("Stop capturing and transcribing")
             }
 
             if let activity = captureActivityDescription {
@@ -214,15 +232,49 @@ struct MeetingSetupView: View {
                     .accessibilityLabel("Captured audio: \(activity)")
             }
 
-            Text("Capture proves audio reaches ScribeKit. Nothing is transcribed, and no audio or transcript is written to disk.")
+            Text("Speech is recognised on this Mac, using an installed language model. "
+                 + "No audio leaves your machine, and nothing is written to disk.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
     }
 
+    /// The recognition language, chosen explicitly and fixed for a run.
+    ///
+    /// Only locales whose on-device model is installed can be selected;
+    /// supported but uninstalled ones are listed and disabled, so the reason a
+    /// language is unavailable is visible rather than implied by its absence.
+    @ViewBuilder
+    private var localePicker: some View {
+        if capture.availableLocales.isEmpty {
+            LabeledContent("Language") {
+                Text("No recognition languages are available.")
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Picker("Language", selection: Binding(
+                get: { capture.localeIdentifier },
+                set: { identifier in Task { await capture.selectLocale(identifier) } }
+            )) {
+                ForEach(capture.availableLocales) { locale in
+                    Text(locale.isInstalled ? locale.displayName : "\(locale.displayName) (not installed)")
+                        .tag(locale.id)
+                }
+            }
+            .disabled(capture.isRunning)
+            .accessibilityLabel("Recognition language")
+
+            if let message = capture.availability.message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     /// A short description of what capture is doing.
     private var captureStatusDescription: String {
-        switch capture.state {
+        switch capture.captureState {
         case .idle: sources.selectedSources.isEmpty
             ? "Not capturing. Select at least one application."
             : "Not capturing. \(sources.selectedSources.count) application(s) selected."
@@ -230,6 +282,20 @@ struct MeetingSetupView: View {
         case .capturing: "Capturing \(sources.selectedSources.count) application(s)."
         case .stopping: "Stopping…"
         case .failed: "Capture failed."
+        }
+    }
+
+    /// A short description of what recognition is doing.
+    private var recognitionStatusDescription: String {
+        switch capture.transcriptionState {
+        case .idle: capture.availability.canTranscribe
+            ? "Ready, on this Mac."
+            : "Unavailable."
+        case .preparing: "Preparing the recogniser…"
+        case .transcribing: "Transcribing on device."
+        case .recovering: "Recognition stopped; restarting…"
+        case .stopping: "Finalising…"
+        case .failed: "Recognition failed."
         }
     }
 
@@ -254,6 +320,84 @@ struct MeetingSetupView: View {
             parts.append("\(activity.unreadableSampleCount) unreadable")
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// The live transcript: finalised spans, then the hypothesis for what is
+    /// being said now.
+    ///
+    /// Finalised segments are rendered lazily, because a long meeting produces
+    /// many of them, and the partial is one row that is replaced rather than
+    /// appended.
+    private var transcriptSection: some View {
+        Section("Live Transcript") {
+            if capture.transcript.isEmpty {
+                Text(capture.transcriptionState == .transcribing
+                     ? "Listening…"
+                     : "Nothing transcribed yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(capture.transcript.finalizedSegments) { segment in
+                            transcriptRow(for: segment)
+                        }
+                        if let partial = capture.transcript.partialSegment {
+                            Text(partial.displayText)
+                                .foregroundStyle(.secondary)
+                                .italic()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityLabel("In progress: \(partial.displayText)")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .defaultScrollAnchor(.bottom)
+                .frame(height: 160)
+            }
+
+            if capture.transcript.untranscribedSeconds > 0 {
+                Label(
+                    String(
+                        format: "%.1f s of audio was not transcribed, so the transcript has gaps.",
+                        capture.transcript.untranscribedSeconds
+                    ),
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+
+            Text("Text in grey is a live guess and is replaced as you speak. "
+                 + "The transcript is not saved anywhere yet.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// One finalised span, with the time it began measured from the start of
+    /// the run.
+    ///
+    /// - Parameter segment: The span to present.
+    /// - Returns: The row view.
+    private func transcriptRow(for segment: TranscriptSegment) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(Self.offset(segment.startTime))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Text(segment.displayText)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Formats a time measured from the start of the run.
+    ///
+    /// - Parameter seconds: Seconds since the first captured frame.
+    /// - Returns: A `mm:ss` string.
+    private static func offset(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded(.down))
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
     private var audioRetentionSection: some View {
@@ -311,7 +455,7 @@ struct MeetingSetupView: View {
 
     private var footer: some View {
         HStack {
-            Text("Transcription is not implemented yet.")
+            Text("Transcripts are not written to disk yet.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
