@@ -17,6 +17,7 @@ struct MeetingSetupView: View {
     @State private var sources: MeetingSetupSourcesModel
     @State private var destination: MeetingSetupDestinationModel
     @State private var capture = MeetingSetupCaptureModel()
+    @State private var recovery = SessionRecoveryModel()
     @State private var title = ""
     @State private var audioRetention: AudioRetentionMode
     @State private var isChoosingDestination = false
@@ -48,6 +49,7 @@ struct MeetingSetupView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             Form {
+                if recovery.isVisible { recoverySection }
                 meetingSection
                 sourcesSection
                 captureSection
@@ -63,6 +65,7 @@ struct MeetingSetupView: View {
         .frame(minWidth: 460, minHeight: 520)
         .task {
             destination.restore()
+            await checkForUnfinishedSessions()
             await capture.prepare()
             await sources.refresh()
         }
@@ -78,8 +81,122 @@ struct MeetingSetupView: View {
         ) { result in
             if case let .success(url) = result {
                 destination.choose(url)
+                Task { await checkForUnfinishedSessions() }
             }
         }
+    }
+
+    /// Looks in the current save folder for meetings that never finished.
+    ///
+    /// Only ever a file scan, and never while a meeting is running: the
+    /// session being written right now is legitimately marked in progress, and
+    /// offering it as an interrupted meeting would be nonsense.
+    private func checkForUnfinishedSessions() async {
+        guard !capture.isRunning else { return }
+        if let url = destination.url {
+            await recovery.check(url)
+        } else if let warning = destination.warningMessage {
+            recovery.reportDestinationUnavailable(warning)
+        }
+    }
+
+    /// What ScribeKit found from a previous launch, and the two things the
+    /// user can do about it.
+    ///
+    /// Neither action resumes anything. The transcript is already on disk with
+    /// everything that reached it; recovery's job is to say so, confirm it is
+    /// readable, and close the record honestly.
+    @ViewBuilder
+    private var recoverySection: some View {
+        Section("Previous Meetings") {
+            if case .checking = recovery.state {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking the save folder…").foregroundStyle(.secondary)
+                }
+            }
+
+            if case let .unavailable(message) = recovery.state {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Unfinished meeting check failed. \(message)")
+            }
+
+            ForEach(recovery.candidates) { candidate in
+                candidateRow(for: candidate)
+            }
+
+            ForEach(recovery.problems) { problem in
+                Label(
+                    "\(problem.name): \(problem.error.errorDescription ?? "")",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Damaged session record. \(problem.name). "
+                                    + (problem.error.errorDescription ?? ""))
+            }
+
+            if let message = recovery.actionMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if recovery.hasFindings {
+                Text("ScribeKit does not resume a meeting it did not finish. "
+                     + "Nothing is recorded again, and no transcript is deleted or rewritten.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// One unfinished meeting, stated in terms of what is actually known.
+    ///
+    /// The times shown are the meeting's start, which its record holds, and
+    /// when the transcript was last written, which the filesystem holds. When
+    /// ScribeKit stopped is not shown, because nothing measured it.
+    ///
+    /// - Parameter candidate: The unfinished session.
+    /// - Returns: The row view.
+    private func candidateRow(for candidate: SessionRecoveryCandidate) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(candidate.metadata.title) did not finish")
+                .font(.headline)
+            Text("Started \(candidate.metadata.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if let modified = candidate.transcript.modifiedAt {
+                Text("Transcript last written \(modified.formatted(date: .abbreviated, time: .shortened))"
+                     + " · \(candidate.transcript.byteCount) bytes")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Text(candidate.transcriptURL.path(percentEncoded: false))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            HStack {
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([candidate.transcriptURL])
+                }
+                .accessibilityHint("Reveal this meeting's transcript in the Finder")
+
+                Button("Mark as Interrupted") {
+                    Task { await recovery.recordInterruption(for: candidate) }
+                }
+                .accessibilityHint("Record the interruption in this meeting's transcript and session record")
+
+                Button("Dismiss") { recovery.dismiss(candidate) }
+                    .accessibilityHint("Hide this until the next launch, changing nothing on disk")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 
     private var header: some View {
