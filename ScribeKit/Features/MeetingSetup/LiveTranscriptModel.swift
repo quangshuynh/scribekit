@@ -72,7 +72,7 @@ final class LiveTranscriptModel {
         case let .interrupted(interruption):
             lastInterruption = interruption
             switch interruption {
-            case let .audioDropped(seconds):
+            case let .audioDropped(seconds, _):
                 untranscribedSeconds += seconds
             case .recognitionFailed:
                 // The hypothesis was never finalised and the recogniser that

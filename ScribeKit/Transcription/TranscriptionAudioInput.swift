@@ -26,6 +26,21 @@ import Synchronization
 /// everything after it.
 nonisolated final class TranscriptionAudioInput: Sendable {
 
+    /// Audio the backlog discarded, and where in the run it fell.
+    ///
+    /// The position is the start time of the oldest buffer discarded since the
+    /// last report, taken from the buffer itself rather than from a clock, so
+    /// a gap is placed where the audio was and not where the report arrived.
+    /// It is optional because the position is only as good as the timing the
+    /// buffer carried.
+    struct DroppedAudio: Equatable, Sendable {
+        /// How many seconds of audio were discarded.
+        let seconds: Double
+
+        /// Seconds from the start of the run to the first discarded audio.
+        let startTime: Double?
+    }
+
     /// Dropped audio worth reporting, in seconds.
     ///
     /// Losses are accumulated and reported once they add up, so a recogniser
@@ -41,6 +56,7 @@ nonisolated final class TranscriptionAudioInput: Sendable {
         var elapsed: CMTime = .zero
         var droppedSeconds: Double = 0
         var unreportedSeconds: Double = 0
+        var unreportedStart: Double?
         var isOpen = true
     }
 
@@ -71,10 +87,11 @@ nonisolated final class TranscriptionAudioInput: Sendable {
     /// allocates beyond one converted buffer.
     ///
     /// - Parameter buffer: Audio as the capture system delivered it.
-    /// - Returns: Seconds of audio dropped that have not been reported yet,
-    ///   once they are worth reporting; otherwise `nil`.
-    func append(_ buffer: CapturedPCMBuffer) -> Double? {
-        state.withLock { state -> Double? in
+    /// - Returns: The unreported drop, once it is worth reporting: how many
+    ///   seconds were lost and where the loss began, in seconds from the start
+    ///   of the run. `nil` when there is nothing worth reporting.
+    func append(_ buffer: CapturedPCMBuffer) -> DroppedAudio? {
+        state.withLock { state -> DroppedAudio? in
             guard state.isOpen else { return nil }
             guard let converted = state.converter.convert(buffer) else { return nil }
 
@@ -93,21 +110,34 @@ nonisolated final class TranscriptionAudioInput: Sendable {
             let lost = Double(evicted.buffer.frameLength) / outputSampleRate
             state.droppedSeconds += lost
             state.unreportedSeconds += lost
+            if state.unreportedStart == nil, let evictedStart = evicted.bufferStartTime, evictedStart.isNumeric {
+                state.unreportedStart = evictedStart.seconds
+            }
             guard state.unreportedSeconds >= Self.reportingThreshold else { return nil }
-            defer { state.unreportedSeconds = 0 }
-            return state.unreportedSeconds
+            return Self.takeDrop(from: &state)
         }
     }
 
     /// Takes any dropped audio that has not been reported yet.
     ///
-    /// - Returns: The unreported seconds, or `nil` when there are none.
-    func takeUnreportedDrop() -> Double? {
+    /// - Returns: The unreported drop, or `nil` when there is none.
+    func takeUnreportedDrop() -> DroppedAudio? {
         state.withLock { state in
             guard state.unreportedSeconds > 0 else { return nil }
-            defer { state.unreportedSeconds = 0 }
-            return state.unreportedSeconds
+            return Self.takeDrop(from: &state)
         }
+    }
+
+    /// Empties the unreported drop and returns it.
+    ///
+    /// - Parameter state: The input's state, with the lock held.
+    /// - Returns: The drop that was pending.
+    private static func takeDrop(from state: inout State) -> DroppedAudio {
+        defer {
+            state.unreportedSeconds = 0
+            state.unreportedStart = nil
+        }
+        return DroppedAudio(seconds: state.unreportedSeconds, startTime: state.unreportedStart)
     }
 
     /// Stops accepting audio and ends the recogniser's input sequence.

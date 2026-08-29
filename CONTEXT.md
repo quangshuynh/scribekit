@@ -5,37 +5,44 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 5 — live on-device transcription. Complete.
+Interval 6 — durable Markdown transcript persistence. Complete.
 
 ## Current implementation
 
-- Domain value types in `ScribeKit/Models/`: `MeetingState`,
-  `AudioRetentionMode`, `CaptureSource`, `MeetingSession`, `AudioCaptureState`,
-  and new for this interval `TranscriptSegment` (with a `RecognitionState` of
-  partial or final), `TranscriptionEvent` / `TranscriptionInterruption`,
-  `TranscriptionState` and `SpeechRecognitionAvailability`.
-- `ScribeKit/Capture/`: discovery unchanged. `CapturedAudioSample` is now
-  `CapturedPCMBuffer` and carries the frames; `CapturedAudioSampleAdapter` is
-  now `CapturedPCMBufferAdapter`. `AudioSampleConsuming` takes a
-  `CapturedPCMBuffer`, and `BroadcastingAudioSampleConsumer` fans one capture
-  stream out to several consumers. `ScreenCaptureKitAudioCapturer` is
-  otherwise unchanged.
-- `ScribeKit/Transcription/`: `SpeechTranscribing` with `TranscriptionError`,
-  `TranscriptionConfiguration` / `TranscriptionLocale`, `BoundedAudioQueue`
-  (generic, fixed-capacity, an `AsyncSequence`), `SpeechAudioConverter`,
-  `TranscriptionAudioInput` (conversion, run-relative timing and the bounded
-  backlog) and `AppleSpeechTranscriber`, an actor owning the `SpeechAnalyzer`.
-- `ScribeKit/Features/MeetingSetup/`: `LiveTranscriptModel` owns the finalised
-  segments and the single partial hypothesis; `MeetingSetupCaptureModel` is now
-  the pipeline coordinator, owning capture, recognition, locale, availability
-  and the ordering between them; `MeetingSetupView` adds a Capture &
-  Transcription section and a lazily rendered Live Transcript section, and
-  keeps Start Meeting disabled.
-- `ScribeKitTests/`: Swift Testing suites (170 tests, 24 suites).
+- `ScribeKit/Models/`: `MeetingState`, `AudioRetentionMode`, `CaptureSource`,
+  `MeetingSession`, `AudioCaptureState`, `TranscriptSegment` (with a
+  `RecognitionState` of partial or final), `TranscriptionEvent` /
+  `TranscriptionInterruption`, `TranscriptionState`,
+  `SpeechRecognitionAvailability`, and new for this interval `TranscriptGap`,
+  `TranscriptPersistenceState` and `MeetingStartRequest`.
+  `TranscriptionInterruption.audioDropped` now carries an optional
+  run-relative `startTime`.
+- `ScribeKit/Capture/`: unchanged. Discovery, `CapturedPCMBuffer`,
+  `AudioSampleConsuming` with `BroadcastingAudioSampleConsumer`, and
+  `ScreenCaptureKitAudioCapturer`.
+- `ScribeKit/Transcription/`: `SpeechTranscribing` (now with `eventTally`),
+  `TranscriptionConfiguration` / `TranscriptionLocale`, `BoundedAudioQueue`,
+  `SpeechAudioConverter`, `TranscriptionAudioInput` (which now reports where
+  dropped audio fell), `AppleSpeechTranscriber`, and new
+  `TranscriptionEventPublisher` / `TranscriptionEventTally`.
+- `ScribeKit/Persistence/`: save-location storage unchanged. New for this
+  interval, `TranscriptPersisting` (the whole boundary between a meeting and
+  the filesystem) with `TranscriptPersistenceError`;
+  `TranscriptMarkdownFormatter` (pure string rendering, no I/O);
+  `TranscriptFileStoring` / `TranscriptFileAppending` with a
+  `FileManager`/`FileHandle` implementation; `MarkdownTranscriptStore`, the
+  actor that owns one session; and `SecurityScopedLease` with
+  `SecurityScopedResourceAccessing`. `SessionDirectoryName` and
+  `SessionArtifactLayout` are finally used rather than only tested.
+- `ScribeKit/Features/MeetingSetup/`: `LiveTranscriptModel` unchanged;
+  `MeetingSetupCaptureModel` now coordinates capture, recognition and durable
+  persistence and takes a `MeetingStartRequest`; `MeetingSetupView` has a real
+  Start Meeting control, an explicit Stop, a Transcript File section and a Show
+  in Finder control.
+- `ScribeKitTests/`: Swift Testing suites (227 tests, 27 suites).
 
-No transcript writing, autosave, recovery or background behaviour exists.
-Nothing is written to the chosen folder, and no audio or transcript file is
-created anywhere.
+No recovery, background behaviour or audio retention exists. No audio file and
+no session metadata file are written.
 
 ## Speech API decision
 
@@ -155,16 +162,144 @@ first installed locale. Nothing detects or switches language on its own.
 
 This Mac: 30 supported locales, 9 installed (all `en-*`).
 
+## Persistence architecture
+
+`TranscriptPersisting` is the only boundary between a running meeting and the
+filesystem: `startSession`, `appendFinalSegment`, `recordGap`, `finishSession`.
+No `FileManager` or `FileHandle` call exists above it, and a test double
+exercises a whole meeting without a disk.
+
+`MarkdownTranscriptStore` is an actor and the serialised owner of one session:
+its folder lease, its open file, and the formatter's position in the document.
+Being an actor is the backpressure design — appends are ordered without a queue
+of their own, and a caller awaiting one is held back by the previous write, so
+there is nothing to overflow and nothing to evict. Writes run on the actor's
+executor, never on the main actor and never from a SwiftUI body.
+
+Formatting is separate from writing. `TranscriptMarkdownFormatter` is a value
+type that renders strings and touches no filesystem, so the exact bytes of a
+document are checked against golden strings. Its only state is the last minute
+it wrote a heading for.
+
+`TranscriptFileStoring` / `TranscriptFileAppending` is a two-method view of the
+filesystem, narrow enough that the production implementation has no logic and a
+double can fail on demand.
+
+## Session layout
+
+```
+<chosen save folder>/
+  2026-08-29-closures-walkthrough/
+    transcript.md
+```
+
+The directory name comes from `SessionDirectoryName` (date prefix plus title
+slug, numeric suffix on collision) and the paths from `SessionArtifactLayout`.
+`transcript.md` is the only file created. `.scribekit/session.json` is named by
+the layout and deliberately not written: nothing reads it yet, and a file with
+no reader is failure modes without benefit. The transcript header already
+carries what a person needs, and `transcript.md` stays canonical either way.
+
+## Security-scoped access lifetime
+
+`SecurityScopedLease` makes the start/stop pair macOS balances an object with an
+owner. A lease is acquired when a session's directory is about to be created and
+released when its transcript has been flushed and closed — including on every
+failure path, so a refused start or a failed meeting never leaves one open.
+Outside a meeting, access is borrowed only for validation, through
+`SecurityScopedAccess.withAccess`. Verified live: `lsof` on the running app
+listed no handle on the destination between meetings.
+
+## Markdown format
+
+```
+# Closures Walkthrough
+
+**Date:** 2026-08-29
+**Started:** 10:01 AM
+**Sources:** QuickTime Player
+**Language:** en-US
+**Captured by:** ScribeKit
+
+## Transcript
+
+### 10:01 AM
+
+**10:01:33**
+
+Today, we are learning about closures in Swift.
+
+> **Transcription gap:** approximately 0.8 seconds of audio around 10:01:41 was not transcribed; recognition fell behind capture.
+
+---
+
+**Ended:** 10:02 AM
+**Duration:** 1 min 4 s
+```
+
+Recognised text is written exactly as it was finalised, apart from trimming the
+whitespace that joins one span to the previous one. Nothing is escaped: a
+recogniser emits words, and adding backslashes would put characters in the
+transcript that were never spoken.
+
+The document is append-only. `Ended` is not known while the meeting runs, so it
+is a footer rather than a header field that would have to be rewritten.
+
+## Timestamp semantics
+
+A segment's time is `session start + segment.startTime`, where the offset is
+audio-relative — measured from the first captured frame, not from when a result
+reached the interface. A minute heading is written when the minute bucket
+changes and never twice for the same minute; gaps do not open one.
+
+Formatting is deterministic and locale-independent: an ISO date and a fixed
+twelve-hour English clock, computed from `Calendar(identifier: .gregorian)` in
+an explicit time zone that defaults to the Mac's current one. Times to the
+second omit `AM`/`PM`, which the minute heading above them carries.
+
+## Gap semantics
+
+`TranscriptGap` carries a duration, a reason and an optional run-relative
+position. Dropped audio is positional: `TranscriptionAudioInput` reads the
+start time of the buffer it evicted, so the marker names where the loss fell.
+Time lost to a recogniser being rebuilt is not: no audio clock is running while
+it is down, so only the length is stated. No position is invented for either.
+
+## Flush and stop
+
+Durability boundary, stated honestly: an append reaches the file as soon as
+`appendFinalSegment` returns, so accepted text survives ScribeKit exiting or
+being killed. The device flush that would also survive a power loss is asked
+for every 25 appends and once at `finishSession`. There is no timer, no polling
+and no flush per audio buffer.
+
+Stop order: capture, then the recogniser's finalisation, then a wait until
+every event the recogniser published has been handled, then footer, flush,
+close, and the folder lease. Only then is the meeting reported as finished. The
+wait is a barrier against the transcriber's own published-event count resumed
+by the event handler, not a poll and not a sleep. Transcription events travel
+through a bounded `AsyncStream`; the publisher records anything the buffer
+discarded, and a non-zero count fails the meeting rather than losing finalised
+speech quietly.
+
+A write that fails mid-meeting sets `TranscriptPersistenceState.failed`, closes
+the writer, releases the folder and stops capture and recognition, so ScribeKit
+never keeps recognising into a transcript it is no longer saving. A failure is
+never overwritten by a later claim that the transcript was saved.
+
 ## Validation status
 
-`xcodebuild ... test` passes on Xcode 26.6: **170 tests in 24 suites**, no
+`xcodebuild ... clean test` passes on Xcode 26.6: **227 tests in 27 suites**, no
 compiler warnings. The `AppleSpeechTranscriber` suite starts and stops the real
 recogniser twice, which is where its 4.2 s comes from — two bounded drains of a
 run that received no audio.
 
-Live validation used a purpose-built looping player application (outside the
-repository) speaking seven sentences about Swift closures, captured as the only
-selected source.
+### Interval 5 live validation, still current
+
+Used a purpose-built looping player application (outside the repository)
+speaking seven sentences about Swift closures, captured as the only selected
+source. The observations below were taken before durable writing existed, which
+is why nothing was open for writing at the time.
 
 - Capture: 48 000 Hz mono float32 non-interleaved, ~50 buffers/second,
   peak 37–44%, unchanged from Interval 4.
@@ -188,6 +323,46 @@ selected source.
   instead. The interface stayed responsive with the transcript at several
   hundred segments.
 
+### Interval 6 live validation
+
+Driven through the real app, sandboxed — the interface operated by scripted
+keyboard and mouse events, not by calling into the code — with QuickTime Player
+playing a
+`say`-generated recording of three sentences about Swift closures as the only
+selected source, writing to a temporary destination chosen in the open panel.
+The destination and its contents were deleted afterwards; nothing from it is in
+the repository.
+
+- Three meetings were run. Each created its own dated directory —
+  `2026-08-29-closures-walkthrough`, then `-2`, then `-3` — so the collision
+  policy is exercised live, and no meeting appended to an earlier one.
+- `transcript.md` appeared as soon as the meeting started, with the header, and
+  filled in as sentences were finalised. Read from the shell while the meeting
+  was still running, it was complete and valid up to that point.
+- The live transcript showed the partial "Next we will discuss" at a moment
+  when the file contained only finalised sentences. No partial text ever
+  reached the file.
+- Timestamps tracked the session timeline, and a minute heading `### 10:02 AM`
+  appeared exactly once when the meeting crossed the minute.
+- Stop reported "Saved and closed." and the footer with `Ended` and `Duration`
+  was present. `lsof` then showed no handle on the destination and no sockets.
+- Only `transcript.md` was created. No `.scribekit`, no `session.json`, no
+  `audio.caf`, no `audio.m4a`, and nothing in the app container.
+- Recognition stayed honest: "self contained" for "self-contained" was left
+  alone, as was "async and await" when it came back correctly this time.
+- The save folder was restored from its bookmark after a relaunch and the
+  meeting after the relaunch wrote a new session, leaving the earlier
+  transcripts byte-identical.
+
+### Interval 6 durability smoke test
+
+The second meeting was force-quit with `SIGKILL` while it was running, after
+several sentences had been finalised. Its `transcript.md` survived: 413 bytes,
+header and every finalised sentence up to the kill, valid Markdown, with no
+footer — which is the honest record of a meeting that never finished. It was
+read outside ScribeKit, from the shell, and was valid Markdown throughout.
+Nothing was reopened, repaired or recovered; that is a later interval.
+
 ### Interval 2, 3 and 4 checks, still current
 
 Source discovery, multi-source selection, save-location restoration and
@@ -197,12 +372,25 @@ intervals; the capture observations above were taken through the same path.
 ## Known limitations
 
 - Interval 2, 3 and 4 limitations still hold.
-- The transcript lives in memory for the length of a run and is lost when the
-  run ends. Nothing is written to the chosen folder.
+- No crash or session recovery. A meeting killed mid-run leaves a transcript
+  with no footer; ScribeKit will not reopen or resume it.
+- Surviving a power loss depends on the flush every 25 appends and at Stop, so
+  an abrupt power cut can cost the appends since the last one. ScribeKit does
+  not claim to be crash-proof.
+- A start that fails after the transcript was created leaves that session
+  folder behind with a header and no speech. ScribeKit does not delete
+  directories it created.
+- No session metadata file is written, so nothing outside `transcript.md`
+  records a session.
+- The transcript's timeline starts when the meeting starts; audio offsets are
+  measured from the first captured frame, which arrives a moment later, so a
+  timestamp can be under a second early.
+- Overflow of the transcription event buffer fails a meeting rather than losing
+  text, but it has never been observed: the path is covered by unit tests.
 - Recognition needs an installed on-device model. Uninstalled locales are
   listed and disabled, and ScribeKit will not install one.
-- Untranscribed time is reported as a single total, not as positions in the
-  transcript, so a run with several gaps says how much was lost but not where.
+- Dropped audio is now positional in the transcript; time lost to a recogniser
+  restart is not, and is stated as a length alone.
 - Bounded recovery from a recogniser failure is unit tested only; no live
   recogniser failure was reproduced.
 - Confidence is not requested. `SpeechTranscriber` can attach a
@@ -218,10 +406,12 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 6: timestamped Markdown persistence. `TranscriptSegment` already
-carries the run-relative timing and the partial/final distinction it needs, and
-`LiveTranscriptModel` already knows the run's start date, so wall-clock
-timestamps are that date plus the segment offset. It needs a writer holding a
-session-length security-scoped lease on the chosen folder, `SessionDirectoryName`
-and `SessionArtifactLayout` finally used to create a directory, batched
-autosave, and a decision about how untranscribed gaps appear in the file.
+Interval 7: crash and session recovery, and the background/menu-bar workflow.
+Recovery has the pieces it needs already: a session directory exists from the
+moment a meeting starts, a transcript with no footer is exactly the signature of
+a meeting that never finished, and `MeetingState` already has a `.recovering`
+case with transitions. What it lacks is anything that records which directory
+belongs to an unfinished meeting, which is what `.scribekit/session.json` was
+laid out for and what that interval should decide the shape of. Nothing should
+edit an existing `transcript.md` in place; appending a resumption marker to it
+is the option that keeps the file append-only.

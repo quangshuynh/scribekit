@@ -13,8 +13,9 @@ A native macOS app for background-first meeting transcription. ScribeKit runs
 quietly while you work in other applications and writes timestamped Markdown
 transcripts to a folder you choose, on your machine.
 
-**Status: early development.** Audio capture from selected applications and
-live on-device transcription work; transcript writing is not implemented yet.
+**Status: early development.** Audio capture from selected applications, live
+on-device transcription and durable Markdown transcripts work end to end;
+crash recovery, background operation and audio retention do not.
 
 ## Philosophy
 
@@ -48,6 +49,21 @@ live on-device transcription work; transcript writing is not implemented yet.
 - Honest reporting of a missing model, an unsupported language, a recogniser
   that stops by itself, and audio that recognition fell too far behind to
   transcribe.
+- A durable Markdown transcript. Starting a meeting creates a dated session
+  folder in the chosen save location and a `transcript.md` inside it, and each
+  finalised span is appended to that file as it is recognised, with a
+  wall-clock timestamp taken from the session start plus the span's own audio
+  offset. The file is append-only, so it is readable in any editor while the
+  meeting is still running.
+- Incremental autosave with no timer: a finalised span reaches the file as soon
+  as it is recognised, the file is flushed to the storage device every 25
+  appends, and Stop flushes and closes the transcript before it reports the
+  meeting finished.
+- Explicit gap markers in the transcript for audio that was never transcribed,
+  positioned where the audio fell when the pipeline knows, and honest about the
+  length alone when it does not.
+- Honest reporting when the transcript stops being writable: the meeting is
+  stopped rather than left recognising speech that nothing is saving.
 - A save folder chosen in the system open panel and remembered across launches
   with a security-scoped bookmark, with honest reporting when the folder has
   been moved, deleted or had its access revoked, and controls to replace or
@@ -58,10 +74,9 @@ live on-device transcription work; transcript writing is not implemented yet.
   session metadata, with unit tests.
 - Shared Xcode scheme and a macOS CI workflow that builds and runs unit tests.
 
-The transcript exists only in memory: no transcript, audio file or session
-directory is written. Choosing a save folder only remembers the folder. The
-Start Meeting control is intentionally disabled, because a meeting implies a
-transcript ScribeKit cannot yet produce.
+No audio file is written in any mode yet, and no ScribeKit metadata file is
+written alongside the transcript: `transcript.md` is the only artifact a
+session produces.
 
 Listing applications and capturing their audio require Screen & System Audio
 Recording permission, which macOS asks for the first time ScribeKit looks for
@@ -85,7 +100,7 @@ connection at all.
 All of the following are *planned*, not available:
 
 - Meeting lifecycle with background operation and a menu bar presence.
-- Timestamped Markdown transcripts with autosave and crash/session recovery.
+- Crash and session recovery for a meeting that ended without stopping.
 - Transcript search and history.
 - Post-meeting review of uncertain passages.
 - Optional audio retention (none / raw / compressed).
@@ -155,9 +170,12 @@ Save-location storage sits behind `SaveLocationPersisting`, so security-scoped
 bookmark data never reaches the setup screen, and session directory naming is a
 pure policy separate from any filesystem work.
 
-A future session will be laid out as a directory named from its date and title,
-holding `transcript.md` with ScribeKit's own metadata in a hidden `.scribekit`
-subdirectory, so a transcript stays readable without this app.
+A session is laid out as a directory named from its date and title, holding
+`transcript.md`. `SessionArtifactLayout` also names a hidden `.scribekit`
+subdirectory for ScribeKit's own metadata and an optional audio file; neither
+is written yet. Durable writing sits behind `TranscriptPersisting`, with
+Markdown formatting separated from filesystem work and an actor owning one
+session's folder lease, open file and position in the document.
 
 ## Roadmap
 
@@ -165,19 +183,27 @@ subdirectory, so a transcript stays readable without this app.
 2. **Application audio source discovery and selection**.
 3. Durable save location and session configuration.
 4. **Audio capture from the selected applications**.
-5. **On-device transcription** *(current)*.
-6. Timestamped Markdown persistence, autosave and recovery.
+5. **On-device transcription**.
+6. **Timestamped Markdown persistence and autosave** *(current)*.
 7. Background and menu bar operation.
 8. Transcript history, search and uncertainty review.
 9. Optional audio retention and, separately, derived notes.
 
 ## Known limitations
 
-- No transcript writing or recovery yet. The transcript is held in memory for
-  the length of a run and lost when it ends; no audio is kept, played back or
-  written anywhere.
-- Start Meeting is a disabled placeholder; capture and transcription have their
-  own control.
+- No crash or session recovery. A meeting that ends without Stop leaves a
+  transcript holding everything already written and no closing footer;
+  ScribeKit will not reopen or resume it, and nothing repairs it.
+- A finalised span reaches the file as soon as it is recognised, so it survives
+  the app exiting. Surviving a power loss depends on the flush that happens
+  every 25 appends and at Stop, so an abrupt power cut can cost the appends
+  since the last one. ScribeKit does not claim to be crash-proof.
+- No session metadata file is written. `transcript.md` carries everything a
+  session records.
+- No audio is kept, played back or written anywhere, in any retention mode.
+- A start that fails after the transcript was created leaves that session
+  folder behind, holding a transcript with a header and no speech. ScribeKit
+  does not delete folders it created.
 - Recognition needs an installed on-device language model. Languages whose
   model is absent are listed but cannot be selected, and ScribeKit does not
   install them.
@@ -205,10 +231,15 @@ subdirectory, so a transcript stays readable without this app.
   menu-bar-only or windowless application is not offered as a source.
 - The application list is refreshed on appearance and on demand, not
   automatically as applications start and quit.
-- Nothing is written to the chosen folder yet; ScribeKit only remembers it and
-  checks it is still reachable at launch.
-- Access to the folder is held only while it is being validated. A session-long
-  lease arrives with the code that writes transcripts.
+- Access to the chosen folder is held for exactly as long as a meeting is
+  being written and released when its transcript is closed; outside a meeting
+  it is taken only while the folder is being validated.
+- The transcript's timeline starts when the meeting starts, and audio offsets
+  are measured from the first captured frame, which arrives a moment later, so
+  a timestamp can be under a second early.
+- Clock times in the transcript use a fixed twelve-hour English format and the
+  Mac's current time zone; neither follows the system locale, so a transcript
+  reads the same wherever it is opened.
 - A moved folder is followed only when macOS reports its bookmark as stale; a
   folder that was deleted, or whose disk is absent, has to be chosen again.
 - CI runs build and unit tests only — no linting, formatting, coverage or UI tests.

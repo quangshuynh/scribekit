@@ -36,7 +36,10 @@ nonisolated enum TranscriptionEvent: Equatable, Sendable {
 nonisolated enum TranscriptionInterruption: Equatable, Sendable {
     /// Recognition fell behind capture and audio was discarded to keep memory
     /// bounded; the transcript has a gap of this length.
-    case audioDropped(seconds: Double)
+    ///
+    /// `startTime` is the position of the discarded audio in the run, in
+    /// seconds from its first frame, when the pipeline knows it.
+    case audioDropped(seconds: Double, startTime: Double? = nil)
 
     /// The recogniser stopped with an error, described by the system.
     case recognitionFailed(message: String)
@@ -44,10 +47,24 @@ nonisolated enum TranscriptionInterruption: Equatable, Sendable {
     /// A message suitable for display.
     var message: String {
         switch self {
-        case let .audioDropped(seconds):
+        case let .audioDropped(seconds, _):
             String(format: "Recognition fell behind; %.1f s of audio was not transcribed.", seconds)
         case let .recognitionFailed(message):
             "Recognition stopped: \(message)"
+        }
+    }
+
+    /// The interruption expressed as durable transcript material.
+    ///
+    /// A recogniser that stopped is not itself a gap: the time it was down is
+    /// measured by whoever restarts it and reported separately, so nothing
+    /// here claims a length it does not know.
+    var gap: TranscriptGap? {
+        switch self {
+        case let .audioDropped(seconds, startTime):
+            TranscriptGap(startTime: startTime, duration: seconds, reason: .audioDropped)
+        case .recognitionFailed:
+            nil
         }
     }
 }
