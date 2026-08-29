@@ -23,8 +23,9 @@ Interval 6 — durable Markdown transcript persistence. Complete.
 - `ScribeKit/Transcription/`: `SpeechTranscribing` (now with `eventTally`),
   `TranscriptionConfiguration` / `TranscriptionLocale`, `BoundedAudioQueue`,
   `SpeechAudioConverter`, `TranscriptionAudioInput` (which now reports where
-  dropped audio fell), `AppleSpeechTranscriber`, and new
-  `TranscriptionEventPublisher` / `TranscriptionEventTally`.
+  dropped audio fell), `AppleSpeechTranscriber`,
+  `TranscriptionEventPublisher` / `TranscriptionEventTally`, and
+  `SpeechAvailabilityProviding` / `SystemSpeechAvailability`.
 - `ScribeKit/Persistence/`: save-location storage unchanged. New for this
   interval, `TranscriptPersisting` (the whole boundary between a meeting and
   the filesystem) with `TranscriptPersistenceError`;
@@ -39,7 +40,7 @@ Interval 6 — durable Markdown transcript persistence. Complete.
   persistence and takes a `MeetingStartRequest`; `MeetingSetupView` has a real
   Start Meeting control, an explicit Stop, a Transcript File section and a Show
   in Finder control.
-- `ScribeKitTests/`: Swift Testing suites (227 tests, 27 suites).
+- `ScribeKitTests/`: Swift Testing suites (232 tests, 27 suites).
 
 No recovery, background behaviour or audio retention exists. No audio file and
 no session metadata file are written.
@@ -72,7 +73,12 @@ Four independent things hold it up:
 
 1. `AppleSpeechTranscriber` refuses to start unless the chosen locale's model
    is in `installedLocales`; otherwise it reports `.modelNotInstalled` and
-   nothing starts.
+   nothing starts. It reads that list, `isAvailable`, `supportedLocales` and
+   `supportedLocale(equivalentTo:)` through `SpeechAvailabilityProviding`,
+   whose only production implementation is `SystemSpeechAvailability` and
+   whose only purpose is to let those four host-dependent answers be stated in
+   a test. The rules built on them are unchanged, and nothing in the app
+   constructs anything but the real one.
 2. Model assets are never downloaded. `AssetInventory.assetInstallationRequest`
    exists and is deliberately not called; it returned a non-nil request even
    for an already-installed locale, so it is not a reliable readiness signal
@@ -289,10 +295,24 @@ never overwritten by a later claim that the transcript was saved.
 
 ## Validation status
 
-`xcodebuild ... clean test` passes on Xcode 26.6: **227 tests in 27 suites**, no
+`xcodebuild ... clean test` passes on Xcode 26.6: **232 tests in 27 suites**, no
 compiler warnings. The `AppleSpeechTranscriber` suite starts and stops the real
 recogniser twice, which is where its 4.2 s comes from — two bounded drains of a
 run that received no audio.
+
+Speech availability is not the same on every Mac, and the tests no longer
+pretend otherwise. `SpeechTranscriber.isAvailable` is `false` on
+GitHub's hosted `macos-26` runners, which have no speech models and reported no
+supported locales; tests written against this Mac's thirty locales failed there
+while the app behaved correctly. The unsupported-system, unsupported-locale,
+model-not-installed, available and locale-listing rules are now decided against
+a stated environment, so they assert the same thing on any host. What remains
+against the real framework is a smoke test that reads
+`SystemSpeechAvailability.isAvailable` first and asserts what is true for that
+answer — no locales and `.unsupportedSystem` when there is no recogniser,
+structurally valid records and correct installed-state mapping when there is —
+and the lifecycle test, which still needs a real installed model and returns
+without one. Neither downloads anything.
 
 ### Interval 5 live validation, still current
 
