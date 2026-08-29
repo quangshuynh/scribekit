@@ -14,6 +14,10 @@ analytics, no stealth capture.
 - Keep domain models as small, testable value types, free of I/O.
 - Model mutually exclusive state with enums, not sets of booleans.
 - Separate capture, transcription, persistence and presentation concerns.
+- Adapt system-framework types at the subsystem boundary. Frameworks such as
+  ScreenCaptureKit stay inside their provider; domain models, state owners and
+  views work with ScribeKit's own value types, so behaviour stays testable
+  without system permission.
 - Prefer Apple platform frameworks over third-party dependencies.
 - Add a dependency only when the platform genuinely cannot do the job, and say
   why in the pull request.
