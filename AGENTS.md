@@ -18,6 +18,10 @@ analytics, no stealth capture.
   ScreenCaptureKit stay inside their provider; domain models, state owners and
   views work with ScribeKit's own value types, so behaviour stays testable
   without system permission.
+- Reach the filesystem only through a location the user chose in a system
+  panel, persisted as a security-scoped bookmark, with access started for the
+  work that needs it and stopped afterwards. Never weaken or disable App
+  Sandbox to reach a path, and never write to a location the user did not pick.
 - Prefer Apple platform frameworks over third-party dependencies.
 - Add a dependency only when the platform genuinely cannot do the job, and say
   why in the pull request.
