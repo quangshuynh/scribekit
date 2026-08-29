@@ -10,7 +10,7 @@ import Foundation
 /// A session is always in exactly one state. Modelling the lifecycle as an
 /// enum rather than a set of independent flags makes contradictory
 /// combinations (such as "paused while stopping") unrepresentable.
-enum MeetingState: String, Codable, Sendable, CaseIterable, Hashable {
+nonisolated enum MeetingState: String, Codable, Sendable, CaseIterable, Hashable {
     /// No session is running and none is being prepared.
     case idle
 
@@ -73,7 +73,7 @@ enum MeetingState: String, Codable, Sendable, CaseIterable, Hashable {
 }
 
 /// An error raised when a caller attempts an illegal lifecycle change.
-enum MeetingStateError: Error, Equatable, Sendable {
+nonisolated enum MeetingStateError: Error, Equatable, Sendable {
     /// The requested transition is not part of the session lifecycle.
     case invalidTransition(from: MeetingState, to: MeetingState)
 }

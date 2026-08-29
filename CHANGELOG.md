@@ -32,6 +32,21 @@ All notable changes to this project are documented in this file.
 - Deterministic session directory naming (`2026-08-31-ios-training-day-2`) and
   a session artifact layout describing where a transcript, metadata and
   optional audio will live. Nothing is written to disk yet.
+- Audio capture from the selected applications behind an `AudioCapturing`
+  abstraction, with a ScreenCaptureKit implementation that resolves the
+  selected bundle identifiers against the applications running at that moment,
+  filters capture to them, and refuses to start when one of them has quit
+  rather than capturing a different set.
+- Audio-only stream configuration: no screen output is added, the video side is
+  reduced to the smallest frame the API accepts, and the microphone and
+  ScribeKit's own output are excluded.
+- Bounded capture accounting: delivered buffers are described on the capture
+  queue and discarded, and the interface shows coalesced counts, duration,
+  the format actually received and a peak level.
+- Start and stop capture controls in the meeting setup screen, with capture
+  state, honest permission and unavailable-source failures, and interruption
+  reporting when the system stops a running stream. Start Meeting remains
+  disabled.
 - App sandbox entitlement for app-scoped bookmarks, and read-write access to
   user-selected folders.
 - GitHub Actions workflow that builds and tests on macOS.
