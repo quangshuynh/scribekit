@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    # ScribeKit targets macOS 26, which requires an Xcode 26 runner image.
+    runs-on: macos-26
+
+    env:
+      # Ad-hoc signing keeps the sandboxed app launchable for unit tests
+      # without provisioning profiles or team credentials on CI.
+      SIGNING_FLAGS: CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Build
+        run: |
+          xcodebuild build-for-testing \
+            -project ScribeKit.xcodeproj \
+            -scheme ScribeKit \
+            -destination 'platform=macOS' \
+            -derivedDataPath .build/DerivedData \
+            $SIGNING_FLAGS
+
+      - name: Test
+        run: |
+          xcodebuild test-without-building \
+            -project ScribeKit.xcodeproj \
+            -scheme ScribeKit \
+            -destination 'platform=macOS' \
+            -derivedDataPath .build/DerivedData \
+            $SIGNING_FLAGS
