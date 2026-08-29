@@ -58,6 +58,9 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     private nonisolated let logger = Logger(subsystem: transcriptionSubsystem, category: "Transcription")
     private nonisolated let backlogCapacity: Int
 
+    /// What this Mac's recogniser supports and has installed.
+    private nonisolated let speechAvailability: any SpeechAvailabilityProviding
+
     /// The input the delivery queue writes to, present only while a run is in
     /// progress. Held outside the actor because audio must not wait for it.
     private nonisolated let input = Mutex<TranscriptionAudioInput?>(nil)
@@ -75,10 +78,19 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
 
     /// Creates a transcriber.
     ///
-    /// - Parameter backlogCapacity: How many converted buffers the recogniser
-    ///   may fall behind by before the oldest audio is dropped.
-    init(backlogCapacity: Int = defaultBacklogCapacity) {
+    /// - Parameters:
+    ///   - backlogCapacity: How many converted buffers the recogniser may fall
+    ///     behind by before the oldest audio is dropped.
+    ///   - speechAvailability: What the recogniser supports and has installed.
+    ///     Apple's own answers for this Mac by default; a substitute makes the
+    ///     availability rules testable without depending on the host's Speech
+    ///     runtime.
+    init(
+        backlogCapacity: Int = defaultBacklogCapacity,
+        speechAvailability: any SpeechAvailabilityProviding = SystemSpeechAvailability()
+    ) {
         self.backlogCapacity = backlogCapacity
+        self.speechAvailability = speechAvailability
         var continuation: AsyncStream<TranscriptionEvent>.Continuation!
         events = AsyncStream(bufferingPolicy: .bufferingNewest(64)) { continuation = $0 }
         publisher = TranscriptionEventPublisher(continuation: continuation)
@@ -104,9 +116,9 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     // MARK: - Availability
 
     func availableLocales() async -> [TranscriptionLocale] {
-        guard SpeechTranscriber.isAvailable else { return [] }
-        let installed = Set(await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) })
-        return await SpeechTranscriber.supportedLocales
+        guard speechAvailability.isAvailable else { return [] }
+        let installed = Set(await speechAvailability.installedLocales().map { $0.identifier(.bcp47) })
+        return await speechAvailability.supportedLocales()
             .map { locale in
                 let identifier = locale.identifier(.bcp47)
                 return TranscriptionLocale(id: identifier, isInstalled: installed.contains(identifier))
@@ -115,13 +127,13 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     }
 
     func availability(for configuration: TranscriptionConfiguration) async -> SpeechRecognitionAvailability {
-        guard SpeechTranscriber.isAvailable else { return .unsupportedSystem }
+        guard speechAvailability.isAvailable else { return .unsupportedSystem }
         let requested = Locale(identifier: configuration.localeIdentifier)
-        guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: requested) else {
+        guard let supported = await speechAvailability.supportedLocale(equivalentTo: requested) else {
             return .unsupportedLocale(localeIdentifier: configuration.localeIdentifier)
         }
         let identifier = supported.identifier(.bcp47)
-        let installed = await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) }
+        let installed = await speechAvailability.installedLocales().map { $0.identifier(.bcp47) }
         guard installed.contains(identifier) else {
             return .modelNotInstalled(localeIdentifier: identifier)
         }
