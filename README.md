@@ -29,13 +29,20 @@ transcription are not implemented yet.
 - Meeting configuration screen: title, audio retention mode, save location.
 - Discovery of running applications through ScreenCaptureKit, with selection of
   one or several of them as intended audio sources, and a manual Refresh.
+- A save folder chosen in the system open panel and remembered across launches
+  with a security-scoped bookmark, with honest reporting when the folder has
+  been moved, deleted or had its access revoked, and controls to replace or
+  forget it.
+- Remembered setup choices: the audio retention mode and the applications last
+  selected, matched against a fresh discovery on each launch.
 - Domain models for the session lifecycle, audio retention, capture sources and
   session metadata, with unit tests.
 - Shared Xcode scheme and a macOS CI workflow that builds and runs unit tests.
 
 Discovery only enumerates applications; nothing is captured, transcribed or
-written to disk yet, and selecting an application does not record it. The Start
-Meeting control is intentionally disabled.
+written to disk yet, and selecting an application does not record it. Choosing
+a save folder only remembers the folder — no session directory, transcript or
+audio file is created. The Start Meeting control is intentionally disabled.
 
 Listing applications requires Screen Recording permission, which macOS asks for
 the first time ScribeKit looks for sources. Without it the screen reports the
@@ -97,6 +104,7 @@ ScribeKit/
   Capture/                Application source discovery
   Features/MeetingSetup/  SwiftUI configuration screen and its state
   Models/                 Domain value types (no I/O)
+  Persistence/            Save-location storage and session layout policy
 ScribeKitTests/           Swift Testing unit tests
 ```
 
@@ -106,28 +114,40 @@ explicit transition rules, so contradictory states are unrepresentable.
 Capture, speech, persistence and session coordination are separate layers
 behind that model: source discovery sits behind the `CaptureSourceProviding`
 protocol, and ScreenCaptureKit types are adapted at that boundary rather than
-reaching the UI.
+reaching the UI. Save-location storage sits behind `SaveLocationPersisting`, so
+security-scoped bookmark data never reaches the setup screen, and session
+directory naming is a pure policy separate from any filesystem work.
+
+A future session will be laid out as a directory named from its date and title,
+holding `transcript.md` with ScribeKit's own metadata in a hidden `.scribekit`
+subdirectory, so a transcript stays readable without this app.
 
 ## Roadmap
 
 1. **Foundation** — domain models, configuration UI, tests, CI, docs.
-2. **Application audio source discovery and selection** *(current)*.
-3. Audio capture and on-device transcription.
-4. Timestamped Markdown persistence, autosave and recovery.
-5. Background and menu bar operation.
-6. Transcript history, search and uncertainty review.
-7. Optional audio retention and, separately, derived notes.
+2. **Application audio source discovery and selection**.
+3. **Durable save location and session configuration** *(current)*.
+4. Audio capture and on-device transcription.
+5. Timestamped Markdown persistence, autosave and recovery.
+6. Background and menu bar operation.
+7. Transcript history, search and uncertainty review.
+8. Optional audio retention and, separately, derived notes.
 
 ## Known limitations
 
-- No audio capture, transcription, persistence or recovery yet. Selected
+- No audio capture, transcription, transcript writing or recovery yet. Selected
   applications are recorded as a choice only.
 - Start Meeting is a disabled placeholder.
 - Only applications owning an ordinary on-screen window are listed, so a
   menu-bar-only or windowless application is not offered as a source.
 - The application list is refreshed on appearance and on demand, not
   automatically as applications start and quit.
-- The chosen save location is held in memory only and is not persisted.
+- Nothing is written to the chosen folder yet; ScribeKit only remembers it and
+  checks it is still reachable at launch.
+- Access to the folder is held only while it is being validated. A session-long
+  lease arrives with the code that writes transcripts.
+- A moved folder is followed only when macOS reports its bookmark as stale; a
+  folder that was deleted, or whose disk is absent, has to be chosen again.
 - CI runs build and unit tests only — no linting, formatting, coverage or UI tests.
 
 ## License
