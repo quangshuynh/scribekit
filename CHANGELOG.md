@@ -6,6 +6,31 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Durable Markdown transcripts. Starting a meeting creates a dated session
+  directory in the chosen save folder and a `transcript.md` inside it, with a
+  deterministic header, per-minute headings, one timestamped entry per
+  finalised span and a footer written when the meeting ends.
+- Wall-clock timestamps derived from the session start plus each span's own
+  audio-relative offset, formatted by fixed rule rather than by system locale.
+- Explicit transcript gap markers for audio that was never transcribed, carrying
+  the position of the loss when the pipeline knows it and its length alone when
+  it does not. Dropped audio now reports where in the run it fell.
+- Durable writing behind a `TranscriptPersisting` boundary, with Markdown
+  formatting separated from filesystem work, an actor owning one session's
+  file, folder lease and document position, and append-only writing so the
+  transcript is readable while the meeting runs and never rewritten.
+- Incremental autosave: finalised speech reaches the file as it is recognised,
+  the file is flushed to the storage device every 25 appends, and Stop flushes
+  and closes it before reporting the meeting finished. No timers.
+- Session-length security-scoped access as an owned `SecurityScopedLease`,
+  taken when a session's directory is created and released when its transcript
+  is closed.
+- A real Start Meeting control, replacing the separate Start Transcribing
+  control and the disabled placeholder, with a status line for the transcript
+  file and a control to reveal it in the Finder once it is closed.
+- Accounting for every transcription event published, so a stop can wait for
+  work still in flight and an overflowing event buffer fails the meeting
+  instead of silently losing finalised speech.
 - Meeting domain models: `MeetingState`, `AudioRetentionMode`, `CaptureSource`
   and `MeetingSession`.
 - Meeting configuration screen with title, audio retention and save location.
