@@ -13,8 +13,8 @@ A native macOS app for background-first meeting transcription. ScribeKit runs
 quietly while you work in other applications and writes timestamped Markdown
 transcripts to a folder you choose, on your machine.
 
-**Status: early development.** Audio capture from selected applications
-works; transcription and transcript writing are not implemented yet.
+**Status: early development.** Audio capture from selected applications and
+live on-device transcription work; transcript writing is not implemented yet.
 
 ## Philosophy
 
@@ -37,6 +37,17 @@ works; transcription and transcript writing are not implemented yet.
   with the selection resolved against the applications running at that moment
   and a clear failure when one of them has quit. Capture reports the format and
   level it is actually receiving.
+- Live speech transcription of that audio, recognised on this Mac with Apple's
+  `SpeechAnalyzer` and an installed on-device language model. Partial text is
+  shown as an ephemeral guess and finalised text accumulates as transcript
+  segments, so a sentence heard word by word leaves one entry rather than one
+  per word.
+- An explicit recognition language, chosen from the locales the recogniser
+  supports, with the ones whose model is not installed listed and disabled
+  rather than silently unavailable.
+- Honest reporting of a missing model, an unsupported language, a recogniser
+  that stops by itself, and audio that recognition fell too far behind to
+  transcribe.
 - A save folder chosen in the system open panel and remembered across launches
   with a security-scoped bookmark, with honest reporting when the folder has
   been moved, deleted or had its access revoked, and controls to replace or
@@ -47,21 +58,32 @@ works; transcription and transcript writing are not implemented yet.
   session metadata, with unit tests.
 - Shared Xcode scheme and a macOS CI workflow that builds and runs unit tests.
 
-Captured audio is measured and discarded: nothing is transcribed, and no
-transcript, audio file or session directory is written. Choosing a save folder
-only remembers the folder. The Start Meeting control is intentionally disabled,
-because a meeting implies a transcript ScribeKit cannot yet produce.
+The transcript exists only in memory: no transcript, audio file or session
+directory is written. Choosing a save folder only remembers the folder. The
+Start Meeting control is intentionally disabled, because a meeting implies a
+transcript ScribeKit cannot yet produce.
 
 Listing applications and capturing their audio require Screen & System Audio
 Recording permission, which macOS asks for the first time ScribeKit looks for
 sources. Without it the screen reports the missing permission instead of a list
-or a capture.
+or a capture. Transcription itself asks for no permission at all, because it
+runs against a speech model on this Mac rather than through a service.
+
+## On-device recognition
+
+Speech recognition uses `SpeechAnalyzer` and `SpeechTranscriber`, Apple's
+on-device speech APIs, against a language model installed on this Mac.
+ScribeKit checks that the model for the selected language is installed and
+refuses to start when it is not; it never downloads one on your behalf and
+never falls back to network recognition. It does not use `SFSpeechRecognizer`,
+the older API that can send audio to Apple's servers. The app ships without the
+network client entitlement, so the sandbox does not permit it to open a network
+connection at all.
 
 ## Planned
 
 All of the following are *planned*, not available:
 
-- Live transcription of captured audio.
 - Meeting lifecycle with background operation and a menu bar presence.
 - Timestamped Markdown transcripts with autosave and crash/session recovery.
 - Transcript search and history.
@@ -115,6 +137,7 @@ ScribeKit/
   Features/MeetingSetup/  SwiftUI configuration screen and its state
   Models/                 Domain value types (no I/O)
   Persistence/            Save-location storage and session layout policy
+  Transcription/          On-device speech recognition behind its own boundary
 ScribeKitTests/           Swift Testing unit tests
 ```
 
@@ -123,9 +146,11 @@ persistence behaviour. Session lifecycle is a single `MeetingState` enum with
 explicit transition rules, so contradictory states are unrepresentable.
 Capture, speech, persistence and session coordination are separate layers
 behind that model: source discovery sits behind the `CaptureSourceProviding`
-protocol and capture behind `AudioCapturing`, and ScreenCaptureKit types are
-adapted at those boundaries rather than reaching the UI. Audio buffers are
-described on the capture system's own queue and never cross the main actor.
+protocol, capture behind `AudioCapturing` and recognition behind
+`SpeechTranscribing`, and ScreenCaptureKit and Speech types are adapted at
+those boundaries rather than reaching the UI. Audio buffers are copied,
+converted and queued on the capture system's own queue and never cross the main
+actor; the interface sees coalesced summaries and transcription events only.
 Save-location storage sits behind `SaveLocationPersisting`, so security-scoped
 bookmark data never reaches the setup screen, and session directory naming is a
 pure policy separate from any filesystem work.
@@ -139,8 +164,8 @@ subdirectory, so a transcript stays readable without this app.
 1. **Foundation** — domain models, configuration UI, tests, CI, docs.
 2. **Application audio source discovery and selection**.
 3. Durable save location and session configuration.
-4. **Audio capture from the selected applications** *(current)*.
-5. On-device transcription.
+4. **Audio capture from the selected applications**.
+5. **On-device transcription** *(current)*.
 6. Timestamped Markdown persistence, autosave and recovery.
 7. Background and menu bar operation.
 8. Transcript history, search and uncertainty review.
@@ -148,9 +173,24 @@ subdirectory, so a transcript stays readable without this app.
 
 ## Known limitations
 
-- No transcription, transcript writing or recovery yet. Captured audio is
-  described and discarded; none of it is kept, played back or written anywhere.
-- Start Meeting is a disabled placeholder; capture has its own controls.
+- No transcript writing or recovery yet. The transcript is held in memory for
+  the length of a run and lost when it ends; no audio is kept, played back or
+  written anywhere.
+- Start Meeting is a disabled placeholder; capture and transcription have their
+  own control.
+- Recognition needs an installed on-device language model. Languages whose
+  model is absent are listed but cannot be selected, and ScribeKit does not
+  install them.
+- The recognition language is fixed for a run and is never detected
+  automatically; a meeting that changes language is transcribed in the language
+  that was chosen.
+- Recognition consumes 16 kHz audio, so 48 kHz capture is resampled on the
+  capture queue before it reaches the recogniser.
+- If recognition falls more than about three seconds behind capture, the oldest
+  audio is dropped to keep memory bounded and the lost time is reported as a
+  gap in the transcript.
+- A recogniser that stops by itself is restarted at most twice; audio arriving
+  during a restart is not transcribed and is counted as a gap.
 - ScreenCaptureKit has no audio-only stream, so the capture filter names a
   display as well as the selected applications. No screen output is added, so
   no frame is delivered or processed, but the permission macOS asks for is the
