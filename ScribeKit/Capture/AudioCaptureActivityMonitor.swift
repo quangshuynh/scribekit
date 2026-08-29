@@ -93,12 +93,12 @@ nonisolated final class AudioCaptureActivityMonitor: AudioSampleConsuming {
         publish(activity: .none)
     }
 
-    func consume(_ sample: CapturedAudioSample) {
+    func consume(_ buffer: CapturedPCMBuffer) {
         record { activity in
             activity.sampleCount += 1
-            activity.frameCount += sample.frameCount
-            activity.format = sample.format
-            activity.peakAmplitude = sample.peakAmplitude
+            activity.frameCount += buffer.frameCount
+            activity.format = buffer.format
+            activity.peakAmplitude = buffer.peakAmplitude
         }
     }
 
