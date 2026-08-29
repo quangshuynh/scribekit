@@ -5,180 +5,223 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 4 — selected-application audio capture. Complete.
+Interval 5 — live on-device transcription. Complete.
 
 ## Current implementation
 
 - Domain value types in `ScribeKit/Models/`: `MeetingState`,
-  `AudioRetentionMode`, `CaptureSource`, `MeetingSession`, unchanged apart from
-  being declared `nonisolated`, since the project defaults to main-actor
-  isolation and value types have no reason to be bound to it.
-- `ScribeKit/Capture/`: discovery unchanged from Interval 2
-  (`CaptureSourceProviding`, `DiscoveredApplication`, `CaptureSourceCatalog`,
-  `ScreenCaptureKitSourceProvider`). Capture added: `AudioCapturing` with
-  `AudioCaptureError`, `AudioCaptureConfiguration`, `AudioSampleConsuming`,
-  `CapturedAudioSample` / `CapturedAudioFormat`, `CaptureSourceReconciliation`
-  (pure identity matching), `AudioCaptureActivityMonitor` with
-  `AudioCaptureActivity`, `CapturedAudioSampleAdapter` (the only reader of
-  `CMSampleBuffer`), and `ScreenCaptureKitAudioCapturer`, an actor owning the
-  `SCStream`.
-- `ScribeKit/Persistence/`: `SaveLocationPersisting` (save/restore/clear) with
-  `SaveLocationError`; `SecurityScopedSaveLocationStore`, the only type that
-  handles bookmark data; `SecurityScopedAccess`, which scopes
-  start/stopAccessingSecurityScopedResource around a piece of work;
-  `MeetingSetupPreferencesStoring` with a `UserDefaults` implementation;
-  `SessionDirectoryName` (pure naming policy) and `SessionArtifactLayout` (pure
-  URL arithmetic).
-- `ScribeKit/Models/`: `AudioCaptureState` (idle / preparing / capturing /
-  stopping / failed) is the capture subsystem's lifecycle, separate from
-  `MeetingState`, which covers a whole session.
-- `ScribeKit/Features/MeetingSetup/`: `MeetingSetupDestinationModel` owns the
-  save-location state; `MeetingSetupSourcesModel` additionally seeds its
-  selection from remembered bundle identifiers; `MeetingSetupCaptureModel` owns
-  capture state and the coalesced activity summary; `MeetingSetupView` renders
-  the folder, its warnings, Choose / Forget, and Start / Stop Capture, and keeps
-  Start Meeting disabled.
-- `ScribeKit.entitlements` adds `com.apple.security.files.bookmarks.app-scope`;
-  the target keeps `ENABLE_APP_SANDBOX` and now grants read-write access to
-  user-selected files.
-- `ScribeKitTests/`: Swift Testing suites (100 tests, 15 suites).
+  `AudioRetentionMode`, `CaptureSource`, `MeetingSession`, `AudioCaptureState`,
+  and new for this interval `TranscriptSegment` (with a `RecognitionState` of
+  partial or final), `TranscriptionEvent` / `TranscriptionInterruption`,
+  `TranscriptionState` and `SpeechRecognitionAvailability`.
+- `ScribeKit/Capture/`: discovery unchanged. `CapturedAudioSample` is now
+  `CapturedPCMBuffer` and carries the frames; `CapturedAudioSampleAdapter` is
+  now `CapturedPCMBufferAdapter`. `AudioSampleConsuming` takes a
+  `CapturedPCMBuffer`, and `BroadcastingAudioSampleConsumer` fans one capture
+  stream out to several consumers. `ScreenCaptureKitAudioCapturer` is
+  otherwise unchanged.
+- `ScribeKit/Transcription/`: `SpeechTranscribing` with `TranscriptionError`,
+  `TranscriptionConfiguration` / `TranscriptionLocale`, `BoundedAudioQueue`
+  (generic, fixed-capacity, an `AsyncSequence`), `SpeechAudioConverter`,
+  `TranscriptionAudioInput` (conversion, run-relative timing and the bounded
+  backlog) and `AppleSpeechTranscriber`, an actor owning the `SpeechAnalyzer`.
+- `ScribeKit/Features/MeetingSetup/`: `LiveTranscriptModel` owns the finalised
+  segments and the single partial hypothesis; `MeetingSetupCaptureModel` is now
+  the pipeline coordinator, owning capture, recognition, locale, availability
+  and the ordering between them; `MeetingSetupView` adds a Capture &
+  Transcription section and a lazily rendered Live Transcript section, and
+  keeps Start Meeting disabled.
+- `ScribeKitTests/`: Swift Testing suites (170 tests, 24 suites).
 
-No transcription, transcript writing, recovery or background behaviour exists.
-Captured audio is described and discarded. Nothing is written to the chosen
-folder, and no Speech framework code exists.
+No transcript writing, autosave, recovery or background behaviour exists.
+Nothing is written to the chosen folder, and no audio or transcript file is
+created anywhere.
 
-## Capture architecture
+## Speech API decision
 
-Selected `CaptureSource` values → `AudioCaptureConfiguration` →
-`ScreenCaptureKitAudioCapturer` → `SCStream` audio output →
-`CapturedAudioSampleAdapter` → `AudioSampleConsuming` →
-`AudioCaptureActivityMonitor` → coalesced snapshots →
-`MeetingSetupCaptureModel` on the main actor.
+`SpeechAnalyzer` with a `SpeechTranscriber` module, from the Speech framework.
 
-Buffers are adapted and consumed on a dedicated serial `userInitiated` queue
-and are never retained past the callback; the main actor sees only summaries,
-published at most twice a second. There is no queue, ring buffer or backlog
-between capture and its consumer, so nothing can grow with meeting length.
-Unreadable buffers are counted rather than dropped silently.
+- The deployment target is macOS 26.5 and these types are available from
+  macOS 26.0, so nothing was raised to reach them. `SFSpeechRecognizer` was
+  rejected: it is the older API and has a server-backed path, which this
+  project must not have.
+- It streams: the analyzer consumes an `AsyncSequence<AnalyzerInput>` and
+  publishes results as they settle.
+- It is on-device by construction. Recognition runs against a model in
+  `SpeechTranscriber.installedLocales`; there is no network mode to fall back
+  to and no flag that would enable one.
+- It supports contextual hints through `AnalysisContext.contextualStrings`,
+  which `TranscriptionConfiguration.contextualStrings` is wired to. ScribeKit
+  ships none, so recognition output is the recogniser's own.
+- It needs no permission. Verified live: transcription ran with
+  `SFSpeechRecognizer.authorizationStatus()` at `notDetermined`, with no
+  prompt, inside the sandboxed app. No Info.plist usage description was added,
+  because none is required and asking for one ScribeKit does not need would be
+  worse than asking for nothing.
 
-## Established decisions
+## Local recognition guarantee
 
-- Interval 1 and 2 decisions still hold.
-- The save location is stored as a security-scoped bookmark in `UserDefaults`.
-  Restoration validates the directory with access held and releases it again;
-  stale bookmark data is renewed in place. A missing, inaccessible or malformed
-  entry is reported to the user — ScribeKit never substitutes a folder of its
-  own.
-- Security-scoped access is acquired per piece of work. Nothing owns a
-  session-length lease yet; the type writing transcripts will hold its own.
-- Save-location state is one enum (`none` / `available` with an origin /
-  `unavailable` / `persistenceFailed`), so "remembered but broken" and "usable
-  but not remembered" stay distinct.
-- Persisted setup configuration is limited to the audio retention mode and the
-  selected bundle identifiers. Remembered identifiers are preferences: they are
-  matched against fresh discovery, never assumed to be running, and are
-  rewritten only when the user changes the selection, so an application that is
-  merely closed today stays remembered. Meeting titles are per-session and the
-  title is not remembered. No PIDs or runtime state are persisted.
-- Session directory names are `yyyy-MM-dd-title-slug`, from the Gregorian
-  calendar and fixed digits, with diacritics folded, non-alphanumerics turned
-  into hyphens, a 60-character limit on a word boundary and an
-  `untitled-meeting` fallback. Collision handling is a predicate, so the policy
-  is tested without touching disk.
-- `SessionArtifactLayout` fixes the future layout (`transcript.md` beside a
-  hidden `.scribekit/session.json`, optional `audio.caf` / `audio.m4a`) without
-  creating anything.
+Four independent things hold it up:
 
-## Capture behaviour
+1. `AppleSpeechTranscriber` refuses to start unless the chosen locale's model
+   is in `installedLocales`; otherwise it reports `.modelNotInstalled` and
+   nothing starts.
+2. Model assets are never downloaded. `AssetInventory.assetInstallationRequest`
+   exists and is deliberately not called; it returned a non-nil request even
+   for an already-installed locale, so it is not a reliable readiness signal
+   either. `AssetInventory.status` was `.supported` for a locale that
+   `installedLocales` listed, so `installedLocales` is the gate.
+3. `SFSpeechRecognizer` is not referenced anywhere in the app target.
+4. The app carries no `com.apple.security.network.client` entitlement, so the
+   sandbox does not permit it to open a socket. Verified live: `lsof -a -p
+   <pid> -i` listed nothing while transcribing.
 
-- The filter is `SCContentFilter(display:including:exceptingWindows:)` over the
-  first display, because ScreenCaptureKit has no audio-only filter. No screen
-  output is added, `capturesAudio` is on, `excludesCurrentProcessAudio` is on,
-  `captureMicrophone` is off, and the video side is 2×2 at 1 fps with a queue
-  depth of 3 — the smallest valid configuration, never read.
-- 48 kHz is requested because it is ScreenCaptureKit's own default, so nothing
-  is resampled; one channel is requested because speech is monaural.
-- Observed delivered format, live: 48 000 Hz, 1 channel, 32-bit float,
-  non-interleaved, in 960-frame (20 ms) buffers. The requested channel count was
-  honoured.
-- Start while capturing throws `alreadyCapturing`. Stop while idle is a no-op.
-  Capture can be started again after a stop, and after a failure.
-- A selected application that is not running at start fails the start with
-  `sourcesUnavailable`, naming it; ScribeKit never captures a smaller set than
-  was chosen.
-- A captured application that quits mid-capture leaves the stream running and
-  silent, verified live. ScribeKit does not poll for liveness and does not
-  substitute another source; the next start reports it as unavailable.
-- A stream the system stops by itself arrives as an interruption and moves
-  capture to `failed` with the system's reason preserved.
+## Audio format
+
+- ScreenCaptureKit delivers 48 000 Hz, 1 channel, float32, non-interleaved, in
+  960-frame (20 ms) buffers, unchanged from Interval 4.
+- The recogniser's `availableCompatibleAudioFormats` is exactly two entries:
+  16 000 Hz and 8 000 Hz, 1 channel, Int16, interleaved.
+  `SpeechAnalyzer.bestAvailableAudioFormat` returns 16 kHz Int16 even when a
+  48 kHz float format is offered as the natural one. Conversion is therefore
+  required, not chosen.
+- One `AVAudioConverter` is built per run and reused; it is rebuilt only if the
+  capture format changes. Conversion happens on ScreenCaptureKit's serial
+  delivery queue, never on the main actor. The 48 kHz to 16 kHz ratio is exact,
+  so 960 frames in gives 320 out after the resampler primes on the first
+  buffer.
+
+## PCM ownership
+
+`CapturedPCMBuffer` holds one buffer's frames as `[Float]`, copied out of the
+`CMSampleBuffer` while its callback is on the stack, because that memory is not
+valid afterwards. It is the smallest copy that makes safe asynchronous
+ownership possible: 960 floats, under 4 KB, released as soon as its consumers
+have run. The peak level is measured with vDSP in the same pass, so the frames
+are read once. No `CMSampleBuffer` is retained past its callback, and no PCM is
+accumulated anywhere.
+
+## Backpressure policy
+
+`TranscriptionAudioInput` converts each buffer on the delivery queue and
+appends it to a `BoundedAudioQueue` of 150 converted buffers — about three
+seconds, roughly 96 KB — which the analyzer drains as an `AsyncSequence`.
+Appending never waits.
+
+When the queue is full the **oldest** buffer is evicted, so recognition stays
+as close to live as the backlog allows and what is lost is audio it had already
+fallen behind on. Each converted buffer carries the time of its first frame
+counted from the first frame of the run, so an eviction leaves a real gap in
+the timeline rather than sliding everything after it forward. Lost time is
+accumulated and reported as `.interrupted(.audioDropped)` once it reaches half
+a second, and the remainder is flushed at stop, so a badly behind recogniser
+produces a readable statement rather than one event per buffer. The interface
+states the total as untranscribed seconds.
+
+## Partial and final semantics
+
+The recogniser reports a volatile hypothesis for the span being spoken and,
+when it settles, a finalised span covering it. Observed live: ten partials
+growing word by word, then one final for the sentence. `LiveTranscriptModel`
+therefore keeps finalised segments in an array and the partial as a single
+value that each new partial replaces, so five hypotheses leave one entry.
+Recognised text is stored exactly as returned; only display trims the space
+that joins one span to the previous one.
+
+## Interruption and recovery
+
+- A recogniser that stops by itself surfaces as
+  `.interrupted(.recognitionFailed)`. The coordinator restarts it at most twice
+  while capture continues, and records the time it was down as untranscribed.
+  Beyond that the run is reported as failed rather than retried forever. This
+  path is unit tested; it has not been observed live, because the recogniser
+  did not fail.
+- A capture stream that stops by itself moves capture to `failed` and stops
+  recognition, which has nothing left to transcribe.
+- Stopping stops capture first, then finalises recognition, so the last
+  sentence is not lost and no audio arrives after the input closes.
+- A run that accepted no audio at all never ends its results sequence — proved
+  with a standalone harness. The wait for it is bounded at two seconds and the
+  task is then cancelled, so a stop can never hang. A cancelled results task is
+  not reported as a recogniser failure.
+
+## Locale behaviour
+
+`TranscriptionConfiguration.localeIdentifier` is explicit and BCP-47. The
+screen offers every locale `SpeechTranscriber.supportedLocales` reports, marks
+the ones whose model is not installed, and disables the picker during a run.
+The default is the system locale when the recogniser supports it, otherwise the
+first installed locale. Nothing detects or switches language on its own.
+
+This Mac: 30 supported locales, 9 installed (all `en-*`).
 
 ## Validation status
 
-`xcodebuild ... clean test` passes on Xcode 26.6 (100 tests, 15 suites) with no
-compiler warnings.
+`xcodebuild ... test` passes on Xcode 26.6: **170 tests in 24 suites**, no
+compiler warnings. The `AppleSpeechTranscriber` suite starts and stops the real
+recogniser twice, which is where its 4.2 s comes from — two bounded drains of a
+run that received no audio.
 
-Live capture was validated twice: through a throwaway command-line harness
-compiled from the same capture sources, and through the sandboxed app itself,
-driven via accessibility. A purpose-built 440 Hz tone application (amplitude
-0.05, outside the repository) was the audio source.
+Live validation used a purpose-built looping player application (outside the
+repository) speaking seven sentences about Swift closures, captured as the only
+selected source.
 
-- Capturing the tone application: ~50 buffers/second, peak 0.0500, 48 kHz mono
-  float32 non-interleaved.
-- Capturing a different running application while the tone played: 8.5 s,
-  peak 0.0000 — the selected-application filter did not admit the other
-  application's audio.
-- In the app: start → "Capturing 1 application(s)" with a rising buffer
-  count; stop → counters freeze and the state returns to idle; start again →
-  a fresh capture from zero; Start Meeting stayed disabled throughout.
-- Minimising the captured application's window did not interrupt capture.
-- Killing the captured application mid-capture left the stream delivering
-  silence, and the next start failed with the application named.
-- One run out of roughly ten was stopped by the system 0.2 s in with
-  "Failed to find any displays or windows to capture". It was surfaced as an
-  interruption and torn down cleanly; it has not been reproduced, and the
-  window-minimising and process-quitting tests above did not cause it.
+- Capture: 48 000 Hz mono float32 non-interleaved, ~50 buffers/second,
+  peak 37–44%, unchanged from Interval 4.
+- Recognition started with no permission prompt and reported "Transcribing on
+  device".
+- The transcript filled with one finalised entry per sentence, each with its
+  offset from the start of the run, and one italic partial below them. Over
+  ~2 minutes no partial hypothesis became an entry.
+- Recognition is honest about what it heard: "async and await" came back as
+  "asking and await" and was left alone. ScribeKit does not correct it.
+- Stop froze the counters and returned both subsystems to idle; a second start
+  produced a fresh transcript on a fresh timeline from 00:00.
+- `lsof -a -p <pid> -i` listed no sockets while transcribing, and no regular
+  file was open for writing. The app's container held no `.md`, `.caf`, `.m4a`
+  or `session.json` afterwards.
+- A ~15 minute continuous run, of which 9.5 minutes were sampled every 15 s
+  with `top`: resident memory moved between 47 MB and 56 MB in a sawtooth, with
+  no upward trend, and CPU held at 13–15% for capture, resampling and
+  recognition together. Recognition kept up throughout; no audio was dropped,
+  so the backpressure path was not exercised live and is covered by tests
+  instead. The interface stayed responsive with the transcript at several
+  hundred segments.
 
-Permission failure was not reproduced: revoking screen recording permission on
-this machine would have disturbed the developer's own environment. The
-permission path is unit tested through the abstraction, and the discovery path
-already reports the same condition.
+### Interval 2, 3 and 4 checks, still current
 
-### Interval 3 checks, still current
-
-The signed app carries `com.apple.security.app-sandbox`,
-`com.apple.security.files.bookmarks.app-scope` and
-`com.apple.security.files.user-selected.read-write`.
-
-The app was launched with a deliberately invalid bookmark stored: the setup
-screen showed "No folder selected" with the explanation that the saved folder
-could not be found, offered Choose Folder… and Forget Folder, listed running
-applications, restored the remembered application selection, and kept Start
-Meeting disabled. Choosing a folder in the open panel and confirming that it
-returns after a relaunch needs a human click and has not been automated here.
+Source discovery, multi-source selection, save-location restoration and
+selected-application audio capture all still behave as recorded for those
+intervals; the capture observations above were taken through the same path.
 
 ## Known limitations
 
-- Interval 2 limitations still hold (Screen Recording permission, windowless
-  applications, manual refresh).
-- Captured audio is described, not carried: `CapturedAudioSample` holds format,
-  frame count, timing and peak level, never the samples. A transcription
-  consumer will need the boundary extended.
-- The captured set is fixed at start; changing the selection mid-capture has no
-  effect until capture is restarted.
-- Capture is stopped when the setup window disappears; there is no session that
-  survives it, because sessions do not exist yet.
-- Creating and resolving real security-scoped bookmarks needs a folder picked in
-  an open panel, so that boundary is covered by running the app rather than by
-  unit tests; absent, malformed and unresolvable stored data are unit tested.
-- A moved folder is only followed when macOS reports the bookmark as stale. A
-  deleted folder, or one on a disconnected disk, must be chosen again.
-- The folder is remembered but never written to; no session directory is
-  created yet.
+- Interval 2, 3 and 4 limitations still hold.
+- The transcript lives in memory for the length of a run and is lost when the
+  run ends. Nothing is written to the chosen folder.
+- Recognition needs an installed on-device model. Uninstalled locales are
+  listed and disabled, and ScribeKit will not install one.
+- Untranscribed time is reported as a single total, not as positions in the
+  transcript, so a run with several gaps says how much was lost but not where.
+- Bounded recovery from a recogniser failure is unit tested only; no live
+  recogniser failure was reproduced.
+- Confidence is not requested. `SpeechTranscriber` can attach a
+  `transcriptionConfidence` attribute; it is left off until there is a review
+  interface that would use it, rather than surfacing a number with nowhere to
+  go.
+- Stopping waits up to two seconds when the recogniser's results sequence does
+  not end on its own, which happens when a run received no audio at all.
+- Memory and CPU were observed, not benchmarked; formal energy measurement is
+  a later interval.
+- Dropping audio under backpressure has never happened on this machine, so the
+  policy is proved by unit tests rather than by a live overload.
 
 ## Next interval
 
-Interval 5: on-device transcription of the captured audio. It needs the sample
-adapter extended to carry PCM to a recogniser instead of only describing it,
-a transcription boundary alongside `AudioSampleConsuming`, and a decision about
-whether the recogniser consumes 48 kHz mono float32 directly. Transcript
-writing, autosave and recovery stay out of it.
+Interval 6: timestamped Markdown persistence. `TranscriptSegment` already
+carries the run-relative timing and the partial/final distinction it needs, and
+`LiveTranscriptModel` already knows the run's start date, so wall-clock
+timestamps are that date plus the segment offset. It needs a writer holding a
+session-length security-scoped lease on the chosen folder, `SessionDirectoryName`
+and `SessionArtifactLayout` finally used to create a directory, batched
+autosave, and a decision about how untranscribed gaps appear in the file.

@@ -19,7 +19,7 @@ private nonisolated let captureSubsystem = Bundle.main.bundleIdentifier ?? "Scri
 /// selection against the applications running now, building the filter and
 /// configuration, the `SCStream` itself, and the order of start and stop.
 /// ScreenCaptureKit types stop here — callers pass ``AudioCaptureConfiguration``
-/// and receive ``CapturedAudioSample`` values and ``AudioCaptureError`` events.
+/// and receive ``CapturedPCMBuffer`` values and ``AudioCaptureError`` events.
 ///
 /// Audio buffers never reach the actor. They are delivered on a dedicated
 /// queue straight to the consumer, so the delivery rate is never coupled to
@@ -292,11 +292,11 @@ private nonisolated final class StreamOutput: NSObject, SCStreamOutput, SCStream
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, isActive.withLock({ $0 }) else { return }
-        guard let sample = CapturedAudioSampleAdapter.sample(from: sampleBuffer) else {
+        guard let buffer = CapturedPCMBufferAdapter.buffer(from: sampleBuffer) else {
             consumer.recordUnreadableSample()
             return
         }
-        consumer.consume(sample)
+        consumer.consume(buffer)
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
