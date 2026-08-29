@@ -754,4 +754,56 @@ struct MeetingSetupCaptureModelTests {
         #expect(persistence.entries.filter { if case .started = $0 { true } else { false } }.count == 2)
         #expect(persistence.entries.filter { $0 == .finished(.completed) }.count == 1)
     }
+
+    // MARK: - Session record
+
+    @Test("A meeting with nowhere to record its session never reaches capture")
+    func aMeetingWithoutASessionRecordDoesNotStart() async {
+        let (model, capturer, transcriber, persistence) = await makeMeeting()
+        persistence.failStart(with: TranscriptPersistenceError(.recoveryMetadataFailed))
+
+        await model.start(request([meet]))
+
+        #expect(model.persistenceState.failureMessage != nil)
+        #expect(model.captureState == .idle)
+        #expect(model.transcriptionState == .idle)
+        #expect(capturer.startCount == 0)
+        #expect(transcriber.startCount == 0)
+        #expect(!persistence.isOpen)
+    }
+
+    @Test("A meeting ended by a save failure is closed as failed, not as completed")
+    func aSaveFailureClosesTheSessionAsFailed() async {
+        let (model, _, transcriber, persistence) = await makeMeeting()
+        await model.start(request([meet]))
+        persistence.failAppends(with: TranscriptPersistenceError(.writeFailed))
+
+        transcriber.emit(.final(segment("This will not reach the file.")))
+
+        #expect(await wait { !persistence.isOpen })
+        #expect(persistence.outcomes == [.failed])
+    }
+
+    @Test("A meeting stopped by the user is closed as completed")
+    func aNormalStopClosesTheSessionAsCompleted() async {
+        let (model, _, transcriber, persistence) = await makeMeeting()
+        await model.start(request([meet]))
+        transcriber.emit(.final(segment("Saved.")))
+        #expect(await wait { persistence.segments.count == 1 })
+
+        await model.stop()
+
+        #expect(persistence.outcomes == [.completed])
+    }
+
+    @Test("Capture failing by itself still closes the session as completed, because the transcript did finish")
+    func aCaptureFailureStillClosesCleanly() async {
+        let (model, capturer, _, persistence) = await makeMeeting()
+        await model.start(request([meet]))
+
+        capturer.interrupt(.interrupted("The stream was stopped by the user"))
+
+        #expect(await wait { !persistence.isOpen })
+        #expect(persistence.outcomes == [.completed])
+    }
 }
