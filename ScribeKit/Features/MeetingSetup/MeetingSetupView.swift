@@ -3,24 +3,17 @@
 //  ScribeKit
 //
 
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
 /// The configuration screen shown before a meeting starts.
 ///
 /// The screen collects the settings a session needs — title, audio sources,
-/// audio retention and save location — and can capture and transcribe the
-/// selected applications live. Starting a *meeting* would imply a written
-/// transcript, which is not implemented, so that control stays deliberately
-/// unavailable rather than simulated.
+/// audio retention and save location — and runs the meeting itself: capture,
+/// on-device recognition and a timestamped Markdown transcript written to the
+/// chosen folder while the meeting is under way.
 struct MeetingSetupView: View {
-    /// Whether a meeting can be started.
-    ///
-    /// Fixed to `false` until transcript writing exists. Live capture and
-    /// transcription are offered under their own control, so nothing here
-    /// claims a session that ScribeKit cannot yet complete.
-    private static let isStartAvailable = false
-
     @State private var sources: MeetingSetupSourcesModel
     @State private var destination: MeetingSetupDestinationModel
     @State private var capture = MeetingSetupCaptureModel()
@@ -59,6 +52,7 @@ struct MeetingSetupView: View {
                 sourcesSection
                 captureSection
                 transcriptSection
+                transcriptFileSection
                 audioRetentionSection
                 destinationSection
             }
@@ -211,20 +205,6 @@ struct MeetingSetupView: View {
 
             localePicker
 
-            HStack {
-                Button("Start Transcribing") {
-                    Task { await capture.start(sources: sources.selectedSources) }
-                }
-                .disabled(!capture.canStart(sources: sources.selectedSources))
-                .accessibilityHint("Capture and transcribe audio from the selected applications")
-
-                Button("Stop") {
-                    Task { await capture.stop() }
-                }
-                .disabled(!capture.canStop)
-                .accessibilityHint("Stop capturing and transcribing")
-            }
-
             if let activity = captureActivityDescription {
                 Text(activity)
                     .font(.footnote.monospacedDigit())
@@ -233,9 +213,76 @@ struct MeetingSetupView: View {
             }
 
             Text("Speech is recognised on this Mac, using an installed language model. "
-                 + "No audio leaves your machine, and nothing is written to disk.")
+                 + "No audio leaves your machine, and no audio file is written.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Where finalised speech is being written, and whether it still is.
+    ///
+    /// One status line, no per-segment feedback: the transcript is either
+    /// being saved to a named file or it is not, and the second case is the
+    /// only one worth an alarm.
+    private var transcriptFileSection: some View {
+        Section("Transcript File") {
+            LabeledContent("Status") {
+                Text(persistenceStatusDescription)
+                    .foregroundStyle(capture.persistenceState == .idle ? .secondary : .primary)
+            }
+            .accessibilityLabel("Transcript file status")
+            .accessibilityValue(persistenceStatusDescription)
+
+            if let layout = capture.persistenceState.layout {
+                LabeledContent("File") {
+                    Text(layout.transcriptURL.path(percentEncoded: false))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .accessibilityLabel("Transcript file")
+                .accessibilityValue(layout.transcriptURL.path(percentEncoded: false))
+
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([layout.transcriptURL])
+                }
+                .accessibilityHint("Reveal the transcript in the Finder")
+            }
+
+            if let message = capture.persistenceState.failureMessage {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+
+            Text("The transcript is Markdown and is written as speech is finalised, "
+                 + "so it stays readable in any editor while the meeting runs.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// What the meeting would start with, or `nil` when it could not start.
+    private var startRequest: MeetingStartRequest? {
+        guard let url = destination.url else { return nil }
+        return MeetingStartRequest(
+            title: title,
+            sources: sources.selectedSources,
+            destination: url,
+            audioRetention: audioRetention
+        )
+    }
+
+    /// A short description of what the durable transcript is doing.
+    private var persistenceStatusDescription: String {
+        switch capture.persistenceState {
+        case .idle: destination.url == nil
+            ? "No transcript. Choose a save folder first."
+            : "No transcript yet. Start a meeting to write one."
+        case .preparing: "Creating the meeting folder…"
+        case .saving: "Saving finalised speech as it is recognised."
+        case .saved: "Saved and closed."
+        case .failed: "Not being saved."
         }
     }
 
@@ -367,8 +414,8 @@ struct MeetingSetupView: View {
                 .foregroundStyle(.secondary)
             }
 
-            Text("Text in grey is a live guess and is replaced as you speak. "
-                 + "The transcript is not saved anywhere yet.")
+            Text("Text in grey is a live guess, is replaced as you speak and is never saved. "
+                 + "Only finalised speech is written to the transcript.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -446,8 +493,8 @@ struct MeetingSetupView: View {
             }
 
             Text(destination.isRestored
-                 ? "Restored from your last launch. Nothing is written there yet; transcript files arrive in a later release."
-                 : "Nothing is written there yet; transcript files arrive in a later release.")
+                 ? "Restored from your last launch. Each meeting is written to its own dated folder here."
+                 : "Each meeting is written to its own dated folder here.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -455,15 +502,42 @@ struct MeetingSetupView: View {
 
     private var footer: some View {
         HStack {
-            Text("Transcripts are not written to disk yet.")
+            Text(meetingStatusDescription)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("Start Meeting") {}
-                .keyboardShortcut(.defaultAction)
-                .disabled(!Self.isStartAvailable)
-                .help("Starting a meeting is not available yet.")
+            Button("Stop") {
+                Task { await capture.stop() }
+            }
+            .disabled(!capture.canStop)
+            .accessibilityHint("Stop capturing, finish the transcript and close it")
+
+            Button("Start Meeting") {
+                guard let request = startRequest else { return }
+                Task { await capture.start(request) }
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(!capture.canStart(startRequest))
+            .help(startHelp)
         }
+    }
+
+    /// One sentence describing the meeting as a whole, derived from the
+    /// subsystems rather than tracked separately.
+    private var meetingStatusDescription: String {
+        if let message = capture.persistenceState.failureMessage { return message }
+        if capture.isRunning { return "Meeting in progress. Speech is transcribed and saved as it is finalised." }
+        if case .saved = capture.persistenceState { return "Meeting finished. The transcript is saved and closed." }
+        return "Choose applications and a save folder, then start the meeting."
+    }
+
+    /// Why the start control is unavailable, when it is.
+    private var startHelp: String {
+        if capture.isRunning { return "A meeting is already running." }
+        if destination.url == nil { return "Choose a save folder for the transcript first." }
+        if sources.selectedSources.isEmpty { return "Select at least one application to capture." }
+        if !capture.availability.canTranscribe { return "On-device speech recognition is unavailable." }
+        return "Capture the selected applications and write a timestamped Markdown transcript."
     }
 }
 

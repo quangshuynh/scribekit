@@ -54,7 +54,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
 
     nonisolated let events: AsyncStream<TranscriptionEvent>
 
-    private nonisolated let eventContinuation: AsyncStream<TranscriptionEvent>.Continuation
+    private nonisolated let publisher: TranscriptionEventPublisher
     private nonisolated let logger = Logger(subsystem: transcriptionSubsystem, category: "Transcription")
     private nonisolated let backlogCapacity: Int
 
@@ -81,19 +81,23 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         self.backlogCapacity = backlogCapacity
         var continuation: AsyncStream<TranscriptionEvent>.Continuation!
         events = AsyncStream(bufferingPolicy: .bufferingNewest(64)) { continuation = $0 }
-        eventContinuation = continuation
+        publisher = TranscriptionEventPublisher(continuation: continuation)
     }
 
     deinit {
-        eventContinuation.finish()
+        publisher.finish()
     }
+
+    nonisolated var eventTally: TranscriptionEventTally { publisher.tally }
 
     // MARK: - Audio
 
     nonisolated func consume(_ buffer: CapturedPCMBuffer) {
         guard let input = input.withLock({ $0 }) else { return }
         if let dropped = input.append(buffer) {
-            eventContinuation.yield(.interrupted(.audioDropped(seconds: dropped)))
+            publisher.publish(.interrupted(
+                .audioDropped(seconds: dropped.seconds, startTime: dropped.startTime)
+            ))
         }
     }
 
@@ -190,7 +194,9 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         input.withLock { $0 = nil }
 
         if let dropped = run.input.takeUnreportedDrop() {
-            eventContinuation.yield(.interrupted(.audioDropped(seconds: dropped)))
+            publisher.publish(.interrupted(
+                .audioDropped(seconds: dropped.seconds, startTime: dropped.startTime)
+            ))
         }
         run.input.close()
 
@@ -235,7 +241,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         for module: SpeechTranscriber,
         localeIdentifier: String
     ) -> Task<Void, Never> {
-        let continuation = eventContinuation
+        let publisher = publisher
         let logger = logger
         return Task.detached(priority: .userInitiated) {
             do {
@@ -247,14 +253,14 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
                         state: result.isFinal ? .final : .partial,
                         localeIdentifier: localeIdentifier
                     )
-                    continuation.yield(result.isFinal ? .final(segment) : .partial(segment))
+                    publisher.publish(result.isFinal ? .final(segment) : .partial(segment))
                 }
             } catch {
                 // A cancelled task is a stop that has already been decided, not
                 // a recogniser that failed, so it is not reported as one.
                 guard !Task.isCancelled else { return }
                 logger.error("Recognition interrupted: \(error.localizedDescription, privacy: .public)")
-                continuation.yield(.interrupted(.recognitionFailed(message: error.localizedDescription)))
+                publisher.publish(.interrupted(.recognitionFailed(message: error.localizedDescription)))
             }
         }
     }
