@@ -22,7 +22,7 @@ enum AudioRetentionMode: String, Codable, Sendable, CaseIterable, Hashable, Iden
     var id: String { rawValue }
 
     /// The mode used when the user has not chosen one.
-    static let `default`: AudioRetentionMode = .none
+    nonisolated static let `default`: AudioRetentionMode = .none
 
     /// A short, user-facing label suitable for menus and pickers.
     var displayName: String {
