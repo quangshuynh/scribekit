@@ -5,7 +5,7 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 6 — durable Markdown transcript persistence. Complete.
+Interval 7 — crash and session recovery. Complete.
 
 ## Current implementation
 
@@ -26,24 +26,29 @@ Interval 6 — durable Markdown transcript persistence. Complete.
   dropped audio fell), `AppleSpeechTranscriber`,
   `TranscriptionEventPublisher` / `TranscriptionEventTally`, and
   `SpeechAvailabilityProviding` / `SystemSpeechAvailability`.
-- `ScribeKit/Persistence/`: save-location storage unchanged. New for this
-  interval, `TranscriptPersisting` (the whole boundary between a meeting and
-  the filesystem) with `TranscriptPersistenceError`;
+- `ScribeKit/Persistence/`: `TranscriptPersisting` (the whole boundary between
+  a meeting and the filesystem) with `TranscriptPersistenceError`;
   `TranscriptMarkdownFormatter` (pure string rendering, no I/O);
   `TranscriptFileStoring` / `TranscriptFileAppending` with a
   `FileManager`/`FileHandle` implementation; `MarkdownTranscriptStore`, the
-  actor that owns one session; and `SecurityScopedLease` with
-  `SecurityScopedResourceAccessing`. `SessionDirectoryName` and
-  `SessionArtifactLayout` are finally used rather than only tested.
+  actor that owns one session; `SecurityScopedLease` with
+  `SecurityScopedResourceAccessing`; `SessionDirectoryName` and
+  `SessionArtifactLayout`. New for this interval, `SessionRecoveryMetadata`
+  with `SessionRecoveryStatus` and `SessionCompletionOutcome`;
+  `SessionRecoveryStoring` / `TranscriptFileInfo` / `SessionRecoveryError` with
+  a `FileManager` implementation; and `SessionRecoveryService` with
+  `SessionRecoveryCandidate`, `SessionRecoveryProblem` and
+  `SessionRecoveryReport`.
 - `ScribeKit/Features/MeetingSetup/`: `LiveTranscriptModel` unchanged;
-  `MeetingSetupCaptureModel` now coordinates capture, recognition and durable
-  persistence and takes a `MeetingStartRequest`; `MeetingSetupView` has a real
-  Start Meeting control, an explicit Stop, a Transcript File section and a Show
-  in Finder control.
-- `ScribeKitTests/`: Swift Testing suites (232 tests, 27 suites).
+  `MeetingSetupCaptureModel` coordinates capture, recognition and durable
+  persistence and takes a `MeetingStartRequest`; `SessionRecoveryModel` is new
+  and owns the recovery section's state; `MeetingSetupView` has a Start Meeting
+  control, an explicit Stop, a Transcript File section, a Show in Finder
+  control and a Previous Meetings section.
+- `ScribeKitTests/`: Swift Testing suites (303 tests, 31 suites).
 
-No recovery, background behaviour or audio retention exists. No audio file and
-no session metadata file are written.
+No background behaviour, menu bar presence or audio retention exists. No audio
+file is written.
 
 ## Speech API decision
 
@@ -141,7 +146,7 @@ value that each new partial replaces, so five hypotheses leave one entry.
 Recognised text is stored exactly as returned; only display trims the space
 that joins one span to the previous one.
 
-## Interruption and recovery
+## Runtime interruption and recovery
 
 - A recogniser that stops by itself surfaces as
   `.interrupted(.recognitionFailed)`. The coordinator restarts it at most twice
@@ -197,14 +202,15 @@ double can fail on demand.
 <chosen save folder>/
   2026-08-29-closures-walkthrough/
     transcript.md
+    .scribekit/
+      session.json
 ```
 
 The directory name comes from `SessionDirectoryName` (date prefix plus title
 slug, numeric suffix on collision) and the paths from `SessionArtifactLayout`.
-`transcript.md` is the only file created. `.scribekit/session.json` is named by
-the layout and deliberately not written: nothing reads it yet, and a file with
-no reader is failure modes without benefit. The transcript header already
-carries what a person needs, and `transcript.md` stays canonical either way.
+`transcript.md` and `.scribekit/session.json` are the only files created. The
+transcript is the user's document; the record is ScribeKit's bookkeeping, and
+losing or failing to parse it never makes the transcript unusable.
 
 ## Security-scoped access lifetime
 
@@ -293,9 +299,165 @@ the writer, releases the folder and stops capture and recognition, so ScribeKit
 never keeps recognising into a transcript it is no longer saving. A failure is
 never overwritten by a later claim that the transcript was saved.
 
+## Session record
+
+`.scribekit/session.json`, one per session directory, schema version 1. It is
+operational bookkeeping, not a second transcript: no segment text, no audio, no
+runtime object. Fields are `schemaVersion`, `sessionID`, `title`, `startedAt`,
+`sourceNames`, `localeIdentifier`, `transcriptPath`, `status`, `endedAt` and
+`interruptedAt`. Encoded with sorted keys, indented and ISO-8601 dates, so the
+file is legible to a person working out what happened and its bytes are stable
+between writes. A real one is about 300 bytes.
+
+There is no last-checkpoint field. "When did this last save something" is
+answered by the transcript's own modification date, which is measured rather
+than asserted, and which costs no writes to keep true.
+
+`schemaVersion` is read on its own before anything else is interpreted. A
+record announcing any other version is reported as unsupported and left
+untouched — never decoded field by field, because fields that happen to still
+parse would give a confident answer about a layout this build has never seen.
+There is no migration framework.
+
+`status` has four values:
+
+- `inProgress` — the transcript is open. A record left like this after ScribeKit
+  exits is a meeting that never finished, and is the only status recovery
+  offers.
+- `completed` — the transcript was flushed and closed and the meeting ended
+  normally.
+- `failed` — the meeting was ended because the transcript stopped being saved.
+  ScribeKit was running and told the user at the time, so this is a closed
+  session, not a lost one, and it is not offered for recovery.
+- `interrupted` — the session was found unfinished after a relaunch and the
+  user was shown it. Recorded so the same interruption is not reported forever.
+
+## Session lifecycle ordering
+
+Start: folder lease, session directory, `transcript.md` with its header, then
+the record as `inProgress`. The record is last because it is the step that must
+succeed before anything is captured; a start that cannot write one closes the
+file, releases the lease and fails with `.recoveryMetadataFailed`, and neither
+recognition nor capture begins.
+
+Stop: capture, the recogniser's finalisation, the event drain, footer, flush,
+close — and only then the record as `completed`. If the footer, flush or close
+fails, the record is not touched at all, so the session stays `inProgress` and
+the next launch offers it. If the record cannot be written after a clean close,
+the meeting is reported as failed rather than finished; the file is complete but
+ScribeKit will not claim a completion it could not record.
+
+A meeting ended by a save failure is closed as `failed` and writes no footer:
+`Ended` and `Duration` would be a claim about a document that stopped being
+written, and the file has just refused a write in any case.
+
+The record is only ever replaced atomically, so a partially written
+`session.json` is not a state a crash can leave behind.
+
+## Durability boundary
+
+Stated exactly, and no wider: **already-durable finalised transcript content
+survives a restart, and a session that did not finish is detectable.**
+
+Recovered because it was written: every finalised span `appendFinalSegment`
+returned for, and the session record.
+
+Not recovered, because it was never written: audio still in an OS or framework
+buffer, a partial hypothesis that was never finalised, a finalised result that
+had not yet reached the file, and anything said while ScribeKit was not
+running. Surviving a power loss rather than a process death additionally
+depends on the flush every 25 appends and at Stop.
+
+ScribeKit is not crash-proof and does not say it is.
+
+## Startup discovery
+
+`SessionRecoveryService.scan(_:)` lists the immediate children of the folder the
+user chose and reads `.scribekit/session.json` in each. One level, no recursive
+walk, nothing outside that folder. It runs when the screen appears and when a
+folder is chosen, and never while a meeting is running — the session being
+written is legitimately `inProgress`. No timer, no watcher, no repeat scan, and
+no work left running afterwards.
+
+A directory without a record is not a ScribeKit-recorded session and is passed
+over silently; sessions written by Interval 6 are therefore not detected, which
+is honest, since nothing recorded them.
+
+The service is an actor, so the filesystem work is off the main actor and one
+scan or update happens at a time. `SessionRecoveryModel` is `@MainActor` and
+holds the resulting state; the view displays it and implements none of it.
+
+Candidates are ordered by start date descending, tie-broken on directory path,
+so repeated scans of the same folder produce the same list and two sessions
+found together stay two sessions.
+
+## Recovery sandbox behaviour
+
+Access is owned by the service and by nothing else in recovery: each call takes
+`SecurityScopedAccess.withAccess` on the save folder for exactly its own
+duration and releases it, including on every failure path. Nothing is held
+between a scan and whatever the user does next. Verified live: `lsof` on the
+running app showed no handle on the save folder between meetings.
+
+The destination itself comes from the existing bookmark, through
+`MeetingSetupDestinationModel`. When it cannot be restored or opened, ScribeKit
+says it could not check for an unfinished meeting and looks nowhere else.
+
+## Recovery UX
+
+A `Previous Meetings` section appears only when there is something to say. For
+each unfinished meeting it states the title, when the meeting started, when the
+transcript was last written and how large it is, and the transcript's path. When
+ScribeKit stopped is not shown, because nothing measured it.
+
+Three controls, none of which resumes anything:
+
+- **Show in Finder** reveals `transcript.md`.
+- **Mark as Interrupted** re-reads the record, confirms the transcript is still
+  readable, writes the record as `interrupted`, and appends the interruption
+  note. The session is not offered again.
+- **Dismiss** hides the finding for this launch and changes nothing on disk, so
+  it is offered again next launch. Closing a panel is not a decision worth
+  writing down.
+
+Nothing in recovery constructs a capturer or a recogniser, so no ScreenCaptureKit
+or Speech permission prompt can come from it.
+
+## Interruption marker
+
+The note is appended to `transcript.md`, which keeps the file append-only, and
+only when the user asks for it. Discovery never writes.
+
+```
+---
+
+> **Session interrupted.** ScribeKit stopped before this meeting was finished,
+> so the transcript ends at the last speech that reached the file. When it
+> stopped is not known, and nothing was transcribed after that point.
+> Interruption recorded by ScribeKit on 2026-08-29 at 10:50 AM.
+```
+
+(One line in the file; wrapped here.) It is a blockquote, like the gap markers,
+so ScribeKit's structural remarks stay distinguishable from recognised speech in
+the rendered document as well as in the source. It names only the moment the
+interruption was recorded — not a crash time, not a gap duration — and no
+recognised text is touched.
+
+Ordering here is deliberately the opposite of completion: the record is written
+first and the note second. Completion is a claim about the file, so it must
+follow the file; the note is a remark in the user's document, and the failure
+worth preventing is writing it twice. An interruption is therefore at worst
+recorded without its note, never noted twice, and a note that cannot be appended
+is reported.
+
+## Logging
+
+None was added. No `OSLog` category, no transcript text, no PCM, no meeting
+titles, no telemetry.
+
 ## Validation status
 
-`xcodebuild ... clean test` passes on Xcode 26.6: **232 tests in 27 suites**, no
+`xcodebuild ... clean test` passes on Xcode 26.6: **303 tests in 31 suites**, no
 compiler warnings. The `AppleSpeechTranscriber` suite starts and stops the real
 recogniser twice, which is where its 4.2 s comes from — two bounded drains of a
 run that received no audio.
@@ -313,6 +475,53 @@ answer — no locales and `.unsupportedSystem` when there is no recogniser,
 structurally valid records and correct installed-state mapping when there is —
 and the lifecycle test, which still needs a real installed model and returns
 without one. Neither downloads anything.
+
+### Interval 7 live validation
+
+Driven through the real app, sandboxed, with the interface operated by scripted
+keyboard and mouse events. QuickTime Player played a `say`-generated recording
+of five sentences about Swift closures as the only selected source, writing to a
+folder on the Desktop chosen in the open panel. The folder and its contents were
+deleted afterwards; nothing from it is in the repository.
+
+- Launched with the previous run's save folder deleted, the recovery section
+  said "Unfinished meeting check failed. The saved folder could not be found…"
+  and offered nothing. No other folder was scanned.
+- A meeting started: `transcript.md` and `.scribekit/session.json` appeared
+  together. The record read `"status" : "inProgress"` with the schema version,
+  session identifier, sources, locale, start date and `"transcriptPath" :
+  "transcript.md"`, and 298 bytes of nothing else.
+- Five sentences were finalised into the transcript (474 bytes, SHA-256
+  recorded). The app was then killed with `SIGKILL` while capture and
+  recognition were running — no Stop.
+- The transcript's hash was unchanged by the kill; the record still read
+  `inProgress`; there was no footer.
+- On relaunch the recovery section appeared: "Untitled Meeting did not finish",
+  "Started Aug 29, 2026 at 10:49 AM", "Transcript last written Aug 29, 2026 at
+  10:49 AM · 474 bytes", and the transcript's path. Capture read "Not
+  capturing", recognition read "Ready, on this Mac", and the transcript file
+  section read "No transcript yet". `lsof` showed no handle on the save folder
+  and no sockets. Nothing was captured, no recogniser was started, and no
+  permission prompt appeared.
+- Mark as Interrupted set the record to `"status" : "interrupted"` with
+  `"interruptedAt"`, and appended the interruption note. The first 474 bytes of
+  the file hashed identically to the pre-crash transcript, each sentence and the
+  title appeared exactly once, and the note appeared once.
+- Relaunching again did not offer the session, and the transcript was unchanged.
+- A second meeting was run and stopped normally. Its record read `"status" :
+  "completed"` with `"endedAt"`, and its transcript carried the `Ended` and
+  `Duration` footer. After a relaunch it was not offered as unfinished.
+- The completed record was then truncated mid-JSON and a third directory was
+  planted with a `"schemaVersion": 9` record. On relaunch both were reported —
+  "…session record is damaged and was left untouched. Its transcript is
+  unaffected." and "…written by a newer version of ScribeKit (format 9) and was
+  left untouched." — neither was offered as recoverable, both records were
+  byte-identical afterwards, and the transcript beside the damaged one hashed
+  identically to before.
+
+Force-terminating immediately after a finalised segment was not attempted
+separately; the kill above landed while a meeting was running with five
+segments already durable, which is the same boundary.
 
 ### Interval 5 live validation, still current
 
@@ -392,16 +601,31 @@ intervals; the capture observations above were taken through the same path.
 ## Known limitations
 
 - Interval 2, 3 and 4 limitations still hold.
-- No crash or session recovery. A meeting killed mid-run leaves a transcript
-  with no footer; ScribeKit will not reopen or resume it.
+- Recovery recovers the artifact and the record, not the meeting. It never
+  resumes capture or recognition; continuing into the same session is a later
+  interval, and was left out deliberately rather than half-built.
 - Surviving a power loss depends on the flush every 25 appends and at Stop, so
   an abrupt power cut can cost the appends since the last one. ScribeKit does
   not claim to be crash-proof.
 - A start that fails after the transcript was created leaves that session
-  folder behind with a header and no speech. ScribeKit does not delete
-  directories it created.
-- No session metadata file is written, so nothing outside `transcript.md`
-  records a session.
+  folder behind with a header and no speech, and a start that fails at the
+  record leaves one with no record either. ScribeKit does not delete
+  directories it created, and recovery never deletes a transcript.
+- Session directories written before this interval carry no record and are not
+  detected as unfinished. Their transcripts are unaffected.
+- A meeting closed as `failed` is not offered for recovery. If the record could
+  not be updated at that moment, it stays `inProgress` and is offered instead —
+  over-reporting rather than under-reporting.
+- Discovery runs at launch and when a folder is chosen. A session interrupted
+  in another launch while this one is open is not noticed until the next scan.
+- Only one save folder is ever scanned: the one currently in use. Sessions in a
+  folder the user has moved on from are not found.
+- The record's `interruptedAt` is when ScribeKit noticed, not when the meeting
+  stopped. Nothing observes the second, so nothing states it.
+- Metadata write failure, transcript flush failure, damaged records and
+  unsupported schema versions are covered by injected failures in tests and,
+  for the last two, live; a real disk-full or permission-revoked failure was
+  not reproduced.
 - The transcript's timeline starts when the meeting starts; audio offsets are
   measured from the first captured frame, which arrives a moment later, so a
   timestamp can be under a second early.
@@ -426,12 +650,18 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 7: crash and session recovery, and the background/menu-bar workflow.
-Recovery has the pieces it needs already: a session directory exists from the
-moment a meeting starts, a transcript with no footer is exactly the signature of
-a meeting that never finished, and `MeetingState` already has a `.recovering`
-case with transitions. What it lacks is anything that records which directory
-belongs to an unfinished meeting, which is what `.scribekit/session.json` was
-laid out for and what that interval should decide the shape of. Nothing should
-edit an existing `transcript.md` in place; appending a resumption marker to it
-is the option that keeps the file append-only.
+Interval 8: optional audio retention. `AudioRetentionMode` and
+`SessionArtifactLayout.audioURL(for:)` already name `audio.caf` and `audio.m4a`
+and neither is written; the setup screen already offers the choice. The pieces
+that interval will need from this one are in place: a session record that says
+what a session is and when it ended, an ordering rule that forbids claiming a
+session finished before its files are closed, and a lease that already spans
+exactly the window an audio file would be open for. An audio file is a second
+artifact with its own flush and close, so the completion ordering above should
+extend to it rather than be duplicated beside it, and a retained audio file
+must be as bounded in memory as the pipeline that produces it.
+
+`MeetingState.recovering` is still unused: recovery does not resume capture, so
+nothing enters that state. It should stay unused until an interval implements
+continuing an interrupted meeting, which will have to decide what a second
+recognition run appended to an existing transcript means for the timeline.

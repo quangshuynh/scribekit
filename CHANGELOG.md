@@ -6,6 +6,27 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Session recovery. Each session directory now carries
+  `.scribekit/session.json`, a schema-versioned record of where the session
+  stands: in progress, completed, failed, or interrupted. It is written before
+  a meeting begins — a meeting that cannot establish one does not start — and
+  updated only after the transcript has been flushed and closed, so a session
+  is never recorded as completed ahead of the file it describes.
+- Startup discovery of meetings that never finished. ScribeKit scans the
+  immediate children of the chosen save folder once, when it launches or when a
+  folder is chosen, holding security-scoped access only for the length of the
+  scan. Damaged and newer-format records are reported and left untouched; a
+  folder that cannot be opened is reported rather than replaced with another.
+- A recovery section on the meeting screen showing what is known about an
+  unfinished meeting — its title, when it started, when its transcript was last
+  written — with controls to reveal the transcript, record the interruption, or
+  leave the finding for the next launch. Nothing about recovery starts capture
+  or speech recognition.
+- An interruption note appended to a recovered transcript, stating that
+  ScribeKit stopped before the meeting finished and that when it stopped is not
+  known. It invents no crash time and no gap duration, is a blockquote like the
+  existing gap markers, and is appended once. Recognised speech is untouched.
+
 - Durable Markdown transcripts. Starting a meeting creates a dated session
   directory in the chosen save folder and a `transcript.md` inside it, with a
   deterministic header, per-minute headings, one timestamped entry per
@@ -106,3 +127,9 @@ All notable changes to this project are documented in this file.
 - GitHub Actions workflow that builds and tests on macOS.
 - Project documentation: `README.md`, `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`,
   `CONTRIBUTING.md`.
+
+### Changed
+
+- `TranscriptPersisting.finishSession` now takes how the meeting ended, so a
+  meeting stopped by a save failure is recorded as failed rather than left
+  looking like one that vanished.
