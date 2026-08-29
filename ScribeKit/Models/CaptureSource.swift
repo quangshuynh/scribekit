@@ -11,7 +11,7 @@ import Foundation
 /// carries no capture machinery: binding a source to a real system audio
 /// stream is the responsibility of a later interval, and nothing here assumes
 /// a particular capture API.
-struct CaptureSource: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct CaptureSource: Identifiable, Hashable, Codable, Sendable {
     /// Stable identifier used to persist and compare selections.
     ///
     /// For application sources this is the bundle identifier, so a selection
