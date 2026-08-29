@@ -27,18 +27,24 @@ transcription are not implemented yet.
 ## Currently implemented
 
 - Meeting configuration screen: title, audio retention mode, save location.
+- Discovery of running applications through ScreenCaptureKit, with selection of
+  one or several of them as intended audio sources, and a manual Refresh.
 - Domain models for the session lifecycle, audio retention, capture sources and
   session metadata, with unit tests.
 - Shared Xcode scheme and a macOS CI workflow that builds and runs unit tests.
 
-Nothing is captured, transcribed or written to disk yet. The Start Meeting
-control is intentionally disabled.
+Discovery only enumerates applications; nothing is captured, transcribed or
+written to disk yet, and selecting an application does not record it. The Start
+Meeting control is intentionally disabled.
+
+Listing applications requires Screen Recording permission, which macOS asks for
+the first time ScribeKit looks for sources. Without it the screen reports the
+missing permission instead of a list.
 
 ## Planned
 
 All of the following are *planned*, not available:
 
-- Selecting one or more macOS application audio sources.
 - Start / Pause / Resume / Stop, with background operation and a menu bar presence.
 - Timestamped Markdown transcripts with autosave and crash/session recovery.
 - Transcript search and history.
@@ -88,7 +94,8 @@ Unit tests use [Swift Testing](https://developer.apple.com/documentation/testing
 ```
 ScribeKit/
   App/                    App entry point
-  Features/MeetingSetup/  SwiftUI configuration screen
+  Capture/                Application source discovery
+  Features/MeetingSetup/  SwiftUI configuration screen and its state
   Models/                 Domain value types (no I/O)
 ScribeKitTests/           Swift Testing unit tests
 ```
@@ -96,13 +103,15 @@ ScribeKitTests/           Swift Testing unit tests
 Domain models are plain value types with no capture, transcription or
 persistence behaviour. Session lifecycle is a single `MeetingState` enum with
 explicit transition rules, so contradictory states are unrepresentable.
-Capture, speech, persistence and session coordination will be added as separate
-layers behind that model.
+Capture, speech, persistence and session coordination are separate layers
+behind that model: source discovery sits behind the `CaptureSourceProviding`
+protocol, and ScreenCaptureKit types are adapted at that boundary rather than
+reaching the UI.
 
 ## Roadmap
 
-1. **Foundation** *(current)* — domain models, configuration UI, tests, CI, docs.
-2. Application audio source discovery and selection.
+1. **Foundation** — domain models, configuration UI, tests, CI, docs.
+2. **Application audio source discovery and selection** *(current)*.
 3. Audio capture and on-device transcription.
 4. Timestamped Markdown persistence, autosave and recovery.
 5. Background and menu bar operation.
@@ -111,8 +120,13 @@ layers behind that model.
 
 ## Known limitations
 
-- No audio capture, transcription, persistence or recovery yet.
-- Source selection and Start Meeting are disabled placeholders.
+- No audio capture, transcription, persistence or recovery yet. Selected
+  applications are recorded as a choice only.
+- Start Meeting is a disabled placeholder.
+- Only applications owning an ordinary on-screen window are listed, so a
+  menu-bar-only or windowless application is not offered as a source.
+- The application list is refreshed on appearance and on demand, not
+  automatically as applications start and quit.
 - The chosen save location is held in memory only and is not persisted.
 - CI runs build and unit tests only — no linting, formatting, coverage or UI tests.
 
