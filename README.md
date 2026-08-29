@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/scribekit-logo2.png" alt="ScribeKit app icon" width="256">
+</p>
+
 # ScribeKit
 
 [![CI](https://github.com/quangshuynh/scribekit/actions/workflows/ci.yml/badge.svg)](https://github.com/quangshuynh/scribekit/actions/workflows/ci.yml)
