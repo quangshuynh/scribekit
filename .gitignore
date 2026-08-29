@@ -2,8 +2,18 @@
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
 
-## User settings
+## macOS
+.DS_Store
+
+## User settings and generated build output
 xcuserdata/
+DerivedData/
+build/
+*.xcuserstate
+*.moved-aside
+
+## Shared project configuration is required by CI and must stay tracked
+!*.xcodeproj/xcshareddata/**
 
 ## Obj-C/Swift specific
 *.hmap
