@@ -59,17 +59,25 @@ final class MeetingRuntime {
         """
 
     /// The capture subsystem's current state.
-    private(set) var captureState: AudioCaptureState = .idle
+    private(set) var captureState: AudioCaptureState = .idle {
+        didSet { synchronizeActivity() }
+    }
 
     /// The recognition subsystem's current state.
-    private(set) var transcriptionState: TranscriptionState = .idle
+    private(set) var transcriptionState: TranscriptionState = .idle {
+        didSet { synchronizeActivity() }
+    }
 
     /// The durable transcript's current state.
-    private(set) var persistenceState: TranscriptPersistenceState = .idle
+    private(set) var persistenceState: TranscriptPersistenceState = .idle {
+        didSet { synchronizeActivity() }
+    }
 
     /// The retained audio file's current state. Stays ``AudioRetentionState/idle``
     /// for the whole of a meeting that keeps no audio.
-    private(set) var audioRetentionState: AudioRetentionState = .idle
+    private(set) var audioRetentionState: AudioRetentionState = .idle {
+        didSet { synchronizeActivity() }
+    }
 
     /// Whether on-device recognition can run in the selected locale.
     private(set) var availability: SpeechRecognitionAvailability = .unknown
@@ -94,11 +102,15 @@ final class MeetingRuntime {
     /// ``status`` says whether it is live.
     private(set) var meeting: MeetingSnapshot?
 
+    /// How long the current meeting has been running.
+    let elapsed: MeetingElapsedClock
+
     private let capturer: AudioCapturing
     private let transcriber: any SpeechTranscribing
     private let persistence: any TranscriptPersisting
     private let audio: any AudioRetaining
     private let monitor: AudioCaptureActivityMonitor
+    private let processActivity: any MeetingActivityAsserting
     private var recoveryAttempts = 0
 
     /// How many transcription events have been handled, counted over the
@@ -137,6 +149,11 @@ final class MeetingRuntime {
     ///     The default writes real files; tests substitute a double.
     ///   - transcript: The transcript the run fills in. A fresh one by
     ///     default.
+    ///   - elapsed: Times the running meeting. A fresh one-second clock by
+    ///     default; tests substitute one they advance themselves.
+    ///   - processActivity: Keeps the process out of App Nap while a meeting
+    ///     runs. The default asserts against the real process; tests
+    ///     substitute a double so the assertion's lifetime is testable.
     ///   - makeCapturer: Builds the capturer around the audio consumers. The
     ///     default builds the ScreenCaptureKit implementation; tests
     ///     substitute a fake.
@@ -146,6 +163,8 @@ final class MeetingRuntime {
         persistence: any TranscriptPersisting = MarkdownTranscriptStore(),
         audio: any AudioRetaining = RetainedAudioRecorder(),
         transcript: LiveTranscriptModel? = nil,
+        elapsed: MeetingElapsedClock? = nil,
+        processActivity: (any MeetingActivityAsserting)? = nil,
         makeCapturer: (AudioSampleConsuming) -> AudioCapturing = {
             ScreenCaptureKitAudioCapturer(consumer: $0)
         }
@@ -155,6 +174,8 @@ final class MeetingRuntime {
         self.persistence = persistence
         self.audio = audio
         self.transcript = transcript ?? LiveTranscriptModel()
+        self.elapsed = elapsed ?? MeetingElapsedClock()
+        self.processActivity = processActivity ?? ProcessMeetingActivity()
         self.capturer = makeCapturer(BroadcastingAudioSampleConsumer([monitor, transcriber, audio]))
         monitor.onUpdate = { [weak self] activity in
             Task { @MainActor [weak self] in self?.activity = activity }
@@ -248,6 +269,21 @@ final class MeetingRuntime {
     /// an interruption note into a transcript that is still open.
     var allowsRecovery: Bool { !isRunning }
 
+    /// Starts or ends the process activity assertion and the elapsed clock as
+    /// the meeting starts and stops holding resources.
+    ///
+    /// Driven from every subsystem state change rather than from the start and
+    /// stop methods, because a meeting also ends through capture interruption,
+    /// a retention failure and a persistence failure. Anything keyed to the
+    /// happy path would leak the assertion down the other three.
+    private func synchronizeActivity() {
+        if isRunning {
+            processActivity.begin()
+        } else {
+            processActivity.end()
+            elapsed.stop()
+        }
+    }
 
     /// Whether the interface should offer to start a meeting.
     ///
@@ -310,6 +346,7 @@ final class MeetingRuntime {
         monitor.reset()
         activity = .none
         transcript.begin(at: startedAt)
+        elapsed.start(at: startedAt)
 
         let layout: SessionArtifactLayout
         do {

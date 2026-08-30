@@ -247,9 +247,12 @@ struct MeetingSetupView: View {
                 .accessibilityLabel("Meeting title")
 
             if let meeting = runtime.meeting, runtime.status.isActive {
-                LabeledContent("Running") { Text(meeting.title) }
-                    .accessibilityLabel("Running meeting")
-                    .accessibilityValue(meeting.title)
+                LabeledContent("Running") {
+                    Text("\(meeting.title) · \(MeetingElapsedClock.description(of: runtime.elapsed.elapsed))")
+                        .monospacedDigit()
+                }
+                .accessibilityLabel("Running meeting")
+                .accessibilityValue(meeting.title)
 
                 Text("Settings on this screen apply to the next meeting. This one keeps what it started with.")
                     .font(.footnote)
