@@ -81,6 +81,24 @@ meeting rather than continuing with a silent hole in it, and whatever reached
 the file is closed and left where it is — meeting audio cannot be captured
 again.
 
+## Meeting ownership
+
+An active meeting's lifetime is application-scoped and must not depend on
+SwiftUI view lifetime. Views request a start or a stop and observe what
+happens; a view appearing, disappearing, being rebuilt or having its window
+closed never starts, stops or duplicates a meeting. There is at most one active
+meeting, and the owner enforces that, not whichever window happens to be open.
+
+A meeting's configuration is fixed when it starts. Title, sources, destination,
+retention mode and recognition locale are copied at the start and read from
+that copy for the rest of the run, so editing the setup screen configures the
+next meeting and cannot reach the one that is running.
+
+Presentation may be throttled or skipped while the interface is hidden;
+capture, recognition and persistence may not. Whatever the window is doing,
+audio is captured, speech is recognised, and finalised text and retained audio
+reach their files at full reliability.
+
 ## Privacy
 
 - Everything stays on the user's machine unless the user explicitly exports it.

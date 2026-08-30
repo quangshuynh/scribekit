@@ -14,8 +14,8 @@ quietly while you work in other applications and writes timestamped Markdown
 transcripts to a folder you choose, on your machine.
 
 **Status: early development.** Audio capture from selected applications, live
-on-device transcription, durable Markdown transcripts, crash recovery and
-optional audio retention work end to end; background operation does not.
+on-device transcription, durable Markdown transcripts, crash recovery, optional
+audio retention and background operation with a menu bar item work end to end.
 
 ## Philosophy
 
@@ -81,6 +81,25 @@ optional audio retention work end to end; background operation does not.
   is closed before the session is recorded as finished, and a recording that
   fails or cannot be finalised is reported and left on disk rather than deleted
   or quietly completed.
+- Background operation. A meeting keeps capturing, transcribing and writing
+  while the ScribeKit window is hidden, minimised, covered by other
+  applications or closed altogether. The meeting belongs to the application,
+  not to the window, so the window is somewhere to watch a meeting rather than
+  something the meeting depends on.
+- A menu bar item, always present. With no meeting it offers Open ScribeKit and
+  Quit ScribeKit. With one running it names the meeting, shows its state and
+  elapsed time, the applications being captured and what is being kept of the
+  audio, and offers Stop Meeting, Show Transcript in Finder, Show Audio in
+  Finder and the same two commands. Stop from the menu bar is the same stop the
+  window performs: capture ends, the recogniser finalises what it has, the
+  audio file is closed, and the transcript is flushed, closed and recorded as
+  finished.
+- Closing the window keeps ScribeKit running, whether or not a meeting is under
+  way; Open ScribeKit brings the same window back rather than opening another.
+- Quitting during a meeting asks first, and stopping from that prompt finishes
+  the transcript and the audio file before the application exits. Quitting is
+  not a crash, and ScribeKit does not leave a meeting for the next launch to
+  discover when it could simply finish it.
 - Remembered setup choices: the audio retention mode and the applications last
   selected, matched against a fresh discovery on each launch.
 - Domain models for the session lifecycle, audio retention, capture sources and
@@ -113,7 +132,7 @@ connection at all.
 
 All of the following are *planned*, not available:
 
-- Meeting lifecycle with background operation and a menu bar presence.
+- Pausing and resuming a meeting.
 - Continuing an interrupted meeting into the same session.
 - Transcript search and history.
 - Post-meeting review of uncertain passages, against the retained audio.
@@ -173,11 +192,21 @@ ScribeKit/
   App/                    App entry point
   Capture/                Application source discovery and audio capture
   Features/MeetingSetup/  SwiftUI configuration screen and its state
+  Features/MenuBar/       Menu bar item and the state it presents
+  Meeting/                The application-scoped active meeting and its runtime
   Models/                 Domain value types (no I/O)
   Persistence/            Save-location storage and session layout policy
   Transcription/          On-device speech recognition behind its own boundary
 ScribeKitTests/           Swift Testing unit tests
 ```
+
+The active meeting is owned by `MeetingRuntime`, created by the application
+delegate and handed to both the window and the menu bar. Its lifetime is the
+application's, so a window that is hidden, closed or built again neither ends a
+meeting nor starts a second one, and the two interfaces read one derived
+`MeetingRuntimeStatus` rather than tracking the meeting separately. What the
+setup screen owns is the configuration for the *next* meeting; the running one
+holds a `MeetingSnapshot` taken when it started.
 
 Domain models are plain value types with no capture, transcription or
 persistence behaviour. Session lifecycle is a single `MeetingState` enum with
@@ -215,8 +244,8 @@ than implementing it.
 5. **On-device transcription**.
 6. **Timestamped Markdown persistence and autosave**.
 7. **Crash and session recovery**.
-8. **Optional audio retention** *(current)*.
-9. Background and menu bar operation.
+8. **Optional audio retention**.
+9. **Background and menu bar operation** *(current)*.
 10. Transcript history, search and uncertainty review, and derived notes.
 
 ## Known limitations
@@ -278,7 +307,16 @@ than implementing it.
   screen recording one.
 - The captured set is fixed when capture starts. Changing the selection while
   capture is running does not change what is being captured; stop and start
-  again.
+  again. The title, save folder, language and retention mode are fixed the same
+  way, and their controls are disabled while a meeting runs.
+- There is no Pause. A meeting runs until it is stopped, and the menu bar does
+  not offer a control ScribeKit has not built.
+- Quitting waits for the meeting to be finished properly rather than racing it
+  against a deadline, so a quit takes as long as closing the transcript and the
+  audio file takes. A force quit or a crash is still a crash, and startup
+  recovery is what handles those.
+- ScribeKit keeps running when its last window is closed, so quitting is
+  explicit — from the menu bar item, the application menu, or ⌘Q.
 - If a captured application quits mid-capture, ScreenCaptureKit keeps the
   stream alive and delivers silence for it. ScribeKit does not substitute
   another source, and the next start reports the application as unavailable.
