@@ -155,7 +155,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
             locale: Locale(identifier: localeIdentifier),
             transcriptionOptions: [],
             reportingOptions: [.volatileResults],
-            attributeOptions: [.audioTimeRange]
+            attributeOptions: [.audioTimeRange, .transcriptionConfidence]
         )
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module]) else {
             throw TranscriptionError.incompatibleAudioFormat
@@ -245,6 +245,11 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     /// with the distinction intact; nothing is merged, deduplicated or edited
     /// here.
     ///
+    /// Review evidence is taken here and nowhere else, because this is the
+    /// only place it exists: the recogniser's own `transcriptionConfidence`,
+    /// read off the runs of the result. It travels on the segment and changes
+    /// not a character of it.
+    ///
     /// - Parameters:
     ///   - module: The recogniser whose results to watch.
     ///   - localeIdentifier: The locale recognition is running in.
@@ -263,7 +268,8 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
                         startTime: Self.seconds(result.range.start),
                         endTime: Self.seconds(result.range.end),
                         state: result.isFinal ? .final : .partial,
-                        localeIdentifier: localeIdentifier
+                        localeIdentifier: localeIdentifier,
+                        confidence: Self.confidence(of: result.text)
                     )
                     publisher.publish(result.isFinal ? .final(segment) : .partial(segment))
                 }
@@ -275,6 +281,25 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
                 publisher.publish(.interrupted(.recognitionFailed(message: error.localizedDescription)))
             }
         }
+    }
+
+    /// Reads the recogniser's own confidence in a result.
+    ///
+    /// `SpeechTranscriber` attaches `transcriptionConfidence` to the runs of
+    /// the result's attributed text when the attribute is requested, so a span
+    /// carries one value per recognised word. The lowest is taken: the weakest
+    /// word in a sentence is the one a reviewer would want to hear again, and
+    /// averaging would hide it behind the words around it.
+    ///
+    /// Only finalised results carry the attribute. A volatile hypothesis has
+    /// no confidence attached to it, so a partial segment's confidence is
+    /// `nil` and nothing pretends otherwise.
+    ///
+    /// - Parameter text: The result's attributed text.
+    /// - Returns: The lowest confidence any run carried, or `nil` when the
+    ///   recogniser attached none. Nothing is substituted for an absent value.
+    static func confidence(of text: AttributedString) -> Double? {
+        text.runs.compactMap { $0.transcriptionConfidence }.min()
     }
 
     /// Reads a recogniser timestamp as seconds from the start of the run.
