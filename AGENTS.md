@@ -68,6 +68,20 @@ existed, and failing to write one never fails a meeting whose durable artifacts
 closed cleanly. Nothing derived from it may be presented with more precision
 than the thing it was derived from actually has.
 
+Source material and user-derived state are separate files, and only one side
+is writable. `transcript.md`, retained audio, `session.json` and the
+recogniser's own observations in `review.json` are source: reading a meeting
+back never rewrites them, and a feature that lets the user decide something —
+a note, a mark, whatever a later interval adds — writes its own versioned
+sidecar under `.scribekit/` instead. The boundary is a type rather than a rule:
+the protocol History reads through has no write method, the protocol that
+writes derived state can address no source artifact, and a failed derived write
+therefore cannot damage one. Such a sidecar is refused rather than overwritten
+when it is damaged, announces a schema this build does not know, names another
+session, or has changed since it was loaded; none of that stops the meeting
+from listing, opening or being searched. Access to the user's folder is opened
+for the length of one read or one write and closed again.
+
 A meeting has two clocks and they are not interchangeable. Captured media time
 advances only while capture is running; wall-clock time does not stop when
 capture does. Transcript offsets, retained audio and anything that seeks into

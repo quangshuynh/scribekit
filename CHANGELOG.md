@@ -6,6 +6,29 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- User-derived meeting state in `.scribekit/derived.json`: local Markdown notes
+  the user writes about a meeting, and a Reviewed mark per review candidate.
+  Schema-versioned, probed for its version before anything else is interpreted,
+  and holding only what the user decided — no transcript text, no confidence, no
+  review reasons, no audio metadata.
+- `DerivedSessionStoring`, a write boundary of its own. `HistoryStoring` stays
+  read-only by construction; the new protocol can address `derived.json` and
+  nothing else, so a failed derived write cannot damage `transcript.md`, the
+  retained recording, `session.json` or `review.json`. `DerivedSessionService`
+  opens security-scoped access for the length of one read or write and closes it
+  again.
+- Mark Reviewed and Mark Unreviewed on each review candidate, written as the
+  decision is made and identified by the span index `review.json` already uses.
+  A mark whose index no longer names a candidate resolves to nothing rather than
+  attaching to another passage, and is kept rather than discarded.
+- A Notes editor in the History detail pane: plain Markdown source, empty by
+  default, explicit Save, and a status line that says *Saved* only after the
+  write succeeded. A failed save keeps the user's text and says why.
+- Last-writer-refused conflict handling. Every derived record carries a revision
+  token; a save reads what is on disk and refuses unless the revision is the one
+  the editor loaded. Damaged, newer-format and foreign sidecars are refused the
+  same way and never overwritten.
+
 - Pausing and resuming a running meeting, from the main window and from the
   menu bar, which drive the same `MeetingRuntime` actions. Pause tears down the
   capture stream, finalises the audio the recogniser already holds and leaves
