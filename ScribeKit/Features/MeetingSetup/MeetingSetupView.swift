@@ -178,6 +178,13 @@ struct MeetingSetupView: View {
             Text("Started \(candidate.metadata.startedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            if candidate.metadata.wasPausedWhenInterrupted, let pausedAt = candidate.metadata.pausedAt {
+                Text("This meeting was paused at "
+                     + "\(pausedAt.formatted(date: .omitted, time: .standard)) and ScribeKit stopped before it "
+                     + "was resumed or finished. Nothing was captured after the pause.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             if let modified = candidate.transcript.modifiedAt {
                 Text("Transcript last written \(modified.formatted(date: .abbreviated, time: .shortened))"
                      + " · \(candidate.transcript.byteCount) bytes")
