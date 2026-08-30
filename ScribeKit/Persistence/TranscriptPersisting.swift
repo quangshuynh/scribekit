@@ -58,6 +58,31 @@ nonisolated protocol TranscriptPersisting: Sendable {
     ///   or the write fails.
     func recordGap(_ gap: TranscriptGap) async throws
 
+    /// Records that the user paused the meeting.
+    ///
+    /// The session stays open. The marker is a structural remark rather than
+    /// speech, and the session record is updated so that a ScribeKit that
+    /// stops while a meeting is paused leaves a record saying so.
+    ///
+    /// - Parameters:
+    ///   - date: The wall-clock moment capture stopped.
+    ///   - capturedDuration: Seconds of audio the meeting had captured, which
+    ///     is where the recording ends and where a resume continues from.
+    /// - Throws: ``TranscriptPersistenceError`` when no session is in progress
+    ///   or the write fails.
+    func recordPause(at date: Date, capturedDuration: Double) async throws
+
+    /// Records that the user resumed the meeting, opening a new stretch in
+    /// which media time and wall-clock time run together again.
+    ///
+    /// - Parameters:
+    ///   - date: The wall-clock moment capture started again.
+    ///   - capturedDuration: Seconds of audio captured before the pause, which
+    ///     is the media offset the resumed audio continues from.
+    /// - Throws: ``TranscriptPersistenceError`` when no session is in progress
+    ///   or the write fails.
+    func recordResume(at date: Date, capturedDuration: Double) async throws
+
     /// Flushes everything accepted so far, closes the file, records how the
     /// session ended, and releases access to the user's folder.
     ///
@@ -73,21 +98,40 @@ nonisolated protocol TranscriptPersisting: Sendable {
     ///     the transcript could not be saved. ``SessionCompletionOutcome/failed``
     ///     writes no closing block, because a meeting that stopped being saved
     ///     has no honest end time to state in the document.
+    ///   - capturedDuration: Seconds of audio the meeting captured, which is
+    ///     the length of the retained recording and, for a meeting that was
+    ///     paused, shorter than the meeting's wall-clock length.
     /// - Throws: ``TranscriptPersistenceError`` when no session is in progress,
     ///   the transcript could not be flushed and closed, or the session record
     ///   could not be updated. Resources are released either way, and a
     ///   session whose record could not be updated is left recorded as
     ///   unfinished rather than falsely as complete.
-    func finishSession(endedAt: Date, outcome: SessionCompletionOutcome) async throws
+    func finishSession(
+        endedAt: Date,
+        outcome: SessionCompletionOutcome,
+        capturedDuration: Double
+    ) async throws
 }
 
 nonisolated extension TranscriptPersisting {
     /// Finishes a session that ended normally.
     ///
     /// - Parameter endedAt: The wall-clock moment the session finished.
-    /// - Throws: Whatever ``finishSession(endedAt:outcome:)`` throws.
+    /// - Throws: Whatever ``finishSession(endedAt:outcome:capturedDuration:)``
+    ///   throws.
     func finishSession(endedAt: Date) async throws {
-        try await finishSession(endedAt: endedAt, outcome: .completed)
+        try await finishSession(endedAt: endedAt, outcome: .completed, capturedDuration: 0)
+    }
+
+    /// Finishes a session whose captured length is not being stated.
+    ///
+    /// - Parameters:
+    ///   - endedAt: The wall-clock moment the session finished.
+    ///   - outcome: How the meeting ended.
+    /// - Throws: Whatever ``finishSession(endedAt:outcome:capturedDuration:)``
+    ///   throws.
+    func finishSession(endedAt: Date, outcome: SessionCompletionOutcome) async throws {
+        try await finishSession(endedAt: endedAt, outcome: outcome, capturedDuration: 0)
     }
 }
 

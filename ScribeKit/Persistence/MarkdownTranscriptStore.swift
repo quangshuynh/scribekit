@@ -31,7 +31,7 @@ import Foundation
 /// The audio file a session may also keep is not written here. The store owns
 /// the transcript, the record and the folder lease, and that lease is what a
 /// retained recording is written under — which is why the recording is closed
-/// before ``finishSession(endedAt:outcome:)`` is called, and why a recording
+/// before ``finishSession(endedAt:outcome:capturedDuration:)`` is called, and why a recording
 /// that could not be finalised reaches this type as
 /// ``SessionCompletionOutcome/failed`` rather than as a completion.
 ///
@@ -62,7 +62,7 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         let lease: SecurityScopedLease
         let file: any TranscriptFileAppending
         let layout: SessionArtifactLayout
-        let metadata: SessionRecoveryMetadata
+        var metadata: SessionRecoveryMetadata
         var formatter: TranscriptMarkdownFormatter
         var appendsSinceSynchronize = 0
 
@@ -80,6 +80,14 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
 
         /// The spans put forward for review, in the order they were written.
         var reviewCandidates: [TranscriptReviewCandidate] = []
+
+        /// When the meeting was paused, while it still is.
+        var pausedAt: Date?
+
+        /// Seconds of audio the meeting has captured, as the last pause or
+        /// resume reported it. Media time, so it is also the length of the
+        /// retained recording.
+        var capturedDuration: Double = 0
     }
 
     private let fileStore: any TranscriptFileStoring
@@ -228,14 +236,70 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         current = session
     }
 
-    func finishSession(endedAt: Date, outcome: SessionCompletionOutcome) async throws {
-        guard let session = current else { throw TranscriptPersistenceError(.noSessionInProgress) }
+    func recordPause(at date: Date, capturedDuration: Double) async throws {
+        guard var session = current else { throw TranscriptPersistenceError(.noSessionInProgress) }
+
+        try write(session.formatter.paused(at: date), to: &session)
+        session.pausedAt = date
+        session.capturedDuration = capturedDuration
+        session.metadata = session.metadata.pausing(at: date, capturedDuration: capturedDuration)
+        // A pause is a point the transcript may have to survive from, so the
+        // record is brought up to date now rather than at the next stop: a
+        // ScribeKit that stops while a meeting is paused must leave a record
+        // that says the meeting was paused, not one that says it was running.
+        // A record that cannot be written does not fail the meeting — the
+        // transcript is what matters and it is intact — but it is reported.
+        do {
+            try recoveryStore.writeMetadata(session.metadata, to: session.layout)
+        } catch {
+            current = session
+            throw TranscriptPersistenceError(.recoveryMetadataFailed, underlying: error)
+        }
+        current = session
+    }
+
+    func recordResume(at date: Date, capturedDuration: Double) async throws {
+        guard var session = current else { throw TranscriptPersistenceError(.noSessionInProgress) }
+
+        let text = session.formatter.resumed(at: date, pausedAt: session.pausedAt)
+        // The epoch opens before the marker is written, so every timestamp
+        // from here on is measured from this resume rather than from a start
+        // the wall clock has since run away from. Timestamps already in the
+        // file are untouched.
+        session.formatter.resume(at: date, capturedDuration: capturedDuration)
+        try write(text, to: &session)
+        session.pausedAt = nil
+        session.capturedDuration = capturedDuration
+        session.metadata = session.metadata.pausing(at: nil, capturedDuration: capturedDuration)
+        do {
+            try recoveryStore.writeMetadata(session.metadata, to: session.layout)
+        } catch {
+            current = session
+            throw TranscriptPersistenceError(.recoveryMetadataFailed, underlying: error)
+        }
+        current = session
+    }
+
+    func finishSession(
+        endedAt: Date,
+        outcome: SessionCompletionOutcome,
+        capturedDuration: Double
+    ) async throws {
+        guard var session = current else { throw TranscriptPersistenceError(.noSessionInProgress) }
         current = nil
+        session.capturedDuration = max(session.capturedDuration, capturedDuration)
         defer { session.lease.release() }
 
         var failure: Error?
         if outcome == .completed {
-            do { try session.file.append(session.formatter.footer(endedAt: endedAt)) } catch { failure = error }
+            do {
+                try session.file.append(session.formatter.footer(
+                    endedAt: endedAt,
+                    capturedDuration: session.capturedDuration
+                ))
+            } catch {
+                failure = error
+            }
         }
         do { try session.file.synchronize() } catch { failure = failure ?? error }
         do { try session.file.close() } catch { failure = failure ?? error }

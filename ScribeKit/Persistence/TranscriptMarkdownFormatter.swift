@@ -39,6 +39,28 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
     /// minutes, so this bucket is the same in any zone.
     private var lastMinuteIndex: Int?
 
+    /// One stretch of the meeting during which media time and wall-clock time
+    /// ran together.
+    ///
+    /// A meeting that was never paused has exactly one: media zero at the
+    /// moment the meeting started. Each resume opens another, because the wall
+    /// clock kept running while capture did not, so the two timelines are the
+    /// same length apart only within an epoch.
+    struct Epoch: Equatable, Sendable {
+        /// Seconds of captured audio before this stretch began.
+        let mediaStart: Double
+
+        /// The wall-clock moment this stretch began.
+        let wallStart: Date
+    }
+
+    /// The stretches of this meeting, oldest first.
+    ///
+    /// Never empty, and only ever appended to: a timestamp already written is
+    /// never recomputed, because the document is append-only and a transcript
+    /// that rewrote its own past would be a transcript ScribeKit edited.
+    private(set) var epochs: [Epoch]
+
     /// Creates a formatter for one session.
     ///
     /// - Parameters:
@@ -48,7 +70,21 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
     init(startedAt: Date, timeZone: TimeZone = .current) {
         self.startedAt = startedAt
         self.timeZone = timeZone
+        self.epochs = [Epoch(mediaStart: 0, wallStart: startedAt)]
     }
+
+    /// Opens a new stretch of the meeting after a pause.
+    ///
+    /// - Parameters:
+    ///   - date: The wall-clock moment capture started again.
+    ///   - capturedDuration: Seconds of audio the meeting had captured before
+    ///     the pause, which is where the resumed audio continues from.
+    mutating func resume(at date: Date, capturedDuration: Double) {
+        epochs.append(Epoch(mediaStart: capturedDuration, wallStart: date))
+    }
+
+    /// Whether this meeting has been paused and resumed at least once.
+    var hasPaused: Bool { epochs.count > 1 }
 
     /// The transcript's opening block, written once when the file is created.
     ///
@@ -115,13 +151,55 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
     /// Recording completion as a footer keeps the file append-only: nothing
     /// already written has to be rewritten to state when the meeting ended.
     ///
-    /// - Parameter endedAt: The wall-clock moment the session finished.
+    /// - Parameters:
+    ///   - endedAt: The wall-clock moment the session finished.
+    ///   - capturedDuration: Seconds of audio the meeting captured, stated
+    ///     separately only when a pause made it differ from the meeting's
+    ///     wall-clock length. It is also the length of the retained recording,
+    ///     which is why a reader is told it.
     /// - Returns: Markdown ending in a newline.
-    func footer(endedAt: Date) -> String {
+    func footer(endedAt: Date, capturedDuration: Double? = nil) -> String {
         var text = "---\n\n"
         text += "**Ended:** \(clock(endedAt, includingSeconds: false))\n"
         text += "**Duration:** \(Self.durationDescription(endedAt.timeIntervalSince(startedAt)))\n"
+        if hasPaused, let capturedDuration {
+            text += "**Captured:** \(Self.durationDescription(capturedDuration))\n"
+        }
         return text
+    }
+
+    /// The marker written where the user paused the meeting.
+    ///
+    /// A pause is a thing the user did, not a recognition failure and not lost
+    /// audio, so it says so plainly and claims nothing about speech: nothing
+    /// was captured while the meeting was paused, so there is nothing to have
+    /// missed. It is a blockquote, the convention ``gap(_:)`` already uses, so
+    /// ScribeKit's own structural remarks stay visibly distinct from
+    /// recognised speech.
+    ///
+    /// - Parameter date: When the meeting was paused.
+    /// - Returns: Markdown ending in a blank line.
+    func paused(at date: Date) -> String {
+        "> **Paused:** \(clock(date, includingSeconds: true)). "
+            + "Capture stopped here; nothing was recorded until the meeting resumed.\n\n"
+    }
+
+    /// The marker written where the user resumed the meeting.
+    ///
+    /// The pause's length is stated because both ends of it were observed. It
+    /// is wall-clock time, and it is not in the recording: the audio file
+    /// continues straight from the last frame before the pause.
+    ///
+    /// - Parameters:
+    ///   - date: When capture started again.
+    ///   - pausedAt: When the meeting was paused, when that is known.
+    /// - Returns: Markdown ending in a blank line.
+    func resumed(at date: Date, pausedAt: Date?) -> String {
+        var text = "> **Resumed:** \(clock(date, includingSeconds: true))"
+        if let pausedAt {
+            text += ", after \(Self.durationDescription(date.timeIntervalSince(pausedAt))) paused"
+        }
+        return text + ".\n\n"
     }
 
     /// The note recovery appends to a transcript whose meeting never finished.
@@ -156,10 +234,17 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
 
     /// The wall-clock moment an audio-relative offset refers to.
     ///
-    /// - Parameter offset: Seconds from the first captured frame of the run.
+    /// `startedAt + offset` is only right for a meeting that was never paused.
+    /// Once it has been, the wall clock is ahead of media time by the pauses
+    /// that came before the offset, so the epoch the offset falls in is found
+    /// first and the remainder measured from that epoch's own wall start.
+    ///
+    /// - Parameter offset: Seconds of captured audio from the first captured
+    ///   frame of the meeting.
     /// - Returns: The moment that audio was heard.
     func wallClock(offset: Double) -> Date {
-        startedAt.addingTimeInterval(offset)
+        let epoch = epochs.last { offset >= $0.mediaStart } ?? epochs[0]
+        return epoch.wallStart.addingTimeInterval(offset - epoch.mediaStart)
     }
 
     /// Formats a moment as a twelve-hour clock time.
