@@ -57,6 +57,14 @@ the user, readable and useful without ScribeKit, and never dependent on
 ScribeKit metadata: losing or failing to parse anything else in a session
 directory must not make the transcript unusable.
 
+Reading a meeting back is a read. History, search and any later feature that
+lists or inspects past sessions are views over user-owned artifacts: listing,
+indexing, previewing or searching a session must leave its transcript, its
+recording and its session record byte-identical, and must not repair a damaged
+one. A disposable index may accelerate search, but the Markdown and the session
+record stay authoritative — anything derived from them is rebuilt on demand,
+never written beside them and never trusted over them.
+
 Finalised segments accepted for persistence are never silently discarded. Once
 the writer has accepted one, ScribeKit does not drop it, and a queue between
 recognition and the writer that cannot hold an entry fails the meeting rather

@@ -6,6 +6,39 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Local transcript history. A History tab beside the meeting screen lists the
+  meetings in the save folder — completed, failed, interrupted and the one
+  running now — newest first, with a detail pane giving each meeting's status,
+  times, applications, language, transcript size, audio state and a bounded
+  preview of its transcript, plus Show Transcript in Finder, Open Transcript and
+  Show Audio in Finder when a recording is actually there.
+- Local search across those transcripts. Plain, case-insensitive, locale-
+  independent substring matching over meeting titles, recognised speech and
+  captured application names, ranked by why a session matched and by how often
+  and how early the query occurs, with a bounded verbatim excerpt carrying the
+  transcript timestamp of the span it came from. No fuzzy matching, no
+  embeddings, no vector database, no cloud service and no database on disk.
+- A read-only filesystem boundary for history. `HistoryStoring` has no method
+  that creates, replaces, appends to or deletes anything, so listing, previewing,
+  refreshing and searching leave every transcript, recording and session record
+  byte-identical — modification dates included — by construction rather than by
+  convention.
+- A parser for ScribeKit's own Markdown, `TranscriptDocument`, which reads a
+  written transcript back into its header fields and its finalised spans.
+  Structure is never inferred from the shape of a line: the paragraph after a
+  timestamp is consumed positionally, so recognised speech that reads like
+  Markdown stays speech, and ScribeKit's own header, minute headings, gap
+  blockquotes, interruption notice and footer never become searchable text.
+- Legacy transcripts in history. A directory holding a ScribeKit transcript with
+  no session record is listed as a legacy meeting, with only the facts its
+  transcript states and no invented start time. Markdown ScribeKit did not write
+  is not listed. Recovery is unchanged: a session with no record is still not an
+  unfinished meeting.
+- A disposable in-memory search index. It precomputes the lower-cased ASCII bytes
+  of each span when History loads, is rebuilt on every refresh, and is never
+  written to disk. Measured in a debug build, it took a query over 200 one-hour
+  meetings from 1.1 s to 100–160 ms.
+
 - Background meeting operation. A meeting now keeps capturing, recognising,
   writing its transcript and writing its retained recording while the main
   window is hidden, minimised, covered or closed. Closing the window no longer
@@ -31,6 +64,9 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- The main window now has two tabs, Meeting and History, in place of the single
+  meeting screen. Both read the same application-scoped `MeetingRuntime` and
+  neither owns it, so moving between them starts, stops and duplicates nothing.
 - The active meeting is owned by the application rather than by the meeting
   screen. `MeetingSetupCaptureModel` is now `MeetingRuntime`, created by the
   application delegate and handed to the views, and the screen no longer stops

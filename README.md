@@ -15,7 +15,8 @@ transcripts to a folder you choose, on your machine.
 
 **Status: early development.** Audio capture from selected applications, live
 on-device transcription, durable Markdown transcripts, crash recovery, optional
-audio retention and background operation with a menu bar item work end to end.
+audio retention, background operation with a menu bar item, and local transcript
+history and search work end to end.
 
 ## Philosophy
 
@@ -100,6 +101,28 @@ audio retention and background operation with a menu bar item work end to end.
   the transcript and the audio file before the application exits. Quitting is
   not a crash, and ScribeKit does not leave a meeting for the next launch to
   discover when it could simply finish it.
+- Local transcript history. A History screen lists the meetings in your save
+  folder — completed, failed, interrupted, and the one running right now —
+  newest first, with each meeting's status, times, applications, language,
+  transcript size and whether a recording is beside it. Selecting one shows its
+  details and a preview of its transcript, and reveals the transcript or the
+  recording in the Finder or opens the transcript in whichever application you
+  use for Markdown.
+- Local search across those transcripts. Plain, case-insensitive text search
+  over meeting titles, recognised speech and captured application names, with a
+  short excerpt of the matching passage and the transcript timestamp it came
+  from. It is deterministic substring matching, not semantic or AI search: no
+  embeddings, no vector database, no cloud service, and no index file written
+  anywhere near your transcripts.
+- History that reads and never writes. Listing, previewing, refreshing and
+  searching leave every transcript, recording and session record byte-identical,
+  including their modification dates. A meeting whose session record is damaged,
+  missing or written by a newer ScribeKit is reported as such and left exactly
+  as it is, and never stops the rest of the folder from listing.
+- A directory holding a ScribeKit transcript with no session record — written
+  before session records existed — is listed as a legacy meeting with only the
+  facts its transcript actually states. Markdown ScribeKit did not write is not
+  listed as a meeting.
 - Remembered setup choices: the audio retention mode and the applications last
   selected, matched against a fresh discovery on each launch.
 - Domain models for the session lifecycle, audio retention, capture sources and
@@ -134,7 +157,6 @@ All of the following are *planned*, not available:
 
 - Pausing and resuming a meeting.
 - Continuing an interrupted meeting into the same session.
-- Transcript search and history.
 - Post-meeting review of uncertain passages, against the retained audio.
 - Playback of a retained recording inside ScribeKit.
 - Optional derived notes that never modify the raw transcript.
@@ -191,8 +213,10 @@ Unit tests use [Swift Testing](https://developer.apple.com/documentation/testing
 ScribeKit/
   App/                    App entry point
   Capture/                Application source discovery and audio capture
+  Features/History/       SwiftUI history screen and its state
   Features/MeetingSetup/  SwiftUI configuration screen and its state
   Features/MenuBar/       Menu bar item and the state it presents
+  History/                Reading past sessions back, and searching them
   Meeting/                The application-scoped active meeting and its runtime
   Models/                 Domain value types (no I/O)
   Persistence/            Save-location storage and session layout policy
@@ -235,6 +259,15 @@ versioned record, and `SessionRecoveryService` is the policy that decides what
 counts as an unfinished meeting — so the setup screen displays recovery rather
 than implementing it.
 
+History asks a different question of the same folder and keeps its own layer for
+it. `HistoryStoring` is a read-only filesystem boundary — it has no method that
+creates, replaces, appends to or deletes anything — `TranscriptDocument` reads a
+written transcript back into its header fields and its finalised spans,
+`HistoryService` is the policy that decides what counts as a meeting, and
+`TranscriptSearch` is a pure matcher over what a load produced. Recovery keeps
+its own store because recording an interruption is a write, and history never
+writes.
+
 ## Roadmap
 
 1. **Foundation** — domain models, configuration UI, tests, CI, docs.
@@ -245,8 +278,9 @@ than implementing it.
 6. **Timestamped Markdown persistence and autosave**.
 7. **Crash and session recovery**.
 8. **Optional audio retention**.
-9. **Background and menu bar operation** *(current)*.
-10. Transcript history, search and uncertainty review, and derived notes.
+9. **Background and menu bar operation**.
+10. **Transcript history and local search** *(current)*.
+11. Uncertainty review against the retained audio, and derived notes.
 
 ## Known limitations
 
@@ -341,6 +375,31 @@ than implementing it.
   reads the same wherever it is opened.
 - A moved folder is followed only when macOS reports its bookmark as stale; a
   folder that was deleted, or whose disk is absent, has to be chosen again.
+- History lists only the save folder you chose, one level deep. It does not
+  search your Mac for transcripts, does not follow a folder you moved a session
+  out of, and does not remember meetings from a folder you have since replaced.
+- History reads the folder when it opens, when you refresh, and when a meeting
+  finishes. There is no filesystem watcher, so a session added by something else
+  while History is open appears on the next refresh.
+- Search is plain substring matching. There is no fuzzy matching, no stemming
+  and no synonyms, so a search for `closures` does not find `closure`, and a
+  recogniser's misheard word is found only by searching for what it actually
+  wrote. Searching for a phrase does not find it if it was split across two
+  finalised spans.
+- Search does not match ScribeKit's own writing in a transcript — the header,
+  minute headings, gap markers, the interruption notice and the footer — so a
+  query for `Transcription gap` finds nothing. Titles and application names are
+  searched as metadata.
+- Whole transcripts are held in memory while History is open, so its cost grows
+  with the folder. Measured on this Mac in a debug build, 200 one-hour meetings
+  — 48,000 spans, 7.9 MB of transcript — load in 0.82 s and search in 100–160 ms
+  per query, for a 17 MB memory increase. A folder several times larger would
+  justify an on-disk index; nothing smaller does.
+- History shows a meeting that is running as In Progress and reads its transcript
+  as it grows. It never writes to that transcript, and cannot start or stop the
+  meeting.
+- Transcript history is read-only. ScribeKit has no editor, no rename, no delete
+  and no export; the files are yours to manage in the Finder.
 - CI runs build and unit tests only — no linting, formatting, coverage or UI tests.
 
 ## License
