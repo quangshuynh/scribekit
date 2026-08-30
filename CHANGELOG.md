@@ -6,6 +6,34 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Optional audio retention. A meeting can now keep its captured audio beside
+  the transcript: `audio.caf` (linear PCM in a CAF container, in exactly the
+  48 kHz mono float the capture system delivers, measured at 691 MB an hour) or
+  `audio.m4a` (AAC at 64 kbit/s, measured at 31 MB an hour). The default is
+  still to keep none, and no audio file is created in that mode.
+- Streaming audio writing behind an `AudioRetaining` boundary. The retainer is
+  a consumer of captured buffers rather than a queue in front of one: each
+  buffer is written on the capture system's delivery queue before the call
+  returns, so there is no backlog to bound, no audio is dropped to keep up, and
+  a multi-hour meeting costs the same memory as a one-minute one.
+- Audio retention in the session lifecycle. The audio file is opened after the
+  transcript and before recognition, so a meeting that cannot keep the audio it
+  was told to keep never captures anything, and it is closed before the
+  transcript, so a session is never recorded as completed while one of its
+  artifacts is still open. A recording that fails or cannot be finalised ends
+  the meeting as failed, and the partial file is closed and left where it is.
+- Retention state in the session record. `session.json` now carries the
+  meeting's retention mode and, when there is one, the recording's name. Both
+  are optional additions at schema version 1: a record written before they
+  existed still reads, which is why the version was not raised.
+- Retained recordings in startup recovery. An unfinished meeting that was
+  recording is reported with its recording's size, stated as a file that was
+  still being written rather than as one that is known to play. Discovery reads
+  attributes and changes nothing.
+- An audio file status, path and Show Audio in Finder control on the meeting
+  screen, and a retention picker disabled while a meeting runs, since the
+  choice is fixed for a run.
+
 - Session recovery. Each session directory now carries
   `.scribekit/session.json`, a schema-versioned record of where the session
   stands: in progress, completed, failed, or interrupted. It is written before
@@ -130,6 +158,9 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- `SessionCompletionOutcome.completed` now means every durable artifact the
+  meeting enabled was finished, not the transcript alone. A meeting whose
+  recording could not be finalised is recorded as failed.
 - `TranscriptPersisting.finishSession` now takes how the meeting ended, so a
   meeting stopped by a save failure is recorded as failed rather than left
   looking like one that vanished.

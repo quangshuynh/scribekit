@@ -66,19 +66,28 @@ failure is reported as one — never papered over with a claim that the
 transcript was saved, and never left running so that recognised speech
 accumulates with nowhere to go.
 
-Persisted session completion never precedes successful transcript
-finalisation. A stored record saying a meeting completed is a claim about a
-file, so it is written only once that file has been flushed and closed, and a
-completion that cannot be recorded leaves the session recorded as unfinished
+Persisted session completion never precedes successful finalisation of every
+durable artifact the meeting enabled — the transcript, and a retained audio
+file when there is one. A stored record saying a meeting completed is a claim
+about files, so it is written only once they have been flushed and closed, and
+a completion that cannot be recorded leaves the session recorded as unfinished
 rather than falsely as finished. Reading such a record back may not invent what
 was never written: not the moment the process stopped, not the length of a gap,
 and not a word of speech.
+
+A durable artifact that fails is reported, never hidden and never deleted. A
+retained recording that cannot be written or cannot be finalised ends the
+meeting rather than continuing with a silent hole in it, and whatever reached
+the file is closed and left where it is — meeting audio cannot be captured
+again.
 
 ## Privacy
 
 - Everything stays on the user's machine unless the user explicitly exports it.
 - No network calls for telemetry, analytics or crash reporting.
 - Audio is retained only when the user opts in; the default retains none.
+  Retained audio is an ordinary file in the folder the user chose, never
+  encrypted or hidden, and it is never uploaded.
 - Capture is always visible to the user. Never add hidden or silent recording.
 
 ## Efficiency
@@ -92,7 +101,9 @@ do not knowingly introduce a hot loop either.
 A live capture pipeline uses bounded memory and never routes high-frequency
 audio callbacks through the main actor. Buffers are handled on the capture
 system's own queue, whatever the interface shows is a coalesced summary, and no
-part of the pipeline accumulates a meeting's audio in memory.
+part of the pipeline accumulates a meeting's audio in memory. Retained audio is
+streamed to disk as it is captured, for the same reason: a meeting's audio is
+written, never collected.
 
 Every queue between a producer of audio and a consumer of it is bounded, and
 overflow is measured and reported. An unbounded `AsyncStream` or array between

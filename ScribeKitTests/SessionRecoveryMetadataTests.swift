@@ -157,4 +157,103 @@ struct SessionRecoveryMetadataTests {
         #expect(metadata().transcriptURL(in: moved).path(percentEncoded: false)
                 == "/Volumes/Backup/2026-08-31-training/transcript.md")
     }
+
+    @Test("A record says what the meeting was keeping of its audio")
+    func recordsAudioRetention() throws {
+        let record = SessionRecoveryMetadata(
+            sessionID: sessionID,
+            title: "iOS Training - Day 2",
+            startedAt: startedAt,
+            sourceNames: ["QuickTime Player"],
+            localeIdentifier: "en-US",
+            audioRetention: .compressed,
+            audioPath: "audio.m4a",
+            status: .inProgress
+        )
+
+        let text = try String(decoding: record.encoded(), as: UTF8.self)
+        #expect(text.contains("\"audioRetention\" : \"compressed\""))
+        #expect(text.contains("\"audioPath\" : \"audio.m4a\""))
+        #expect(try SessionRecoveryMetadata.decoded(from: record.encoded()) == record)
+    }
+
+    @Test("A meeting keeping no audio names no audio file")
+    func noRetentionNamesNoFile() throws {
+        let record = SessionRecoveryMetadata(
+            sessionID: sessionID,
+            title: "iOS Training - Day 2",
+            startedAt: startedAt,
+            sourceNames: ["QuickTime Player"],
+            localeIdentifier: "en-US",
+            audioRetention: AudioRetentionMode.none,
+            audioPath: nil,
+            status: .inProgress
+        )
+
+        let text = try String(decoding: record.encoded(), as: UTF8.self)
+        #expect(text.contains("\"audioRetention\" : \"none\""))
+        #expect(!text.contains("audioPath"))
+        #expect(record.audioURL(in: URL(filePath: "/tmp/session", directoryHint: .isDirectory)) == nil)
+    }
+
+    @Test("A record written before audio retention existed is still a version one record")
+    func earlierRecordsStillDecode() throws {
+        // Exactly the fields version one carried before retention was added.
+        let json = """
+            {
+              "schemaVersion" : 1,
+              "sessionID" : "\(sessionID.uuidString)",
+              "title" : "Closures Walkthrough",
+              "startedAt" : "2026-08-31T15:00:00Z",
+              "sourceNames" : ["QuickTime Player"],
+              "localeIdentifier" : "en-US",
+              "transcriptPath" : "transcript.md",
+              "status" : "inProgress"
+            }
+            """
+
+        let decoded = try SessionRecoveryMetadata.decoded(from: Data(json.utf8))
+
+        #expect(decoded.schemaVersion == 1)
+        #expect(decoded.audioRetention == nil)
+        #expect(decoded.audioPath == nil)
+        #expect(decoded.status == .inProgress)
+    }
+
+    @Test("The recording is found relative to the directory the record was read from")
+    func audioIsFoundRelativeToItsDirectory() {
+        let record = SessionRecoveryMetadata(
+            sessionID: sessionID,
+            title: "Closures Walkthrough",
+            startedAt: startedAt,
+            sourceNames: [],
+            localeIdentifier: "en-US",
+            audioRetention: .raw,
+            audioPath: "audio.caf",
+            status: .inProgress
+        )
+        let moved = URL(filePath: "/Users/someone/Meetings/2026-08-31-closures", directoryHint: .isDirectory)
+
+        #expect(record.audioURL(in: moved)?.path(percentEncoded: false)
+                == "/Users/someone/Meetings/2026-08-31-closures/audio.caf")
+    }
+
+    @Test("Closing a session keeps what it was recording")
+    func closingKeepsRetention() {
+        let record = SessionRecoveryMetadata(
+            sessionID: sessionID,
+            title: "Closures Walkthrough",
+            startedAt: startedAt,
+            sourceNames: [],
+            localeIdentifier: "en-US",
+            audioRetention: .raw,
+            audioPath: "audio.caf",
+            status: .inProgress
+        )
+
+        let closed = record.closed(.completed, at: startedAt.addingTimeInterval(600))
+
+        #expect(closed.audioRetention == .raw)
+        #expect(closed.audioPath == "audio.caf")
+    }
 }

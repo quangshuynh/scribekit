@@ -68,7 +68,7 @@ struct SessionRecoveryServiceTests {
             session,
             in: destination,
             metadata: record,
-            transcript: TranscriptFileInfo(byteCount: 413, modifiedAt: startedAt.addingTimeInterval(600))
+            transcript: SessionFileInfo(byteCount: 413, modifiedAt: startedAt.addingTimeInterval(600))
         )
         let (service, _) = makeService(store)
 

@@ -14,8 +14,8 @@ quietly while you work in other applications and writes timestamped Markdown
 transcripts to a folder you choose, on your machine.
 
 **Status: early development.** Audio capture from selected applications, live
-on-device transcription and durable Markdown transcripts work end to end;
-crash recovery, background operation and audio retention do not.
+on-device transcription, durable Markdown transcripts, crash recovery and
+optional audio retention work end to end; background operation does not.
 
 ## Philosophy
 
@@ -75,16 +75,22 @@ crash recovery, background operation and audio retention do not.
   with a security-scoped bookmark, with honest reporting when the folder has
   been moved, deleted or had its access revoked, and controls to replace or
   forget it.
+- Optional audio retention. A meeting keeps no audio by default; choosing Raw
+  or Compressed writes one audio file beside the transcript as the meeting
+  runs, streamed to disk buffer by buffer rather than held in memory. The file
+  is closed before the session is recorded as finished, and a recording that
+  fails or cannot be finalised is reported and left on disk rather than deleted
+  or quietly completed.
 - Remembered setup choices: the audio retention mode and the applications last
   selected, matched against a fresh discovery on each launch.
 - Domain models for the session lifecycle, audio retention, capture sources and
   session metadata, with unit tests.
 - Shared Xcode scheme and a macOS CI workflow that builds and runs unit tests.
 
-No audio file is written in any mode yet. A session produces the user-owned
-`transcript.md` and one small operational record in a hidden `.scribekit`
-folder beside it; losing or failing to read that record never makes the
-transcript unusable.
+A session produces the user-owned `transcript.md`, one small operational record
+in a hidden `.scribekit` folder beside it, and — only when audio retention is
+switched on — one audio file. Losing or failing to read the record never makes
+the transcript unusable, and no retention mode changes a word of it.
 
 Listing applications and capturing their audio require Screen & System Audio
 Recording permission, which macOS asks for the first time ScribeKit looks for
@@ -110,17 +116,26 @@ All of the following are *planned*, not available:
 - Meeting lifecycle with background operation and a menu bar presence.
 - Continuing an interrupted meeting into the same session.
 - Transcript search and history.
-- Post-meeting review of uncertain passages.
-- Optional audio retention (none / raw / compressed).
+- Post-meeting review of uncertain passages, against the retained audio.
+- Playback of a retained recording inside ScribeKit.
 - Optional derived notes that never modify the raw transcript.
 
 ## Audio retention modes
 
-| Mode | Behaviour |
-| --- | --- |
-| No Audio File | Default. Only the transcript is kept; no audio touches disk. |
-| Raw | Lossless audio kept alongside the transcript. Largest files. |
-| Compressed | Lossy audio kept as a smaller reviewable record. |
+Audio retention is opt-in and off by default. When it is on, one file is
+written into the session directory beside `transcript.md`, incrementally, while
+the meeting runs. The file stays on your Mac: nothing is uploaded, and nothing
+is encrypted — anyone who can read the folder can play the recording.
+
+| Mode | File | Behaviour |
+| --- | --- | --- |
+| No Audio File | none | Default. Only the transcript is kept; no audio touches disk. |
+| Raw (Lossless) | `audio.caf` | Linear PCM in a CAF container, in exactly the 48 kHz mono 32-bit float audio ScreenCaptureKit delivered. Measured at 691 MB an hour. |
+| Compressed | `audio.m4a` | AAC at 64 kbit/s in an MPEG-4 container. Measured at 31 MB an hour — about a twentieth of the raw size. |
+
+Both files open in QuickTime Player and anything else that reads standard
+macOS audio. A recording's time zero is the first captured audio frame, which
+is the same origin the transcript's own segment offsets are measured from.
 
 ## Efficiency goals
 
@@ -179,9 +194,11 @@ bookmark data never reaches the setup screen, and session directory naming is a
 pure policy separate from any filesystem work.
 
 A session is laid out as a directory named from its date and title, holding
-`transcript.md` and a hidden `.scribekit/session.json`. `SessionArtifactLayout`
-also names an optional audio file, which is not written yet. Durable writing
-sits behind `TranscriptPersisting`, with Markdown formatting separated from
+`transcript.md`, a hidden `.scribekit/session.json`, and an `audio.caf` or
+`audio.m4a` when audio retention is on. Durable writing sits behind
+`TranscriptPersisting`, retained audio behind `AudioRetaining` — a consumer of
+captured buffers rather than a queue in front of one, so audio is written where
+it arrives and no backlog can build up — with Markdown formatting separated from
 filesystem work and an actor owning one session's folder lease, open file and
 position in the document. Recovery is built on the same separation:
 `SessionRecoveryStoring` is the filesystem, `SessionRecoveryMetadata` is the
@@ -197,9 +214,9 @@ than implementing it.
 4. **Audio capture from the selected applications**.
 5. **On-device transcription**.
 6. **Timestamped Markdown persistence and autosave**.
-7. **Crash and session recovery** *(current)*.
-8. Background and menu bar operation.
-9. Optional audio retention.
+7. **Crash and session recovery**.
+8. **Optional audio retention** *(current)*.
+9. Background and menu bar operation.
 10. Transcript history, search and uncertainty review, and derived notes.
 
 ## Known limitations
@@ -223,7 +240,22 @@ than implementing it.
 - A damaged or newer-format session record is reported and left exactly as it
   is. ScribeKit never repairs, rewrites or deletes one, and never deletes a
   transcript.
-- No audio is kept, played back or written anywhere, in any retention mode.
+- Audio retention writes a file; it does not play one. There is no playback,
+  waveform or scrubber in ScribeKit, and a retained recording is reviewed in
+  another application.
+- A recording is not encrypted. It is an ordinary audio file in the folder you
+  chose, and it is as private as that folder is.
+- A recording left behind by a crash is a different thing in each format: a
+  partly written `audio.caf` opens and plays up to the moment ScribeKit
+  stopped, while a partly written `audio.m4a` does not open at all, because an
+  MPEG-4 container is only completed when the file is closed. ScribeKit reports
+  the file's size and does not repair either one.
+- A recording that fails mid-meeting ends the meeting. ScribeKit will not keep
+  transcribing while quietly leaving a hole in a file the user asked for.
+- Audio arriving in a different format from the one capture was asked for is
+  refused rather than resampled, because a file's format is fixed when it is
+  created. On this Mac ScreenCaptureKit has always delivered the format that
+  was requested.
 - A start that fails after the transcript was created leaves that session
   folder behind, holding a transcript with a header and no speech. ScribeKit
   does not delete folders it created.

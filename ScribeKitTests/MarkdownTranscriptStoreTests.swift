@@ -206,12 +206,18 @@ struct MarkdownTranscriptStoreTests {
         #expect(fileStore.files == [layout.transcriptURL])
     }
 
-    @Test("No audio file and no metadata file are created")
-    func onlyTheTranscriptIsCreated() async throws {
+    @Test("The transcript writer creates no audio file, whatever the meeting is keeping", arguments: [
+        AudioRetentionMode.none, .raw, .compressed
+    ])
+    func onlyTheTranscriptIsCreated(retention: AudioRetentionMode) async throws {
         let (store, fileStore, _) = makeStore()
+        var meeting = session
+        meeting.audioRetention = retention
 
-        _ = try await start(store)
+        _ = try await store.startSession(meeting, localeIdentifier: "en-US", startedAt: startedAt)
 
+        // Audio is a separate artifact with a separate owner: this writer
+        // creates the transcript and the record, and nothing else.
         #expect(fileStore.files.count == 1)
         #expect(fileStore.files.allSatisfy { $0.pathExtension == "md" })
     }
@@ -532,8 +538,28 @@ struct MarkdownTranscriptStoreTests {
         #expect(record.sourceNames == ["Microsoft Teams"])
         #expect(record.localeIdentifier == "en-US")
         #expect(record.transcriptPath == "transcript.md")
+        #expect(record.audioRetention == AudioRetentionMode.none)
+        #expect(record.audioPath == nil)
         #expect(record.endedAt == nil)
         #expect(layout.metadataURL.path(percentEncoded: false).hasSuffix(".scribekit/session.json"))
+    }
+
+    @Test("The record names the recording a meeting is keeping", arguments: [
+        (AudioRetentionMode.raw, "audio.caf"),
+        (AudioRetentionMode.compressed, "audio.m4a")
+    ])
+    func recordNamesTheRecording(retention: AudioRetentionMode, name: String) async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+        var meeting = session
+        meeting.audioRetention = retention
+
+        let layout = try await store.startSession(meeting, localeIdentifier: "en-US", startedAt: startedAt)
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+
+        #expect(record.audioRetention == retention)
+        #expect(record.audioPath == name)
+        #expect(record.audioURL(in: layout.directory) == layout.audioURL(for: retention))
     }
 
     @Test("A meeting whose session record cannot be written does not begin")

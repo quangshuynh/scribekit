@@ -74,14 +74,15 @@ extension SessionRecoveryError: LocalizedError {
     }
 }
 
-/// What ScribeKit can tell about a transcript file without reading its text.
+/// What ScribeKit can tell about one of a session's files without opening it.
 ///
-/// Recovery needs to know that the transcript is there and when it last grew;
-/// it does not need its contents, and reading a multi-hour transcript at
+/// Recovery needs to know that the transcript is there and when it last grew,
+/// and the same two facts about a retained recording; it needs the contents of
+/// neither, and reading a multi-hour transcript or a gigabyte of audio at
 /// launch to answer a question the file's own attributes answer would be work
 /// for nothing.
-nonisolated struct TranscriptFileInfo: Equatable, Sendable {
-    /// The transcript's size in bytes.
+nonisolated struct SessionFileInfo: Equatable, Sendable {
+    /// The file's size in bytes.
     let byteCount: Int
 
     /// When the file was last written, as the filesystem records it.
@@ -94,7 +95,7 @@ nonisolated struct TranscriptFileInfo: Equatable, Sendable {
     /// Creates the description.
     ///
     /// - Parameters:
-    ///   - byteCount: The transcript's size in bytes.
+    ///   - byteCount: The file's size in bytes.
     ///   - modifiedAt: When the file was last written.
     init(byteCount: Int, modifiedAt: Date?) {
         self.byteCount = byteCount
@@ -155,7 +156,19 @@ nonisolated protocol SessionRecoveryStoring: Sendable {
     /// - Throws: ``SessionRecoveryError/transcriptMissing`` when it is not
     ///   there, or ``SessionRecoveryError/transcriptUnreadable`` when it
     ///   cannot be examined.
-    func transcriptInfo(at url: URL) throws -> TranscriptFileInfo
+    func transcriptInfo(at url: URL) throws -> SessionFileInfo
+
+    /// Describes a retained audio file without opening it.
+    ///
+    /// Absence is an answer rather than a failure: a meeting killed before its
+    /// first captured buffer has a record that names an audio file and no file
+    /// beside it, and that is a fact about the meeting, not a damaged session.
+    /// Nothing here decodes the recording or claims it will play.
+    ///
+    /// - Parameter url: The recording's location.
+    /// - Returns: Its size and modification date, or `nil` when it is not
+    ///   there or cannot be examined.
+    func audioInfo(at url: URL) -> SessionFileInfo?
 
     /// Appends text to the end of an existing transcript.
     ///
@@ -220,17 +233,32 @@ nonisolated struct FileManagerSessionRecoveryStore: SessionRecoveryStoring {
         }
     }
 
-    func transcriptInfo(at url: URL) throws -> TranscriptFileInfo {
+    func transcriptInfo(at url: URL) throws -> SessionFileInfo {
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
             throw SessionRecoveryError.transcriptMissing
         }
+        guard let info = Self.fileInfo(at: url) else {
+            throw SessionRecoveryError.transcriptUnreadable
+        }
+        return info
+    }
+
+    func audioInfo(at url: URL) -> SessionFileInfo? {
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return nil }
+        return Self.fileInfo(at: url)
+    }
+
+    /// Reads a file's size and modification date from the filesystem.
+    ///
+    /// - Parameter url: The file to describe.
+    /// - Returns: Its size and modification date, or `nil` when it cannot be
+    ///   examined.
+    private static func fileInfo(at url: URL) -> SessionFileInfo? {
         guard FileManager.default.isReadableFile(atPath: url.path(percentEncoded: false)),
               let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
               let size = values.fileSize
-        else {
-            throw SessionRecoveryError.transcriptUnreadable
-        }
-        return TranscriptFileInfo(byteCount: size, modifiedAt: values.contentModificationDate)
+        else { return nil }
+        return SessionFileInfo(byteCount: size, modifiedAt: values.contentModificationDate)
     }
 
     func appendToTranscript(_ text: String, at url: URL) throws {

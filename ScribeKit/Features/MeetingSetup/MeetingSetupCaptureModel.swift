@@ -6,22 +6,27 @@
 import Foundation
 
 /// Owns the live pipeline behind the meeting setup screen: capture, on-device
-/// recognition, durable transcript writing, and the order between them.
+/// recognition, durable transcript writing, optional audio retention, and the
+/// order between them.
 ///
-/// The model drives an ``AudioCapturing``, a ``SpeechTranscribing`` and a
-/// ``TranscriptPersisting`` value and never touches ScreenCaptureKit, the
-/// Speech framework or the filesystem itself, so a whole meeting is testable
-/// without capture permission, a speech model, a save folder or a disk.
+/// The model drives an ``AudioCapturing``, a ``SpeechTranscribing``, a
+/// ``TranscriptPersisting`` and an ``AudioRetaining`` value and never touches
+/// ScreenCaptureKit, the Speech framework, a codec or the filesystem itself, so
+/// a whole meeting is testable without capture permission, a speech model, a
+/// save folder or a disk.
 ///
 /// Audio does not pass through here. The capturer delivers buffers on its own
-/// queue to a fan-out consumer that feeds the activity summary and the
-/// transcriber; the main actor sees coalesced summaries and transcription
-/// events only, and file writes happen on the writer's own executor.
+/// queue to a fan-out consumer that feeds the activity summary, the transcriber
+/// and — when the user asked to keep audio — the retainer that writes them to a
+/// file. The main actor sees coalesced summaries and transcription events only;
+/// transcript writes happen on the writer's own executor and audio writes on
+/// the capture queue.
 ///
 /// The durability invariant this type is responsible for: a finalised span the
 /// writer accepted is never discarded, and a stop does not report a finished
-/// meeting until every event the recogniser produced has been handled and the
-/// transcript has been flushed and closed.
+/// meeting until every event the recogniser produced has been handled and every
+/// durable artifact the meeting enabled — the transcript, and the audio file
+/// when there is one — has been flushed and closed.
 @MainActor
 @Observable
 final class MeetingSetupCaptureModel {
@@ -52,6 +57,10 @@ final class MeetingSetupCaptureModel {
     /// The durable transcript's current state.
     private(set) var persistenceState: TranscriptPersistenceState = .idle
 
+    /// The retained audio file's current state. Stays ``AudioRetentionState/idle``
+    /// for the whole of a meeting that keeps no audio.
+    private(set) var audioRetentionState: AudioRetentionState = .idle
+
     /// Whether on-device recognition can run in the selected locale.
     private(set) var availability: SpeechRecognitionAvailability = .unknown
 
@@ -71,6 +80,7 @@ final class MeetingSetupCaptureModel {
     private let capturer: AudioCapturing
     private let transcriber: any SpeechTranscribing
     private let persistence: any TranscriptPersisting
+    private let audio: any AudioRetaining
     private let monitor: AudioCaptureActivityMonitor
     private var recoveryAttempts = 0
 
@@ -94,6 +104,9 @@ final class MeetingSetupCaptureModel {
     /// Observes transcription events for as long as the model exists.
     private var eventTask: Task<Void, Never>?
 
+    /// Observes retained-audio failures for as long as the model exists.
+    private var retentionFailureTask: Task<Void, Never>?
+
     /// Creates a model with its own capture, recognition and writing stack.
     ///
     /// - Parameters:
@@ -103,6 +116,8 @@ final class MeetingSetupCaptureModel {
     ///     default is the on-device Apple recogniser; tests substitute a fake.
     ///   - persistence: Writes the durable Markdown transcript. The default
     ///     writes real files; tests substitute a double.
+    ///   - audio: Writes the retained audio file, when the meeting keeps one.
+    ///     The default writes real files; tests substitute a double.
     ///   - transcript: The transcript the run fills in. A fresh one by
     ///     default.
     ///   - makeCapturer: Builds the capturer around the audio consumers. The
@@ -112,6 +127,7 @@ final class MeetingSetupCaptureModel {
         monitor: AudioCaptureActivityMonitor = AudioCaptureActivityMonitor(),
         transcriber: any SpeechTranscribing = AppleSpeechTranscriber(),
         persistence: any TranscriptPersisting = MarkdownTranscriptStore(),
+        audio: any AudioRetaining = RetainedAudioRecorder(),
         transcript: LiveTranscriptModel? = nil,
         makeCapturer: (AudioSampleConsuming) -> AudioCapturing = {
             ScreenCaptureKitAudioCapturer(consumer: $0)
@@ -120,8 +136,9 @@ final class MeetingSetupCaptureModel {
         self.monitor = monitor
         self.transcriber = transcriber
         self.persistence = persistence
+        self.audio = audio
         self.transcript = transcript ?? LiveTranscriptModel()
-        self.capturer = makeCapturer(BroadcastingAudioSampleConsumer([monitor, transcriber]))
+        self.capturer = makeCapturer(BroadcastingAudioSampleConsumer([monitor, transcriber, audio]))
         monitor.onUpdate = { [weak self] activity in
             Task { @MainActor [weak self] in self?.activity = activity }
         }
@@ -135,6 +152,12 @@ final class MeetingSetupCaptureModel {
         eventTask = Task { [weak self] in
             for await event in events {
                 await self?.handle(event)
+            }
+        }
+        let retentionFailures = audio.failures
+        retentionFailureTask = Task { [weak self] in
+            for await failure in retentionFailures {
+                self?.handleRetentionFailure(failure)
             }
         }
     }
@@ -183,6 +206,7 @@ final class MeetingSetupCaptureModel {
     /// Whether a meeting is running or in the middle of starting or stopping.
     var isRunning: Bool {
         captureState.isActive || transcriptionState.isActive || persistenceState.isActive
+            || audioRetentionState.isActive
     }
 
     /// Whether the interface should offer to start a meeting.
@@ -193,20 +217,25 @@ final class MeetingSetupCaptureModel {
     func canStart(_ request: MeetingStartRequest?) -> Bool {
         guard let request else { return false }
         return captureState.canStart && transcriptionState.canStart && !persistenceState.isActive
-            && !request.sources.isEmpty && availability.canTranscribe
+            && !audioRetentionState.isActive && !request.sources.isEmpty && availability.canTranscribe
     }
 
     /// Whether the interface should offer to stop.
     var canStop: Bool { captureState.canStop || transcriptionState.canStop }
 
-    /// Starts a meeting: the transcript file, then recognition, then capture.
+    /// Starts a meeting: the transcript file, then the audio file, then
+    /// recognition, then capture.
     ///
     /// The order is the order of dependency. The transcript is created first,
     /// because a meeting that cannot be saved should not capture anything at
-    /// all; recognition next, because capturing audio nothing will transcribe
-    /// holds system resources for no result; capture last. Every step undoes
-    /// the ones before it when it fails, so a failed start never leaves a file
-    /// open, a folder leased or half a pipeline running.
+    /// all; the retained audio file next, because it is the other durable
+    /// artifact the user asked for and a meeting that cannot keep the audio it
+    /// was told to keep should not run either; recognition next, because
+    /// capturing audio nothing will transcribe holds system resources for no
+    /// result; capture last, so no buffer is delivered before everything that
+    /// wants one is ready. Every step undoes the ones before it when it fails,
+    /// so a failed start never leaves a file open, a folder leased or half a
+    /// pipeline running — and never records a session as completed.
     ///
     /// - Parameter request: The meeting to start.
     func start(_ request: MeetingStartRequest) async {
@@ -228,14 +257,16 @@ final class MeetingSetupCaptureModel {
         persistenceState = .preparing
         transcriptionState = .preparing
         captureState = .preparing
+        audioRetentionState = request.audioRetention.retainsAudio ? .preparing : .idle
         recoveryAttempts = 0
         droppedEventBaseline = transcriber.eventTally.dropped
         monitor.reset()
         activity = .none
         transcript.begin(at: startedAt)
 
+        let layout: SessionArtifactLayout
         do {
-            let layout = try await persistence.startSession(
+            layout = try await persistence.startSession(
                 request.makeSession(createdAt: startedAt),
                 localeIdentifier: localeIdentifier,
                 startedAt: startedAt
@@ -245,6 +276,25 @@ final class MeetingSetupCaptureModel {
             persistenceState = .failed(message: message(for: error, sources: []), layout: nil)
             transcriptionState = .idle
             captureState = .idle
+            audioRetentionState = .idle
+            return
+        }
+
+        let captureConfiguration = AudioCaptureConfiguration(sources: request.sources)
+        do {
+            let url = try audio.startSession(
+                mode: request.audioRetention,
+                layout: layout,
+                format: captureConfiguration.requestedFormat
+            )
+            audioRetentionState = url.map { .retaining($0) } ?? .idle
+        } catch {
+            audioRetentionState = .failed(message: message(for: error, sources: []), url: nil)
+            transcriptionState = .idle
+            captureState = .idle
+            // The transcript is closed without claiming a completion: nothing
+            // was captured, so the meeting did not finish, it never began.
+            await closeSession(outcome: .failed)
             return
         }
 
@@ -260,7 +310,7 @@ final class MeetingSetupCaptureModel {
         }
 
         do {
-            try await capturer.start(configuration: AudioCaptureConfiguration(sources: request.sources))
+            try await capturer.start(configuration: captureConfiguration)
             captureState = .capturing
         } catch {
             await transcriber.stop()
@@ -273,11 +323,12 @@ final class MeetingSetupCaptureModel {
     /// Stops the meeting, in the order that loses nothing.
     ///
     /// Capture stops first so no audio arrives after the recogniser has closed
-    /// its input; the recogniser then finalises what it has already accepted,
-    /// so the last sentence of a meeting is not lost; every event it produced
-    /// is handled and written before the transcript is flushed and closed.
-    /// Only then is the folder lease released and the meeting reported as
-    /// over.
+    /// its input and after the audio file stops accepting frames; the
+    /// recogniser then finalises what it has already accepted, so the last
+    /// sentence of a meeting is not lost; every event it produced is handled
+    /// and written; then the retained audio file is closed, and last the
+    /// transcript is flushed, closed and recorded. Only then is the folder
+    /// lease released and the meeting reported as over.
     func stop() async {
         guard canStop else { return }
         captureState = .stopping
@@ -307,19 +358,85 @@ final class MeetingSetupCaptureModel {
         }
     }
 
-    /// Finishes the durable transcript and releases the folder.
+    /// Closes the meeting's durable artifacts and releases the folder.
+    ///
+    /// The audio file is closed first and the transcript second, because the
+    /// transcript's own writer records the session as finished and owns the
+    /// folder lease the audio file was written under: nothing may claim a
+    /// meeting completed while one of its artifacts is still open. A retained
+    /// recording that could not be finalised therefore turns a completion into
+    /// a failure, and the transcript is still flushed and closed either way.
     ///
     /// A session that has already failed is left alone: its resources were
     /// released when it failed, and overwriting the failure with a success
     /// would be the one thing this model must never do.
-    private func closeSession() async {
+    ///
+    /// - Parameter outcome: How the meeting is being closed, when the caller
+    ///   already knows it did not finish normally.
+    private func closeSession(outcome: SessionCompletionOutcome = .completed) async {
+        let audioFailure = finishRetainedAudio()
         guard persistenceState.isActive else { return }
         let layout = persistenceState.layout
         do {
-            try await persistence.finishSession(endedAt: Date(), outcome: .completed)
+            try await persistence.finishSession(
+                endedAt: Date(),
+                outcome: audioFailure == nil ? outcome : .failed
+            )
             persistenceState = layout.map { .saved($0) } ?? .idle
         } catch {
             persistenceState = .failed(message: message(for: error, sources: []), layout: layout)
+        }
+    }
+
+    /// Closes the retained audio file, when the meeting is keeping one.
+    ///
+    /// - Returns: What to tell the user when the recording could not be
+    ///   finalised, or when it had already failed earlier in the meeting;
+    ///   `nil` when there is nothing wrong to say. A non-`nil` answer is what
+    ///   stops the session being recorded as completed.
+    private func finishRetainedAudio() -> String? {
+        if let existing = audioRetentionState.failureMessage { return existing }
+        guard case let .retaining(url) = audioRetentionState else { return nil }
+        do {
+            try audio.finishSession()
+            audioRetentionState = .retained(url)
+            return nil
+        } catch {
+            let text = message(for: error, sources: [])
+            audioRetentionState = .failed(message: text, url: url)
+            return text
+        }
+    }
+
+    /// Records that the audio file stopped being written, and ends the meeting
+    /// rather than carrying on with a recording that has a hole in it.
+    ///
+    /// The file is closed and left on disk with everything that reached it:
+    /// audio from a meeting cannot be captured again, so a partial recording is
+    /// the user's. The transcript is unaffected and is flushed and closed
+    /// normally, but the session is not recorded as completed, because one of
+    /// the artifacts the meeting promised did not finish.
+    ///
+    /// A meeting that is already stopping is left to finish its own teardown,
+    /// which picks the failure up from ``audioRetentionState``.
+    ///
+    /// - Parameter error: What the retainer reported.
+    private func handleRetentionFailure(_ error: AudioRetentionError) {
+        guard case let .retaining(url) = audioRetentionState else { return }
+        audioRetentionState = .failed(message: message(for: error, sources: []), url: url)
+        audio.cancelSession()
+        guard canStop else { return }
+
+        captureState = .stopping
+        transcriptionState = .stopping
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await capturer.stop()
+            captureState = .idle
+            await transcriber.stop()
+            transcriptionState = .idle
+            await drainPendingEvents()
+            await closeSession()
         }
     }
 
@@ -432,6 +549,10 @@ final class MeetingSetupCaptureModel {
             captureState = .idle
             await transcriber.stop()
             transcriptionState = .idle
+            // The recording is closed after capture, so nothing is still
+            // arriving for it, and it is closed rather than discarded: the
+            // transcript failing is no reason to throw away the audio.
+            _ = finishRetainedAudio()
         }
     }
 

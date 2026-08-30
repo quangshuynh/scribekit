@@ -41,10 +41,14 @@ struct SessionRecoveryIntegrationTests {
     ///
     /// - Parameter destination: The save folder.
     /// - Returns: The session description.
-    private func session(in destination: URL) -> MeetingSession {
+    private func session(
+        in destination: URL,
+        retention: AudioRetentionMode = .none
+    ) -> MeetingSession {
         MeetingSession(
             title: "Closures Walkthrough",
             createdAt: startedAt,
+            audioRetention: retention,
             selectedSources: [.application(bundleIdentifier: "com.example.Player", displayName: "QuickTime Player")],
             destination: destination
         )
@@ -322,6 +326,99 @@ struct SessionRecoveryIntegrationTests {
 
             #expect(report.candidates.count == 1)
             #expect(report.problems.isEmpty)
+        }
+    }
+
+
+    // MARK: - Retained audio after an interruption
+
+    @Test("A meeting killed while recording is still found, and its recording is left alone")
+    func partialRecordingSurvivesDiscovery() async throws {
+        try await withSaveFolder { destination in
+            let writer = makeWriter()
+            let layout = try await writer.startSession(
+                session(in: destination, retention: .raw),
+                localeIdentifier: "en-US",
+                startedAt: startedAt
+            )
+            try await writer.appendFinalSegment(segment("Today we are learning about closures.", start: 0))
+
+            // A recording that a killed process left behind: real bytes, never
+            // closed, and no claim here that they play.
+            let audioURL = try #require(layout.audioURL(for: .raw))
+            let partial = Data((0..<8_192).map { UInt8($0 % 251) })
+            try partial.write(to: audioURL)
+            let transcriptBefore = try transcriptBytes(layout)
+
+            let service = makeService()
+            let report = try await service.scan(destination)
+            _ = try await service.scan(destination)
+
+            let candidate = try #require(report.candidates.first)
+            #expect(candidate.metadata.audioRetention == .raw)
+            #expect(candidate.metadata.audioPath == "audio.caf")
+            #expect(candidate.retainedAudio?.byteCount == partial.count)
+            #expect(candidate.retainedAudioURL == audioURL)
+            // Discovery reads attributes and nothing else.
+            #expect(try Data(contentsOf: audioURL) == partial)
+            #expect(try transcriptBytes(layout) == transcriptBefore)
+        }
+    }
+
+    @Test("Recording an interruption changes the transcript's record, not its recording")
+    func recordingAnInterruptionLeavesTheAudioAlone() async throws {
+        try await withSaveFolder { destination in
+            let writer = makeWriter()
+            let layout = try await writer.startSession(
+                session(in: destination, retention: .compressed),
+                localeIdentifier: "en-US",
+                startedAt: startedAt
+            )
+            try await writer.appendFinalSegment(segment("A closure captures the values around it.", start: 0))
+            let audioURL = try #require(layout.audioURL(for: .compressed))
+            let partial = Data((0..<4_096).map { UInt8($0 % 97) })
+            try partial.write(to: audioURL)
+
+            let service = makeService()
+            let candidate = try #require(try await service.scan(destination).candidates.first)
+            let updated = try await service.recordInterruption(for: candidate)
+
+            #expect(updated.status == .interrupted)
+            #expect(updated.audioRetention == .compressed)
+            #expect(try Data(contentsOf: audioURL) == partial)
+        }
+    }
+
+    @Test("A meeting that was recording but produced no file is reported without one")
+    func aRecordingThatNeverStartedIsNotInvented() async throws {
+        try await withSaveFolder { destination in
+            let writer = makeWriter()
+            let layout = try await writer.startSession(
+                session(in: destination, retention: .raw),
+                localeIdentifier: "en-US",
+                startedAt: startedAt
+            )
+            try await writer.appendFinalSegment(segment("Nothing was captured.", start: 0))
+
+            let candidate = try #require(try await makeService().scan(destination).candidates.first)
+
+            #expect(candidate.metadata.audioRetention == .raw)
+            #expect(candidate.retainedAudio == nil)
+            #expect(candidate.retainedAudioURL == nil)
+            #expect(try #require(layout.audioURL(for: .raw)).path(percentEncoded: false).hasSuffix("audio.caf"))
+        }
+    }
+
+    @Test("A meeting keeping no audio records no audio file in its session record")
+    func noRetentionIsRecordedAsSuch() async throws {
+        try await withSaveFolder { destination in
+            try await writeInterruptedMeeting(in: destination)
+
+            let candidate = try #require(try await makeService().scan(destination).candidates.first)
+
+            #expect(candidate.metadata.audioRetention == AudioRetentionMode.none)
+            #expect(candidate.metadata.audioPath == nil)
+            #expect(candidate.retainedAudio == nil)
         }
     }
 }

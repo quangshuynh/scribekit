@@ -174,6 +174,12 @@ struct MeetingSetupView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            if let audio = candidate.retainedAudio, let url = candidate.retainedAudioURL {
+                Text("Audio \(url.lastPathComponent) · \(audio.byteCount) bytes. "
+                     + "It was still being written, so whether it plays depends on how far it got.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             Text(candidate.transcriptURL.path(percentEncoded: false))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -330,7 +336,7 @@ struct MeetingSetupView: View {
             }
 
             Text("Speech is recognised on this Mac, using an installed language model. "
-                 + "No audio leaves your machine, and no audio file is written.")
+                 + "No audio leaves your machine.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -564,6 +570,12 @@ struct MeetingSetupView: View {
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
+    /// What the meeting keeps of its audio, and — once it is keeping some —
+    /// where that file is.
+    ///
+    /// The choice is fixed for a run, so the picker is disabled while a meeting
+    /// is under way rather than accepting a change that would not take effect
+    /// until the next one.
     private var audioRetentionSection: some View {
         Section("Audio Retention") {
             Picker("Keep audio", selection: $audioRetention) {
@@ -571,12 +583,69 @@ struct MeetingSetupView: View {
                     Text(mode.displayName).tag(mode)
                 }
             }
+            .disabled(capture.isRunning)
             .accessibilityLabel("Audio retention mode")
-            Text(audioRetention.retainsAudio
-                 ? "An audio file is kept alongside the transcript."
-                 : "Only the transcript is kept. No audio is written to disk.")
+
+            LabeledContent("Status") {
+                Text(audioStatusDescription)
+                    .foregroundStyle(capture.audioRetentionState == .idle ? .secondary : .primary)
+            }
+            .accessibilityLabel("Audio file status")
+            .accessibilityValue(audioStatusDescription)
+
+            if let url = capture.audioRetentionState.url {
+                LabeledContent("File") {
+                    Text(url.path(percentEncoded: false))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .accessibilityLabel("Audio file")
+                .accessibilityValue(url.path(percentEncoded: false))
+
+                Button("Show Audio in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+                .accessibilityHint("Reveal the meeting's audio file in the Finder")
+            }
+
+            if let message = capture.audioRetentionState.failureMessage {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+
+            Text(audioRetentionExplanation)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// A short description of what the audio file is doing.
+    private var audioStatusDescription: String {
+        switch capture.audioRetentionState {
+        case .idle: audioRetention.retainsAudio
+            ? "No audio file yet. Start a meeting to record one."
+            : "No audio file. Only the transcript is kept."
+        case .preparing: "Creating the audio file…"
+        case .retaining: "Recording audio as it is captured."
+        case .retained: "Saved and closed."
+        case .failed: "Not being recorded."
+        }
+    }
+
+    /// What the selected mode will actually write, said in terms of the file
+    /// the user will find in the folder.
+    private var audioRetentionExplanation: String {
+        switch audioRetention {
+        case .none:
+            "Only the transcript is kept. No audio is written to disk."
+        case .raw:
+            "audio.caf is written beside the transcript as the meeting runs, in the audio exactly as it "
+            + "was captured. It is large: roughly 690 MB an hour. The file stays on this Mac."
+        case .compressed:
+            "audio.m4a is written beside the transcript as the meeting runs, encoded as AAC at "
+            + "64 kbit/s — roughly 31 MB an hour. The file stays on this Mac."
         }
     }
 
@@ -643,6 +712,7 @@ struct MeetingSetupView: View {
     /// subsystems rather than tracked separately.
     private var meetingStatusDescription: String {
         if let message = capture.persistenceState.failureMessage { return message }
+        if let message = capture.audioRetentionState.failureMessage { return message }
         if capture.isRunning { return "Meeting in progress. Speech is transcribed and saved as it is finalised." }
         if case .saved = capture.persistenceState { return "Meeting finished. The transcript is saved and closed." }
         return "Choose applications and a save folder, then start the meeting."
