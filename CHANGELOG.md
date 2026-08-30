@@ -6,6 +6,47 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Background meeting operation. A meeting now keeps capturing, recognising,
+  writing its transcript and writing its retained recording while the main
+  window is hidden, minimised, covered or closed. Closing the window no longer
+  ends anything, and ScribeKit stays running with its menu bar item when its
+  last window closes.
+- A menu bar item. It shows the meeting's title, state, elapsed time, the
+  applications it is capturing and what it is keeping of its audio, and offers
+  Stop Meeting, Show Transcript in Finder, Show Audio in Finder, Open ScribeKit
+  and Quit ScribeKit. Stop is the same stop the window performs, with the same
+  finalisation order. There is no Pause item, because pause is not implemented.
+- A process activity assertion held for exactly the length of a meeting, so
+  macOS does not put a hidden ScribeKit into App Nap while it is transcribing.
+  It uses the narrowest option that addresses that — the Mac is still free to
+  sleep when the user leaves it idle — and it is released on every path a
+  meeting can end by, including failure.
+- Quitting during a meeting asks first. Choosing to quit stops the meeting the
+  ordinary way — capture, recogniser, drained events, recording closed,
+  transcript closed, completion recorded — and termination continues only once
+  that is done. Cancelling leaves the meeting exactly as it was.
+- One elapsed-time clock for the whole application, ticking once a second only
+  while a meeting runs. It writes nothing: the transcript and the session
+  record remain the account of when a meeting ran.
+
+### Changed
+
+- The active meeting is owned by the application rather than by the meeting
+  screen. `MeetingSetupCaptureModel` is now `MeetingRuntime`, created by the
+  application delegate and handed to the views, and the screen no longer stops
+  the meeting when it disappears. There is at most one active meeting, enforced
+  by the runtime rather than by whichever window is open, and the menu bar and
+  the main window read one derived status instead of two.
+- The main window is a single `Window` scene, so Open ScribeKit reopens or
+  fronts the window that exists instead of adding another.
+- Setup controls that a running meeting has already fixed — its title, its
+  applications, its save folder — are disabled while it runs, alongside the
+  language and retention pickers that already were. A meeting keeps the
+  settings it started with.
+- Unfinished-session recovery controls are unavailable while a meeting is
+  running, because the meeting being written right now is legitimately recorded
+  as in progress.
+
 - Optional audio retention. A meeting can now keep its captured audio beside
   the transcript: `audio.caf` (linear PCM in a CAF container, in exactly the
   48 kHz mono float the capture system delivers, measured at 691 MB an hour) or

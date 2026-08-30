@@ -5,7 +5,7 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 8 — optional audio retention. Complete.
+Interval 9 — background and menu bar meeting lifecycle. Complete.
 
 ## Current implementation
 
@@ -46,17 +46,155 @@ Interval 8 — optional audio retention. Complete.
   `RetainedAudioRecorder`, which owns one recording at a time.
   `TranscriptFileInfo` is now `SessionFileInfo`, because it describes a
   retained recording as well as a transcript.
-- `ScribeKit/Features/MeetingSetup/`: `LiveTranscriptModel` unchanged;
-  `MeetingSetupCaptureModel` coordinates capture, recognition, durable
-  persistence and audio retention, and takes a `MeetingStartRequest`; `SessionRecoveryModel` is new
-  and owns the recovery section's state; `MeetingSetupView` has a Start Meeting
-  control, an explicit Stop, a Transcript File section, a Show in Finder
-  control, a Previous Meetings section, and an Audio Retention section that now
-  shows the recording's status, its path and a Show Audio in Finder control.
-- `ScribeKitTests/`: Swift Testing suites (346 tests, 33 suites).
+- `ScribeKit/Meeting/`, new for this interval and the home of the active
+  meeting: `MeetingRuntime` (formerly `MeetingSetupCaptureModel`) coordinates
+  capture, recognition, durable persistence and audio retention and takes a
+  `MeetingStartRequest`; `LiveTranscriptModel` moved here with it;
+  `MeetingRuntimeStatus` derives one lifecycle answer from the four subsystem
+  states; `MeetingElapsedClock` times the running meeting;
+  `MeetingActivityAsserting` / `ProcessMeetingActivity` hold the App Nap
+  assertion; `MeetingQuitCoordinator` decides what Quit does.
+- `ScribeKit/Features/MeetingSetup/`: `SessionRecoveryModel` owns the recovery
+  section's state; `MeetingSetupView` takes the runtime rather than creating
+  one, no longer stops anything in `onDisappear`, and disables the title,
+  source, folder, language and retention controls while a meeting runs.
+- `ScribeKit/Features/MenuBar/`, new: `MeetingMenuBarPresentation` (a pure
+  mapping from runtime state to what the menu says) and `MeetingMenuBarView`.
+- `ScribeKit/App/`: `ScribeKitApp` has a single `Window` scene and a
+  `MenuBarExtra`; `ScribeKitAppDelegate` is new and owns the runtime.
+- `ScribeKit/Models/`: new for this interval, `MeetingSnapshot`.
+- `ScribeKitTests/`: Swift Testing suites (389 tests, 38 suites).
 
-No background behaviour and no menu bar presence exist. Audio retention writes
-a file; nothing plays one.
+Audio retention writes a file; nothing plays one. Pause and resume do not
+exist.
+
+## Meeting ownership
+
+The active meeting is owned by `ScribeKitAppDelegate`, which holds one
+`MeetingRuntime` as a `let` for the process's lifetime. Both scenes are handed
+that object: the `Window` scene passes it to `MeetingSetupView`, and the
+`MenuBarExtra` passes it to `MeetingMenuBarView`.
+
+The delegate rather than `@State` on the `App` struct, for one reason:
+`@NSApplicationDelegateAdaptor` is constructed before the App's own state is
+available to it, and the quit policy needs the runtime. Putting the runtime in
+the object that already has the application's lifetime removes the ordering
+problem instead of working around it, and it is not a singleton — nothing looks
+it up globally, it is passed in.
+
+What moved and what did not:
+
+- **Runtime** (application-scoped): the meeting's capture, recognition,
+  transcript writing and audio retention; the live transcript; the snapshot of
+  what the meeting was started with; the elapsed clock; the activity assertion.
+- **Presentation** (view-scoped, unchanged): `MeetingSetupSourcesModel`,
+  `MeetingSetupDestinationModel`, `SessionRecoveryModel`, the title field and
+  the retention picker. These configure the *next* meeting, so they are exactly
+  the state that should disappear with the window.
+
+`MeetingSetupView.onDisappear` no longer exists. Nothing in the view layer can
+stop a meeting except the Stop control.
+
+## One lifecycle answer
+
+`MeetingRuntimeStatus` is computed from `captureState`, `transcriptionState`,
+`persistenceState` and `audioRetentionState` — idle, preparing, transcribing,
+stopping, completed, or failed with a message. It is a derivation, not a second
+state machine: nothing assigns it, so the menu bar and the window cannot
+disagree. Failure is reported by artifact first (transcript, then recording,
+then capture, then recognition) and as soon as it exists, including while the
+teardown it triggered is still running, because a meeting that has lost an
+artifact is not "stopping normally".
+
+`MeetingState` is untouched. It remains the persisted domain lifecycle in
+`MeetingSession` and the session record; the runtime's status is a presentation
+answer that needs a `failed` case the persisted enum does not have, and adding
+one to a `Codable` enum for the sake of the menu bar would have been the wrong
+trade.
+
+## Configuration immutability
+
+`MeetingSnapshot` is taken in `start(_:)` before anything is created, and holds
+the `MeetingSession` (title, sources, destination, retention mode, creation
+time) plus the locale. Everything after that reads the copy. The setup screen
+disables the controls a running meeting has already fixed, but the snapshot is
+what makes it true: a meeting cannot adopt a later edit even if a control were
+left enabled.
+
+## Window and quit behaviour
+
+- **Closing the main window** ends nothing. `Window` (not `WindowGroup`) is the
+  scene, so Open ScribeKit fronts or recreates the one window rather than
+  stacking copies. `applicationShouldTerminateAfterLastWindowClosed` returns
+  `false`, so ScribeKit stays running with its menu bar item whether or not a
+  meeting is under way.
+- **Quitting during a meeting** asks: "A meeting is still being transcribed."
+  with *Stop Meeting and Quit* and *Cancel*. Cancel returns `.terminateCancel`
+  and changes nothing. Stopping returns `.terminateLater`, runs the ordinary
+  `stop()`, and replies to the termination when it finishes.
+- The stop is **not** raced against a deadline. Every step in it is bounded
+  already, and terminating out from under a transcript that is being closed
+  would produce exactly the half-written files the policy exists to prevent.
+- `MeetingQuitCoordinator` holds no AppKit — the question and the reply are
+  closures — so the policy is tested without a modal alert.
+
+## Menu bar
+
+`MenuBarExtra` with `.menu` style. The label is one SF Symbol per status; the
+menu shows the meeting's title, `Transcribing · mm:ss`, the applications being
+captured and the retention mode, then Stop Meeting, Show Transcript in Finder
+and Show Audio in Finder when there are any, then Open ScribeKit and Quit
+ScribeKit. Idle, it is three lines: the state, Open and Quit.
+
+`MeetingMenuBarPresentation` is a pure value built from the status, the
+snapshot and the two artifact URLs, so the mapping is unit tested. Elapsed time
+is deliberately outside it: it changes every second and nothing else there
+does.
+
+There is **no Pause item**. Pause is not implemented — see the limitations.
+
+## Elapsed time
+
+`MeetingElapsedClock`, one per application, owned by the runtime. It starts
+with the meeting, ticks once a second with a single `Task` (a second `start`
+cancels the first, so recreating the interface cannot leave two behind), and
+stops when the runtime stops holding resources. It writes nothing and reads
+nothing persistent; `startedAt` in the transcript and the session record remain
+the authoritative account of when a meeting ran. Its `now` closure and tick
+interval are injectable, so the tests advance time rather than waiting for it.
+
+## App Nap
+
+`ProcessMeetingActivity` holds one `ProcessInfo.beginActivity` assertion for
+exactly the length of a meeting, with
+`.userInitiatedAllowingIdleSystemSleep` — the narrowest option that opts the
+process out of App Nap. `.userInitiated` was rejected because it also disables
+idle system sleep, which is a promise ScribeKit does not make; `.latencyCritical`
+was rejected as a realtime-media option with no evidence behind it here.
+
+It is driven from `didSet` on all four subsystem states rather than from
+`start` and `stop`, because a meeting also ends through capture interruption, a
+retention failure and a persistence failure — anything keyed to the happy path
+would leak the assertion down the other three. Tests substitute a double and
+assert the assertion is taken once and released on the failure path as well as
+the normal one.
+
+**Honesty about why it is there:** no throttled hidden meeting was observed on
+this Mac. The assertion was added because a hidden, windowless application
+running user-initiated timed work is precisely the case App Nap exists for, and
+because the failure it would cause — audio arriving late enough to be dropped —
+is a silent one that a short validation run would not reliably reveal. It is
+scoped to the meeting and released on every path, so its cost when unnecessary
+is nothing.
+
+## UI updates while hidden
+
+No throttling boundary was added. With the window closed, the SwiftUI scene is
+gone and nothing renders; while it is merely hidden, measured CPU did not rise
+in a way that justified speculative machinery. The distinction the design keeps
+is that presentation may be coalesced and capture, recognition and persistence
+may not — recorded as a rule in `AGENTS.md` — so a later interval that finds a
+real cost has somewhere to put the fix.
 
 ## Speech API decision
 
@@ -608,6 +746,14 @@ Three controls, none of which resumes anything:
 Nothing in recovery constructs a capturer or a recogniser, so no ScreenCaptureKit
 or Speech permission prompt can come from it.
 
+Recovery and a running meeting never overlap. `MeetingRuntime.allowsRecovery`
+is false while anything is running, which skips the scan and disables *Mark as
+Interrupted*: the session being written right now is legitimately recorded as
+in progress, and offering it as an interrupted meeting — or writing an
+interruption note into a transcript that is still open — would be nonsense. The
+scan still runs when the screen appears and when a folder is chosen, and never
+on a timer or because the menu bar changed.
+
 ## Interruption marker
 
 The note is appended to `transcript.md`, which keeps the file append-only, and
@@ -642,7 +788,7 @@ titles, no telemetry.
 
 ## Validation status
 
-`xcodebuild ... clean test` passes on Xcode 26.6: **346 tests in 33 suites**, no
+`xcodebuild ... clean test` passes on Xcode 26.6: **389 tests in 38 suites**, no
 compiler warnings. The `AppleSpeechTranscriber` suite starts and stops the real
 recogniser twice, which is where its 4.2 s comes from — two bounded drains of a
 run that received no audio.
@@ -660,6 +806,80 @@ answer — no locales and `.unsupportedSystem` when there is no recogniser,
 structurally valid records and correct installed-state mapping when there is —
 and the lifecycle test, which still needs a real installed model and returns
 without one. Neither downloads anything.
+
+### Interval 9 live validation
+
+Driven through the real sandboxed app, with the interface operated by scripted
+accessibility actions and keyboard events. QuickTime Player played a
+`say`-generated 4 min 41 s recording as the only selected source, retention set
+to Compressed, writing to `~/Documents/ScribeKitValidation` chosen in the open
+panel. That folder and the source recording were left in place; nothing from
+either is in the repository.
+
+- **Hide.** A meeting ran with the window visible, then ScribeKit was hidden
+  with ⌘H for 60 s (`AXVisible` confirmed `false`). `transcript.md` grew from
+  2 270 to 3 466 bytes and `audio.m4a` from 943 518 to 1 426 852 bytes across
+  that window. Nothing about the meeting's state changed.
+- **Menu bar while hidden.** The menu read `Background Validation`,
+  `Transcribing · 03:08`, `Capturing QuickTime Player`, `Keeping compressed
+  audio`, then Stop Meeting, Show Transcript in Finder, Show Audio in Finder,
+  Open ScribeKit, Quit ScribeKit. The elapsed time advanced between openings.
+- **Reopen.** Open ScribeKit from the menu bar unhid the app and brought back
+  one window showing the same meeting: "Capturing 1 application(s)",
+  "Transcribing on device", 10 805 buffers / 216.1 s, the transcript file path,
+  Start Meeting disabled, and the segments recognised while it was hidden.
+- **Close the window.** ⌘W left the process running and the meeting under way;
+  `transcript.md` grew from 4 785 to 5 623 bytes and `audio.m4a` from 1 901 837
+  to 2 219 342 bytes over the next 40 s, with the menu bar still reporting
+  `Transcribing · 04:38`.
+- **Reopen repeatedly.** Open ScribeKit invoked four times in a row produced
+  one window and one frontmost application every time.
+- **Stop from the menu bar.** The transcript closed with `**Ended:** 11:01 AM`
+  and `**Duration:** 4 min 58 s`; the record read `"status" : "completed"` with
+  an `endedAt`; `audio.m4a` finalised at 2 391 327 bytes and `afinfo` read it
+  as AAC 62.6 kbit/s, 1 ch, 48 000 Hz, `estimated duration: 297.64 sec`. The
+  menu collapsed to `Meeting finished` with the two Finder items and no Stop.
+  `lsof` on the process listed no handle under the save folder and no sockets.
+- **Quit during a meeting.** A second meeting was started and Quit chosen from
+  the menu bar. The alert appeared as specified. *Cancel* left the process
+  alive with the meeting still transcribing and the record still `inProgress`.
+  Quitting again and choosing *Stop Meeting and Quit* exited the process with
+  `"status" : "completed"`, an `**Ended:**`/`**Duration:** 42 s` footer, and a
+  readable `audio.m4a` of 41.88 s.
+- **Relaunch.** No Previous Meetings section (all three sessions completed), no
+  file written to the save folder, 0.82 s of CPU at launch — nothing captures
+  itself on launch. The remembered application selection was restored.
+- The macOS screen-capture indicator was visible in the menu bar for the whole
+  of every meeting, hidden window or not.
+
+### Interval 9 background measurements
+
+One Debug build, one Mac, one meeting, 20-second sampling windows of process
+CPU time and RSS. Rough, not a benchmark; Interval 12 is where measurement
+becomes formal.
+
+| Phase | CPU per 20 s | RSS |
+| --- | --- | --- |
+| Window visible and frontmost | ~4.1 s (≈20% of a core) | 129–146 MB |
+| Application hidden (⌘H) | ~4.5 s | 153–154 MB |
+| Window closed | ~3.5 s | 145 MB |
+
+The qualitative result the interval asked for holds: capture and transcription
+work continues unchanged with no window, and closing the window lowers total
+process CPU by roughly 15%. The hidden phase reading slightly above the visible
+one is not a real increase — speech density varies across the recording and the
+visible phase was sampled while screenshots were being taken — so the honest
+statement is that hiding does not reduce the work and closing does. Memory
+stayed inside a 25 MB band across a five-minute meeting with no upward trend,
+and returned to 146 MB after Stop.
+
+No live failure was reproduced while the window was hidden. Quitting the
+captured application does not end the ScreenCaptureKit stream — it keeps
+delivering silence, which is the documented Interval 4 behaviour — so there was
+no controlled way to fail a hidden meeting without injecting one. The failure
+paths are covered by injected failures in unit tests, including the assertion
+that a failure raised with nothing observing it is still there when a window is
+opened.
 
 ### Interval 8 live validation
 
@@ -849,6 +1069,39 @@ intervals; the capture observations above were taken through the same path.
 ## Known limitations
 
 - Interval 2, 3 and 4 limitations still hold.
+- **Pause and resume are not implemented, and were deliberately left out.**
+  Doing it honestly means deciding what a resumed run means for two timelines
+  at once: the transcript's offsets, which are measured from the first captured
+  frame, and the retained recording, which is one file with one time origin.
+  Splicing discontinuous audio into that file would silently break the
+  alignment between recording and transcript that Interval 8 established, and
+  the alternative — a second file, or a gap of real silence — is a format
+  decision, not a control. `MeetingState.paused` stays unused, and the menu bar
+  offers no Pause rather than a fake one.
+- No throttling boundary exists between the runtime and the interface. A closed
+  window renders nothing because its scene is gone; a merely hidden one is
+  still evaluated by SwiftUI, and the measurement that would justify building a
+  coalescing layer was not there. A long meeting with a hidden window has not
+  been profiled for view work specifically.
+- The App Nap assertion is justified by Apple's documented semantics, not by an
+  observed throttle on this Mac. Nothing measured a hidden meeting being slowed
+  down; the assertion exists so that it cannot be.
+- Quitting during a meeting waits for the stop with no timeout. Every step is
+  bounded, so this has always returned promptly, but a wedged filesystem would
+  hold termination rather than abandoning a half-closed transcript.
+- ScribeKit stays running when its last window closes, including with no
+  meeting. That is deliberate for a menu bar application, but it means the app
+  has to be quit explicitly.
+- The menu bar item is compact by choice: it shows one meeting and offers Stop.
+  It is not a second interface, and there is no way to start or configure a
+  meeting from it.
+- Elapsed time is wall-clock time since the meeting started. It is not audio
+  time, and it does not subtract gaps.
+- A live runtime failure with the window hidden was not reproduced; the path is
+  covered by injected failures in unit tests.
+- Background CPU and memory were sampled on one Mac in a Debug build over
+  20-second windows in a single five-minute meeting. No multi-hour hidden run
+  has been measured, and no battery claim is made.
 - Retention writes audio; it does not play it. There is no playback, waveform,
   scrubber or uncertainty review, and a retained recording is opened in another
   application.
@@ -928,24 +1181,31 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 9: background and menu bar operation, as the roadmap has it. The
-meeting screen now owns three subsystems, a start ordering with rollback at
-every step, and a stop ordering that finalises two artifacts before recording a
-completion. Moving the meeting behind a menu bar item means that lifecycle has
-to survive the window going away — `MeetingSetupCaptureModel` is currently
-owned by `MeetingSetupView` as `@State` and is stopped in `onDisappear`, which
-is exactly the assumption background operation has to undo. Nothing about
-retention needs to change for it: the recorder is already off the main actor
-and already indifferent to whether a window exists.
+Interval 10, as the roadmap has it: transcript history, search and uncertainty
+review, and derived notes. The ground for it is now in place — every meeting
+leaves a dated directory with a Markdown transcript, a schema-versioned record
+and, optionally, a recording whose time origin matches the transcript's — and
+the runtime is no longer somewhere a second screen would have to fight for
+ownership. A history screen is a second view over the same save folder that
+recovery already scans, and it can be built without touching the meeting
+pipeline at all.
 
-The other candidate is post-meeting review against a retained recording, which
-is what retention was built to make possible. That needs playback, a
-transcript-to-audio seek, and `transcriptionConfidence` — three things
-deliberately left out here — and it should follow rather than precede
-background operation, because the alignment it depends on is already recorded
-and will not decay.
+Two candidates sit behind it, and both should follow rather than precede it.
 
-`MeetingState.recovering` is still unused: recovery does not resume capture, so
-nothing enters that state. It should stay unused until an interval implements
-continuing an interrupted meeting, which will have to decide what a second
-recognition run appended to an existing transcript means for the timeline.
+Post-meeting review against a retained recording needs playback, a
+transcript-to-audio seek and `transcriptionConfidence`, which is deliberately
+not requested today. The alignment it depends on is already written to disk and
+will not decay, so there is no cost to waiting.
+
+Pause and resume needs a timeline decision before it needs any code: what a
+second recognition run means for transcript offsets, and what a discontinuity
+means for a single retained audio file. It is a format question, and the
+interval that answers it should own both artifacts at once. The same question
+blocks continuing an interrupted meeting into the same session, which is why
+`MeetingState.recovering` is still unused — recovery does not resume capture,
+so nothing enters that state.
+
+Nothing in this interval needs revisiting first. The one thing worth measuring
+before Interval 12's formal benchmark is view work during a long hidden
+meeting: no coalescing boundary was built, because none was justified by a
+five-minute run, and a multi-hour one may say otherwise.

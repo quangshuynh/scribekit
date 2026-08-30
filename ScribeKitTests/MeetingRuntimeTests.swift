@@ -1,5 +1,5 @@
 //
-//  MeetingSetupCaptureModelTests.swift
+//  MeetingRuntimeTests.swift
 //  ScribeKitTests
 //
 
@@ -8,62 +8,9 @@ import Synchronization
 import Testing
 @testable import ScribeKit
 
-/// A capturer that records calls and can be made to fail or to be interrupted,
-/// so capture lifecycle is testable without ScreenCaptureKit, a real meeting or
-/// screen recording permission.
-///
-/// Its start/stop rules mirror the real implementation: an empty selection and
-/// a second start are refused rather than quietly accepted.
-private nonisolated final class FakeCapturer: AudioCapturing, @unchecked Sendable {
-    let interruptions: AsyncStream<AudioCaptureError>
-    let consumer: AudioSampleConsuming
-
-    private(set) var startCount = 0
-    private(set) var stopCount = 0
-    private(set) var configurations: [AudioCaptureConfiguration] = []
-    private(set) var isCapturing = false
-
-    /// Thrown by the next `start`, when set.
-    var startError: AudioCaptureError?
-
-    private let continuation: AsyncStream<AudioCaptureError>.Continuation
-
-    init(consumer: AudioSampleConsuming) {
-        self.consumer = consumer
-        var continuation: AsyncStream<AudioCaptureError>.Continuation!
-        interruptions = AsyncStream { continuation = $0 }
-        self.continuation = continuation
-    }
-
-    func start(configuration: AudioCaptureConfiguration) async throws {
-        startCount += 1
-        configurations.append(configuration)
-        if let startError { throw startError }
-        guard !configuration.sourceIDs.isEmpty else { throw AudioCaptureError.noSourcesSelected }
-        guard !isCapturing else { throw AudioCaptureError.alreadyCapturing }
-        isCapturing = true
-    }
-
-    func stop() async {
-        stopCount += 1
-        isCapturing = false
-    }
-
-    /// Reports the capture system ending the stream on its own.
-    func interrupt(_ error: AudioCaptureError) {
-        isCapturing = false
-        continuation.yield(error)
-    }
-
-    /// Delivers a synthetic buffer the way the real capture queue would.
-    func deliver(_ buffer: CapturedPCMBuffer) {
-        consumer.consume(buffer)
-    }
-}
-
 @MainActor
-@Suite("MeetingSetupCaptureModel")
-struct MeetingSetupCaptureModelTests {
+@Suite("MeetingRuntime")
+struct MeetingRuntimeTests {
 
     private let meet = CaptureSource.application(bundleIdentifier: "com.example.Meet", displayName: "Meet")
     private let browser = CaptureSource.application(bundleIdentifier: "com.example.Browser", displayName: "Browser")
@@ -83,7 +30,7 @@ struct MeetingSetupCaptureModelTests {
     /// - Returns: The model and the two fakes behind it.
     private func makeModel(
         availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
-    ) async -> (MeetingSetupCaptureModel, FakeCapturer, FakeSpeechTranscriber) {
+    ) async -> (MeetingRuntime, FakeCapturer, FakeSpeechTranscriber) {
         let (model, capturer, transcriber, _) = await makeMeeting(availability: availability)
         return (model, capturer, transcriber)
     }
@@ -94,7 +41,7 @@ struct MeetingSetupCaptureModelTests {
     /// - Returns: The model and the three doubles behind it.
     private func makeMeeting(
         availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
-    ) async -> (MeetingSetupCaptureModel, FakeCapturer, FakeSpeechTranscriber, FakeTranscriptPersistence) {
+    ) async -> (MeetingRuntime, FakeCapturer, FakeSpeechTranscriber, FakeTranscriptPersistence) {
         let (model, capturer, transcriber, persistence, _) = await makeRetainingMeeting(availability: availability)
         return (model, capturer, transcriber, persistence)
     }
@@ -107,7 +54,7 @@ struct MeetingSetupCaptureModelTests {
     private func makeRetainingMeeting(
         availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
     ) async -> (
-        MeetingSetupCaptureModel,
+        MeetingRuntime,
         FakeCapturer,
         FakeSpeechTranscriber,
         FakeTranscriptPersistence,
@@ -118,7 +65,7 @@ struct MeetingSetupCaptureModelTests {
         let persistence = FakeTranscriptPersistence()
         let audio = FakeAudioRetention()
         var capturer: FakeCapturer!
-        let model = MeetingSetupCaptureModel(
+        let model = MeetingRuntime(
             monitor: AudioCaptureActivityMonitor(minimumPublishInterval: .zero),
             transcriber: transcriber,
             persistence: persistence,
@@ -495,7 +442,7 @@ struct MeetingSetupCaptureModelTests {
         let (model, _, transcriber) = await makeModel()
         await model.start(request([meet]))
 
-        for _ in 0...MeetingSetupCaptureModel.maximumRecoveryAttempts {
+        for _ in 0...MeetingRuntime.maximumRecoveryAttempts {
             transcriber.emit(.interrupted(.recognitionFailed(message: "resources")))
             try? await Task.sleep(for: .milliseconds(30))
         }
@@ -504,7 +451,7 @@ struct MeetingSetupCaptureModelTests {
             if case .failed = model.transcriptionState { return true }
             return false
         })
-        #expect(transcriber.startCount <= MeetingSetupCaptureModel.maximumRecoveryAttempts + 1)
+        #expect(transcriber.startCount <= MeetingRuntime.maximumRecoveryAttempts + 1)
     }
 
     @Test("Dropped audio is recorded as a gap rather than passed over")
