@@ -5,7 +5,7 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 11 — uncertainty review with retained-audio playback. Complete.
+Interval 14 — long-duration reliability and fault injection. Complete.
 
 ## Current implementation
 
@@ -83,7 +83,7 @@ Interval 11 — uncertainty review with retained-audio playback. Complete.
 - `ScribeKit/App/`: `ScribeKitApp` has a single `Window` scene and a
   `MenuBarExtra`; `ScribeKitAppDelegate` is new and owns the runtime.
 - `ScribeKit/Models/`: new for this interval, `MeetingSnapshot`.
-- `ScribeKitTests/`: Swift Testing suites (463 tests, 44 suites).
+- `ScribeKitTests/`: Swift Testing suites (552 tests, 53 suites).
 
 Audio retention writes a file; nothing plays one. Pause and resume do not
 exist.
@@ -1332,6 +1332,106 @@ titles, no telemetry.
 
 ## Validation status
 
+### Interval 14 validation
+
+A falsification pass: long logical runs and deliberate faults at every seam a
+meeting depends on, run against the real coordination code through doubles, and
+against the real writers and container formats on disk. Four production defects
+were found and fixed. Everything below states which kind of evidence it is.
+
+**Tested by deterministic injection.** `ReliabilityHarness` drives one
+`MeetingRuntime` over the four existing doubles with both clocks under the
+test's control: buffers arrive through the capturer's own delivery path, so the
+media clock, the activity monitor, the recogniser's input and the retainer see
+them in order; recognition events are published the way a run publishes them;
+and every failure is armed on the double that would really have failed. No
+disk, no permission, no sleeping.
+
+- A two-hour meeting: 7 200 s of captured media, 240 finalised spans, 23
+  Pause/Resume cycles, one recogniser self-restart in the middle, normal Stop.
+  Offsets strictly increasing and equal to the media time each span was
+  recognised at; pause and resume markers monotonic in captured time; one
+  session directory, one transcript, one recording; the recording holding
+  exactly 7 200 s of frames and not one of synthetic pause silence; the footer
+  told the same captured duration the media clock held; final state
+  `completed`; the activity assertion released.
+- 25 sequential meetings in one process, some with Pause/Resume, one with a
+  recogniser restart: each returned to a terminal state, closed its transcript
+  and recording, released the assertion, and left 25 distinct session
+  directories with nothing carried between them.
+- Fault matrices: transcript failure at an append, a gap, a pause marker, a
+  resume marker and the footer; retained-audio failure at creation, mid-write
+  and finalisation; a start that fails at recognition and at capture; capture
+  ending by itself; a resume whose source has gone away and then comes back.
+- Recogniser restarts: offset continuity across a restart, no duplicated or
+  lost durable text, the restart limit enforced, and both terminal cases — the
+  limit reached, and a restart that cannot start recognition again.
+
+**Observed against the real framework.** `LongRunDurabilityTests` uses the real
+`MarkdownTranscriptStore`, `FileManager`, `FileHandle`, `RetainedAudioRecorder`
+and `AVAudioFile` against files in a temporary directory.
+
+- Three two-hour transcripts written and closed in one process: 2 400 spans
+  each, every one parsed back by `TranscriptDocument` in the order it was
+  written, with the footer and the captured duration present, and three
+  distinct session directories.
+- A recording copied while its writer was still open — the bytes a killed
+  process leaves behind — reopened with `AVAudioFile`. A CAF holds its frames
+  as they are written and the copy opens and reads; an unfinalised M4A does
+  not, which is the documented limitation, now checked against the framework
+  rather than asserted. The closed file reads fully in both cases.
+- Twenty recordings written and finalised in one process each hold exactly the
+  frames they were given, with nothing carried over between them.
+
+**Defects found and fixed.**
+
+1. *A recogniser restart reset the transcript's timeline.* A restarted run
+   counts its offsets from its own first frame; `mediaOffsetBase` was updated
+   at a pause but never at a self-restart, so every span after a mid-meeting
+   restart was written at a position near the start of the meeting. Offsets
+   went backwards, the wall-clock timestamps derived from them went backwards,
+   and review playback would have sought to the wrong second of the recording.
+   The base is now scheduled at the handled-event count a drain would have
+   waited for, because a restart happens inside the handler for the event that
+   caused it and cannot wait for itself; an event the old run published on its
+   way out therefore keeps the old run's base.
+2. *A recogniser that could not be brought back left everything running.* The
+   run was reported as failed and nothing else happened: capture kept running,
+   the transcript and recording stayed open, the App Nap assertion stayed held,
+   the transcript recorded nothing about the untranscribed stretch, and because
+   the runtime still counted the meeting as active, no further meeting could be
+   started in that process. It now ends the meeting the way every other
+   terminal subsystem failure does.
+3. *A failed start was recorded as a completed meeting.* A start that could not
+   begin recognition or capture closed its transcript with
+   `SessionCompletionOutcome.completed`, so History listed an empty transcript
+   under the status a meeting that ran and finished gets — contradicting what
+   this document already said the start path did. It is recorded as `failed`.
+4. *A pause whose marker failed leaked the recording.* The transcript failure
+   ended the meeting, but the teardown was guarded on `canStop`, and at a pause
+   boundary capture and recognition have already stopped; the recording's
+   writer was never closed, the assertion never released, and `isRunning`
+   stayed true for the life of the process. The recording is now finalised on
+   that path too.
+
+**Measurements.** Debug build, Xcode 26.6 (17F113), macOS 26.6.2, MacBookAir10,1
+(Apple M1), `clean test`: 552 tests in 53 suites, 5.7 s. The accelerated runs
+say nothing about CPU, memory, App Nap or thermals; they are evidence about
+ordering, arithmetic, state and release. Process-wide file-descriptor counting
+was tried as leak evidence and abandoned: the test runner runs suites in
+parallel, so the count moves for reasons that have nothing to do with the code
+under test. Writer and lease lifetime are asserted at the double layer instead,
+where an unclosed writer is observable directly.
+
+**Not validated this interval, and not claimed.** No real-time soak of the
+running application, no ScreenCaptureKit source-disappearance observation, no
+abrupt `kill -9` of the app followed by relaunch discovery, and no
+background/closed-window continuation check: all four need the application
+driven by hand with screen-recording permission and a save folder chosen in a
+system panel. The recorder work above approximates process death by reading the
+bytes on disk while the writer is open, which is faithful to what a killed
+process leaves but does not exercise relaunch discovery.
+
 ### Interval 13 validation
 
 Focused, on a synthetic session folder written by the real formatter and the
@@ -1811,6 +1911,21 @@ intervals; the capture observations above were taken through the same path.
 
 ## Known limitations
 
+- **The restart budget is per meeting, not per recognition run.** Two
+  self-restarts are all a meeting gets, however many hours and however many
+  resumes it spans, and an explicit Resume does not give it more. That is a
+  deliberate ceiling on a recogniser that keeps failing rather than a measured
+  number, and raising it to make a test pass would be the wrong reason to.
+- **Capture ending by itself still closes the session as completed.** The
+  meeting is reported as failed while it is running and the reason is on
+  screen, but the transcript and the recording did close cleanly, so the record
+  says `completed` and History lists it that way. Whether a meeting whose
+  source disappeared should read as completed or as something else is a product
+  question, and no evidence this interval produced answers it.
+- **Accelerated runs are not real-time evidence.** The two-hour meeting above
+  costs a second, because nothing sleeps and no audio is synthesised. It proves
+  ordering, arithmetic and release; it proves nothing about CPU, memory under a
+  real recogniser, App Nap or thermals.
 - Notes are not searchable. `TranscriptSearchIndex` is built from transcripts
   and session metadata, and derived state is deliberately not in it: mixing
   user-written text into transcript matches would need its own ranking and its
@@ -2016,7 +2131,18 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 14, as the roadmap has it. Nothing in Interval 13 needs revisiting
+Interval 15, as the roadmap has it. The reliability work above changes what it
+should start from: the accelerated evidence is strong about ordering and state
+and says nothing about real-time cost, so the first thing Interval 15 needs is
+the real-time soak this interval could not run — the running application, a
+real source, an hour, the window closed for a meaningful part of it — measured
+for RSS, CPU and thermals rather than for correctness. Two questions are open
+underneath it: whether ScreenCaptureKit reports a captured application quitting
+in a way ScribeKit can act on, which no test here can answer, and whether the
+recogniser's restart budget should reset at an explicit Resume, which is a
+product decision rather than a defect.
+
+The earlier note stands. Nothing in Interval 13 needs revisiting
 first: the write boundary it opened is one protocol wide, it can address one
 file, and the regression that proves it fingerprints every source artifact
 around a save.

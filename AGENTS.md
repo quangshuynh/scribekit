@@ -93,6 +93,15 @@ timestamp already written is never recomputed to do so. Suspending capture is
 the user's act, recorded as ScribeKit's own structural remark and never
 described as lost audio or as a recognition failure.
 
+A recognition run is not the meeting. A run counts its offsets from its own
+first frame and a meeting outlives any number of runs, so what a run reports is
+put back on the meeting's own media timeline before it is displayed or written.
+The origin that mapping uses changes only when every event the previous run
+published has been handled — the boundary a pause reaches by draining, and the
+one a self-restart has to schedule because it happens inside the handler for
+the event that caused it. An offset in the transcript therefore names the same
+second of the recording however many times the recogniser was rebuilt.
+
 Reading a meeting back is a read. History, search and any later feature that
 lists or inspects past sessions are views over user-owned artifacts: listing,
 indexing, previewing or searching a session must leave its transcript, its
@@ -110,12 +119,23 @@ failure is reported as one — never papered over with a claim that the
 transcript was saved, and never left running so that recognised speech
 accumulates with nowhere to go.
 
+A subsystem that cannot be brought back ends the meeting. A recogniser that
+has used up its restarts, like a transcript that stopped being written, is not
+a state to sit in: capture is stopped, the durable artifacts are closed and
+kept, the session is recorded as the failure it was, and every hold on the
+process — the capture stream, the recording's writer, the activity assertion —
+is released. Nothing may keep capturing audio that nothing is transcribing, and
+no meeting may stay active in a process for want of a teardown, because the
+next meeting cannot start while one is.
+
 Persisted session completion never precedes successful finalisation of every
 durable artifact the meeting enabled — the transcript, and a retained audio
 file when there is one. A stored record saying a meeting completed is a claim
 about files, so it is written only once they have been flushed and closed, and
 a completion that cannot be recorded leaves the session recorded as unfinished
-rather than falsely as finished. Reading such a record back may not invent what
+rather than falsely as finished. A start that fails after the transcript was
+created closes it as a failure, not a completion: a meeting that never captured
+a second did not finish, it never began. Reading such a record back may not invent what
 was never written: not the moment the process stopped, not the length of a gap,
 and not a word of speech.
 
