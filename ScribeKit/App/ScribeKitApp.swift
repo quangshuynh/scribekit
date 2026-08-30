@@ -8,9 +8,9 @@ import SwiftUI
 /// The ScribeKit application entry point.
 ///
 /// Two scenes observe one meeting: the main window, which configures and
-/// displays it, and the menu bar item, which watches and ends it. Neither owns
-/// it — ``ScribeKitAppDelegate`` does — so closing the window changes what is
-/// visible and nothing else.
+/// displays it and lists the meetings already on disk, and the menu bar item,
+/// which watches and ends it. Neither owns it — ``ScribeKitAppDelegate`` does
+/// — so closing the window changes what is visible and nothing else.
 ///
 /// The main window is a `Window` rather than a `WindowGroup` deliberately.
 /// There is one meeting, so there is one window for it, and asking for it from
@@ -26,7 +26,7 @@ struct ScribeKitApp: App {
 
     var body: some Scene {
         Window("ScribeKit", id: Self.mainWindowID) {
-            MeetingSetupView(runtime: delegate.runtime)
+            ScribeKitRootView(runtime: delegate.runtime)
         }
         .windowResizability(.contentMinSize)
 
