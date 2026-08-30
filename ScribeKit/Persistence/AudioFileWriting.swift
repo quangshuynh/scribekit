@@ -67,9 +67,9 @@ nonisolated protocol AudioFileCreating: Sendable {
 ///   the sample rate, channel count and 32-bit float samples capture delivered,
 ///   so the file is the captured audio rather than a re-encoding of it. CAF is
 ///   chosen over WAV because a WAV header addresses its data with 32 bits: at
-///   the 48 kHz mono float32 ScreenCaptureKit delivers, a meeting passes WAV's
-///   four-gigabyte ceiling after about six hours, and ScribeKit is built for
-///   long meetings. CAF has no such limit, and — measured, not assumed — a CAF
+///   the 48 kHz mono float32 ScreenCaptureKit delivers — 691 MB an hour,
+///   measured — a meeting passes WAV's four-gigabyte ceiling after about six
+///   hours, and ScribeKit is built for long meetings. CAF has no such limit, and — measured, not assumed — a CAF
 ///   left unclosed by a process that was killed still opens and reports its
 ///   real duration.
 /// - ``AudioRetentionMode/compressed`` is AAC in an MPEG-4 container at
@@ -81,8 +81,8 @@ nonisolated struct AVAudioFileCreator: AudioFileCreating {
 
     /// The bit rate compressed recordings are encoded at.
     ///
-    /// 64 kbit/s mono AAC: measured at about 26 MB per hour against roughly
-    /// 660 MB per hour for the same audio as raw float PCM. It is fixed rather
+    /// 64 kbit/s mono AAC: measured at 31 MB per hour against 691 MB per hour
+    /// for the same meeting written as raw float PCM. It is fixed rather
     /// than offered as a setting, because a meeting recording has one job and a
     /// bit-rate picker is a choice without a question behind it.
     static let compressedBitRate = 64_000

@@ -642,10 +642,10 @@ struct MeetingSetupView: View {
             "Only the transcript is kept. No audio is written to disk."
         case .raw:
             "audio.caf is written beside the transcript as the meeting runs, in the audio exactly as it "
-            + "was captured. It is large: roughly 660 MB an hour. The file stays on this Mac."
+            + "was captured. It is large: roughly 690 MB an hour. The file stays on this Mac."
         case .compressed:
             "audio.m4a is written beside the transcript as the meeting runs, encoded as AAC at "
-            + "64 kbit/s — roughly 26 MB an hour. The file stays on this Mac."
+            + "64 kbit/s — roughly 31 MB an hour. The file stays on this Mac."
         }
     }
 
