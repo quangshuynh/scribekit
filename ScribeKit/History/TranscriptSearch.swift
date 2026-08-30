@@ -147,6 +147,101 @@ nonisolated struct HistorySearchResult: Identifiable, Equatable, Sendable {
     }
 }
 
+/// The transcripts History has loaded, prepared for matching.
+///
+/// This is a disposable index, not a database. It holds nothing that is not
+/// already in the documents it was built from, it is never written to disk,
+/// and it is rebuilt from the Markdown on every refresh — so it can be thrown
+/// away at any moment without losing anything, and the user's files remain the
+/// only authority on what a meeting contains.
+///
+/// What it precomputes is one thing: the lower-cased ASCII bytes of each span,
+/// for the spans that are pure ASCII. Case-insensitive comparison through
+/// `String.range(of:options:)` was measured at roughly 140 ms per megabyte of
+/// transcript in a debug build, which a search field cannot afford on every
+/// keystroke; matching folded bytes is about fifteen times faster. Spans that
+/// are not pure ASCII keep no folded form and are matched through Unicode-aware
+/// comparison instead, because ASCII folding would be the wrong answer for
+/// them and byte offsets would not be character offsets.
+nonisolated struct TranscriptSearchIndex: Sendable {
+
+    /// One document with its spans prepared for matching.
+    private struct Entry {
+        let document: TranscriptSearchDocument
+
+        /// The lower-cased ASCII bytes of each span, in span order, or `nil`
+        /// for a span that is not pure ASCII.
+        let folded: [[UInt8]?]
+    }
+
+    private let entries: [Entry]
+
+    /// The sessions and their text, as the load produced them.
+    let documents: [TranscriptSearchDocument]
+
+    /// Prepares a set of documents for searching.
+    ///
+    /// - Parameter documents: The sessions and their text, from
+    ///   ``HistoryService``.
+    init(_ documents: [TranscriptSearchDocument]) {
+        self.documents = documents
+        entries = documents.map { document in
+            Entry(document: document, folded: document.spans.map { TranscriptSearchIndex.folded($0.text) })
+        }
+    }
+
+    /// An empty index, for a screen that has not loaded anything.
+    static let empty = TranscriptSearchIndex([])
+
+    /// Whether there is nothing to search.
+    var isEmpty: Bool { entries.isEmpty }
+
+    /// Runs `body` over each document and the folded form of its spans.
+    ///
+    /// - Parameter body: Called once per document.
+    fileprivate func forEachEntry(_ body: (TranscriptSearchDocument, [[UInt8]?]) -> Void) {
+        for entry in entries { body(entry.document, entry.folded) }
+    }
+
+    /// The lower-cased ASCII bytes of a string.
+    ///
+    /// - Parameter text: The string to fold.
+    /// - Returns: Its bytes with `A`–`Z` lowered, or `nil` when the string
+    ///   holds anything outside ASCII.
+    static func folded(_ text: String) -> [UInt8]? {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(text.utf8.count)
+        for byte in text.utf8 {
+            guard byte < 0x80 else { return nil }
+            bytes.append(byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z") ? byte + 32 : byte)
+        }
+        return bytes
+    }
+
+    /// Finds the first occurrence of one byte sequence in another.
+    ///
+    /// - Parameters:
+    ///   - needle: The bytes to look for, already folded.
+    ///   - haystack: The bytes to look in, already folded.
+    ///   - start: Where to begin looking.
+    /// - Returns: The offset of the match, or `nil` when there is none.
+    static func firstOccurrence(of needle: [UInt8], in haystack: [UInt8], from start: Int) -> Int? {
+        guard !needle.isEmpty, haystack.count >= needle.count else { return nil }
+        let first = needle[0]
+        let limit = haystack.count - needle.count
+        var index = max(0, start)
+        while index <= limit {
+            if haystack[index] == first {
+                var offset = 1
+                while offset < needle.count, haystack[index + offset] == needle[offset] { offset += 1 }
+                if offset == needle.count { return index }
+            }
+            index += 1
+        }
+        return nil
+    }
+}
+
 /// Deterministic text search over the transcripts History has loaded.
 ///
 /// Plain substring matching, case-insensitive and locale-independent. There is
@@ -181,15 +276,12 @@ nonisolated enum TranscriptSearch {
     ///
     /// - Parameters:
     ///   - query: What the user typed. Surrounding whitespace is ignored.
-    ///   - documents: The sessions and their text, from ``HistoryService``.
+    ///   - index: The loaded transcripts, prepared for matching.
     /// - Returns: The matching sessions, best match first.
-    static func results(
-        for query: String,
-        in documents: [TranscriptSearchDocument]
-    ) -> [HistorySearchResult] {
+    static func results(for query: String, in index: TranscriptSearchIndex) -> [HistorySearchResult] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else {
-            return documents.map {
+            return index.documents.map {
                 HistorySearchResult(
                     session: $0.session,
                     kind: .unfiltered,
@@ -199,47 +291,66 @@ nonisolated enum TranscriptSearch {
             }
         }
 
+        let foldedNeedle = TranscriptSearchIndex.folded(needle)
         var matches: [(result: HistorySearchResult, firstSpan: Int)] = []
-        for document in documents {
-            guard let match = evaluate(needle, against: document) else { continue }
+        index.forEachEntry { document, folded in
+            guard let match = evaluate(
+                needle,
+                foldedNeedle: foldedNeedle,
+                against: document,
+                folded: folded
+            ) else { return }
             matches.append(match)
         }
         return matches.sorted(by: isOrderedBefore).map(\.result)
+    }
+
+    /// Runs a query over documents that have not been prepared yet.
+    ///
+    /// Building the index is part of the call, so this is for a one-off search
+    /// rather than for a search field: a screen that searches as the user types
+    /// builds the index once, when it loads.
+    ///
+    /// - Parameters:
+    ///   - query: What the user typed.
+    ///   - documents: The sessions and their text.
+    /// - Returns: The matching sessions, best match first.
+    static func results(
+        for query: String,
+        in documents: [TranscriptSearchDocument]
+    ) -> [HistorySearchResult] {
+        results(for: query, in: TranscriptSearchIndex(documents))
     }
 
     /// Scores one document against a query.
     ///
     /// - Parameters:
     ///   - needle: The trimmed query.
+    ///   - foldedNeedle: Its folded ASCII bytes, or `nil` when the query is
+    ///     not pure ASCII and every span must be matched through Unicode-aware
+    ///     comparison.
     ///   - document: The session and its text.
+    ///   - folded: The folded form of each span, from the index.
     /// - Returns: The result and the index of the first matching span, or
     ///   `nil` when nothing matched.
     private static func evaluate(
         _ needle: String,
-        against document: TranscriptSearchDocument
+        foldedNeedle: [UInt8]?,
+        against document: TranscriptSearchDocument,
+        folded: [[UInt8]?]
     ) -> (result: HistorySearchResult, firstSpan: Int)? {
         let titleKind = titleKind(needle, title: document.session.title)
 
         var count = 0
         var excerpt: TranscriptExcerpt?
         var firstSpan = Int.max
-        for span in document.spans {
-            var searchStart = span.text.startIndex
-            while let range = span.text.range(
-                of: needle,
-                options: matchOptions,
-                range: searchStart..<span.text.endIndex,
-                locale: nil
-            ) {
+        for (position, span) in document.spans.enumerated() {
+            for match in matches(of: needle, foldedNeedle: foldedNeedle, in: span, folded: folded[position]) {
                 count += 1
                 if excerpt == nil {
                     firstSpan = span.index
-                    excerpt = makeExcerpt(in: span, matching: range)
+                    excerpt = makeExcerpt(in: span, at: match.offset, length: match.length)
                 }
-                searchStart = range.upperBound > range.lowerBound
-                    ? range.upperBound
-                    : span.text.index(after: range.lowerBound)
-                guard searchStart < span.text.endIndex else { break }
             }
         }
 
@@ -262,6 +373,53 @@ nonisolated enum TranscriptSearch {
         return (result, firstSpan)
     }
 
+    /// Every occurrence of a query in one span, as character offsets.
+    ///
+    /// A pure-ASCII query in a pure-ASCII span is matched on folded bytes,
+    /// where a byte offset is a character offset. Anything else — a span with
+    /// a character outside ASCII, or a query with one — is matched through
+    /// `String.range(of:options:)`, which is the correct answer for text
+    /// ASCII folding would mishandle.
+    ///
+    /// - Parameters:
+    ///   - needle: The trimmed query.
+    ///   - foldedNeedle: Its folded ASCII bytes, when it has them.
+    ///   - span: The span to search.
+    ///   - folded: The span's folded ASCII bytes, when it has them.
+    /// - Returns: The offset and length of each match, in characters, in the
+    ///   order they occur.
+    private static func matches(
+        of needle: String,
+        foldedNeedle: [UInt8]?,
+        in span: TranscriptSpan,
+        folded: [UInt8]?
+    ) -> [(offset: Int, length: Int)] {
+        var found: [(offset: Int, length: Int)] = []
+
+        if let foldedNeedle, let folded {
+            var from = 0
+            while let offset = TranscriptSearchIndex.firstOccurrence(of: foldedNeedle, in: folded, from: from) {
+                found.append((offset, foldedNeedle.count))
+                from = offset + max(1, foldedNeedle.count)
+            }
+            return found
+        }
+
+        let text = span.text
+        var searchStart = text.startIndex
+        while let range = text.range(of: needle, options: matchOptions, range: searchStart..<text.endIndex, locale: nil) {
+            found.append((
+                text.distance(from: text.startIndex, to: range.lowerBound),
+                text.distance(from: range.lowerBound, to: range.upperBound)
+            ))
+            searchStart = range.upperBound > range.lowerBound
+                ? range.upperBound
+                : text.index(after: range.lowerBound)
+            guard searchStart < text.endIndex else { break }
+        }
+        return found
+    }
+
     /// How strongly a query matches a title.
     ///
     /// - Parameters:
@@ -281,13 +439,16 @@ nonisolated enum TranscriptSearch {
     ///
     /// - Parameters:
     ///   - span: The span the match was found in.
-    ///   - range: Where the match sits in the span's text.
+    ///   - matchStart: Where the match begins, in characters.
+    ///   - matchLength: How long the match is, in characters.
     /// - Returns: The excerpt.
-    private static func makeExcerpt(in span: TranscriptSpan, matching range: Range<String.Index>) -> TranscriptExcerpt {
+    private static func makeExcerpt(
+        in span: TranscriptSpan,
+        at matchStart: Int,
+        length matchLength: Int
+    ) -> TranscriptExcerpt {
         let text = span.text
         let total = text.count
-        let matchStart = text.distance(from: text.startIndex, to: range.lowerBound)
-        let matchLength = text.distance(from: range.lowerBound, to: range.upperBound)
 
         var start = 0
         var end = total

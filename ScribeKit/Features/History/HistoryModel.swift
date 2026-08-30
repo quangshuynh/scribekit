@@ -65,6 +65,13 @@ final class HistoryModel {
     /// when nothing has been typed.
     private(set) var results: [HistorySearchResult] = []
 
+    /// The loaded transcripts, prepared for matching.
+    ///
+    /// Built once per load and replaced by the next one. It is derived
+    /// entirely from the Markdown on disk and is never written anywhere, so
+    /// dropping it costs nothing but the work of reading the folder again.
+    private var index = TranscriptSearchIndex.empty
+
     private let service: HistoryService
     private let saveLocation: SaveLocationPersisting
 
@@ -121,6 +128,7 @@ final class HistoryModel {
     /// listing meetings from somewhere the user did not choose.
     func load() async {
         state = .loading
+        index = .empty
         results = []
 
         let folder: URL?
@@ -139,7 +147,9 @@ final class HistoryModel {
 
         destination = folder
         do {
-            state = .loaded(try await service.load(folder))
+            let report = try await service.load(folder)
+            index = TranscriptSearchIndex(report.documents)
+            state = .loaded(report)
         } catch {
             state = .unavailable(message: Self.message(for: error))
         }
@@ -178,7 +188,7 @@ final class HistoryModel {
 
     /// Re-runs the search over the documents in memory.
     private func refreshResults() {
-        results = TranscriptSearch.results(for: query, in: documents)
+        results = TranscriptSearch.results(for: query, in: index)
     }
 
     /// Runs work with security-scoped access to the save folder held open for

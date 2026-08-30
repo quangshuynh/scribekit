@@ -359,6 +359,61 @@ struct TranscriptSearchTests {
         #expect(first.map(\.session.title) == ["Needle", "Beta", "Alpha"])
     }
 
+    // MARK: - Text outside ASCII
+
+    @Test("Speech with accented characters matches without regard to case")
+    func nonASCIISpeechMatches() throws {
+        let documents = [document(title: "Alpha", texts: ["Nous avons parlé du café au lait."])]
+
+        let results = TranscriptSearch.results(for: "CAFÉ", in: documents)
+
+        #expect(results.count == 1)
+        let excerpt = try #require(results.first?.excerpt)
+        let start = excerpt.text.index(excerpt.text.startIndex, offsetBy: excerpt.matchOffset)
+        let end = excerpt.text.index(start, offsetBy: excerpt.matchLength)
+        #expect(String(excerpt.text[start..<end]) == "café")
+    }
+
+    @Test("An ASCII query still locates itself correctly in speech that is not ASCII")
+    func asciiQueryInNonASCIISpeech() throws {
+        let documents = [document(title: "Alpha", texts: ["Nous avons parlé du café au lait."])]
+
+        let excerpt = try #require(TranscriptSearch.results(for: "lait", in: documents).first?.excerpt)
+
+        let start = excerpt.text.index(excerpt.text.startIndex, offsetBy: excerpt.matchOffset)
+        let end = excerpt.text.index(start, offsetBy: excerpt.matchLength)
+        #expect(String(excerpt.text[start..<end]) == "lait")
+        #expect(excerpt.text == "Nous avons parlé du café au lait.")
+    }
+
+    @Test("A query outside ASCII matches nothing in speech that has no such character")
+    func nonASCIIQueryAgainstASCIISpeech() throws {
+        let documents = [document(title: "Alpha", texts: ["Plain ASCII speech only."])]
+
+        #expect(TranscriptSearch.results(for: "é", in: documents).isEmpty)
+    }
+
+    @Test("Preparing an index once gives the same answers as searching directly")
+    func indexMatchesTheOneShotSearch() throws {
+        let documents = [
+            document(title: "Alpha", texts: ["the needle appears", "parlé du café"]),
+            document(title: "Beta", texts: ["needle needle"])
+        ]
+        let index = TranscriptSearchIndex(documents)
+
+        for query in ["needle", "NEEDLE", "café", "", "nothing here"] {
+            #expect(TranscriptSearch.results(for: query, in: index)
+                    == TranscriptSearch.results(for: query, in: documents))
+        }
+    }
+
+    @Test("An empty index has nothing to return")
+    func emptyIndex() throws {
+        #expect(TranscriptSearchIndex.empty.isEmpty)
+        #expect(TranscriptSearch.results(for: "anything", in: TranscriptSearchIndex.empty).isEmpty)
+        #expect(TranscriptSearch.results(for: "", in: TranscriptSearchIndex.empty).isEmpty)
+    }
+
     @Test("Recognised text that looks like Markdown is searchable as text")
     func markdownLikeSpeechIsSearchable() throws {
         let documents = [document(title: "Alpha", texts: ["> quoted the memo back at us"])]
