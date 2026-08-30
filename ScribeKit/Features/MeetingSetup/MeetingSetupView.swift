@@ -273,7 +273,7 @@ struct MeetingSetupView: View {
                     }
                 }
             case let .loaded(discovered) where discovered.isEmpty:
-                Text("No applications are available to runtime.")
+                Text("No applications are available to capture.")
                     .foregroundStyle(.secondary)
             case let .loaded(discovered):
                 ForEach(discovered) { source in
@@ -765,7 +765,7 @@ struct MeetingSetupView: View {
     private var startHelp: String {
         if runtime.isRunning { return "A meeting is already running." }
         if destination.url == nil { return "Choose a save folder for the transcript first." }
-        if sources.selectedSources.isEmpty { return "Select at least one application to runtime." }
+        if sources.selectedSources.isEmpty { return "Select at least one application to capture." }
         if !runtime.availability.canTranscribe { return "On-device speech recognition is unavailable." }
         return "Capture the selected applications and write a timestamped Markdown transcript."
     }

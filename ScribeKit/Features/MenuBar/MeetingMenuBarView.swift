@@ -44,23 +44,25 @@ struct MeetingMenuBarView: View {
             Text(message)
         }
 
-        Divider()
+        if presentation.canStop || presentation.transcriptURL != nil || presentation.audioURL != nil {
+            Divider()
 
-        if presentation.canStop {
-            Button("Stop Meeting") {
-                Task { await runtime.stop() }
+            if presentation.canStop {
+                Button("Stop Meeting") {
+                    Task { await runtime.stop() }
+                }
             }
-        }
 
-        if let url = presentation.transcriptURL {
-            Button("Show Transcript in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
+            if let url = presentation.transcriptURL {
+                Button("Show Transcript in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
             }
-        }
 
-        if let url = presentation.audioURL {
-            Button("Show Audio in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
+            if let url = presentation.audioURL {
+                Button("Show Audio in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
             }
         }
 
