@@ -68,6 +68,17 @@ existed, and failing to write one never fails a meeting whose durable artifacts
 closed cleanly. Nothing derived from it may be presented with more precision
 than the thing it was derived from actually has.
 
+A meeting has two clocks and they are not interchangeable. Captured media time
+advances only while capture is running; wall-clock time does not stop when
+capture does. Transcript offsets, retained audio and anything that seeks into
+that audio are measured in captured time, so an offset names the same second of
+the recording however often a meeting was suspended, and no suspension is ever
+padded into the file as silence or held in a buffer. Human-readable timestamps
+are wall-clock and must account for the time capture was not running; a
+timestamp already written is never recomputed to do so. Suspending capture is
+the user's act, recorded as ScribeKit's own structural remark and never
+described as lost audio or as a recognition failure.
+
 Reading a meeting back is a read. History, search and any later feature that
 lists or inspects past sessions are views over user-owned artifacts: listing,
 indexing, previewing or searching a session must leave its transcript, its

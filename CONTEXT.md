@@ -500,8 +500,11 @@ is a footer rather than a header field that would have to be rewritten.
 
 ## Timestamp semantics
 
-A segment's time is `session start + segment.startTime`, where the offset is
-audio-relative — measured from the first captured frame, not from when a result
+A segment's time is `epoch wall start + (segment.startTime - epoch media start)`.
+For a meeting that was never paused there is one epoch — media zero at the
+session start — so this is `session start + segment.startTime`, unchanged. Each
+resume appends an epoch, and a segment uses the last epoch whose media start it
+is at or past. The offset is audio-relative — measured from the first captured frame, not from when a result
 reached the interface. A minute heading is written when the minute bucket
 changes and never twice for the same minute; gaps do not open one.
 
@@ -520,6 +523,21 @@ are started before `capturer.start`, and both therefore see the same buffer
 first. So segment offset *t* is second *t* of the audio file, frame for frame,
 with no synchronisation machinery and nothing to keep in step.
 
+Pausing does not move that. Media time advances only while capture runs, so a
+pause adds nothing to a segment's offset and nothing to the recording: the
+audio after a resume continues from the frame before the pause, with no
+synthetic silence and nothing buffered across it. Offset *t* is still second
+*t* of the file after any number of pauses, which is what keeps review
+playback's seek direct. Verified end to end in the Interval 12 validation
+below, for `audio.caf` and `audio.m4a` alike.
+
+The recogniser's own timeline does reset: a resumed run counts from its first
+frame again. `MeetingRuntime` holds one accumulator, `mediaOffsetBase`, set
+from a `CapturedMediaClock` after the pause has drained, and adds it to every
+offset a run reports — segments and the position of dropped audio — before
+anything is displayed or written. The base is read from captured frames rather
+than from the wall clock, so nothing a pause spends can leak into it.
+
 What is *not* exact is the wall clock. The transcript's timestamps are
 `session start + offset`, and the session starts a moment before the first
 frame arrives, so a stated time can be under a second early — the Interval 6
@@ -534,6 +552,58 @@ the two apart by the length of the buffers it lost. No conversion has ever
 failed here. Buffers *evicted* under recognition backpressure do not have this
 problem: the clock advances for them, they stay in the recording, and the
 recording is then the only place that audio exists.
+
+## Pause and resume
+
+Pause is the front of a stop and no more: capture stops, the recogniser
+finalises the audio it already holds, every event it produced is handled and
+written, and then the meeting sits in `AudioCaptureState.paused` with its
+transcript, its recording, its session record and its folder lease all still
+open. Resume rebuilds the stream from the `AudioCaptureConfiguration`
+snapshotted at the start — the same rule as every other part of a meeting's
+configuration — restarts the recogniser and returns to `.capturing`.
+
+`AudioCaptureState.paused` is `isActive` and `canStop`, and
+`MeetingRuntimeStatus` derives `.paused` from it before its "something is still
+active" cases, so the menu bar and the window read one answer. There is no
+second lifecycle state and nothing sets a paused flag.
+
+The two clocks, stated once. **Captured media time** is `CapturedMediaClock`, a
+capture consumer first in the fan-out, counting each buffer's own frames over
+its own sample rate; it is what transcript offsets, the recording and review
+seek share. **Wall-clock time** is what the transcript's timestamps state, what
+`MeetingElapsedClock` shows in the window and the menu bar, and what the
+footer's `**Duration:**` reports — the user-facing elapsed time is deliberately
+wall-clock meeting length, so a paused meeting's timer keeps running. A
+transcript that was paused also carries `**Captured:**`, the recording's
+length. Captured duration is otherwise internal, on `MeetingRuntime` and in the
+session record.
+
+The pause is written into the document as two blockquotes, the convention gap
+markers already use:
+
+```
+> **Paused:** 11:42:10. Capture stopped here; nothing was recorded until the meeting resumed.
+
+> **Resumed:** 11:48:32, after 6 min 22 s paused.
+```
+
+Both ends of the pause were observed, so its length is stated. Neither marker
+calls an intentional pause a recognition failure or missed speech, because
+nothing was captured to miss. Recognised text is untouched and timestamps
+already written are never recomputed: the epoch opens before the resume marker
+is appended, so only what comes after it is measured from the new wall start.
+
+Failure semantics. A pause that reaches the drained boundary but cannot write
+its marker is *not* reported as paused: the write failure fails the transcript
+the way any other one does, and the meeting ends. A resume that cannot start
+recognition, or cannot start capture, leaves the meeting paused with every
+artifact untouched and reports why in `pauseFailureMessage`, which is held
+apart from `captureState` precisely so the paused state survives it; a source
+that has quit is named and never substituted, and the resume can be retried.
+Stop while paused runs the ordinary stop, in the ordinary order. Quit while
+paused goes through `MeetingQuitCoordinator` unchanged, because a paused
+meeting is an active one.
 
 ## Gap semantics
 
@@ -685,6 +755,24 @@ process death additionally depends on the flush every 25 appends and at Stop;
 retained audio has no flush of its own, so the same caveat is wider for it.
 
 ScribeKit is not crash-proof and does not say it is.
+
+## Pausing and the session record
+
+`pausedAt` and `capturedDuration` were added to `session.json` additively at
+schema version 1, for the reason `audioRetention` and `audioPath` were: both
+are optional, a record written before they existed decodes with them absent,
+and a build that has never heard of them ignores them. Raising the version
+would have made every earlier session unreadable in exchange for nothing.
+
+The record is rewritten at each pause and each resume, so a ScribeKit that
+stops while a meeting is paused leaves a record that says `inProgress` with a
+`pausedAt`. `SessionRecoveryMetadata.wasPausedWhenInterrupted` is exactly that
+pairing, and the recovery screen states it: the meeting was paused at a stated
+time and ScribeKit stopped before it was resumed or finished. Nothing resumes
+capture on relaunch; recovery still only offers to mark the session interrupted,
+and `markingInterruption` carries `pausedAt` through rather than dropping an
+observed fact. A record ScribeKit closes clears `pausedAt`, because a closed
+meeting is not paused.
 
 ## Startup discovery
 
@@ -1150,6 +1238,48 @@ titles, no telemetry.
 
 ## Validation status
 
+### Interval 12 validation
+
+Focused, on synthesised speech, with no microphone and no meeting audio. A
+harness drove the real pipeline with ScreenCaptureKit replaced and nothing
+else: two phrases synthesised in process with `AVSpeechSynthesizer`, converted
+to the 48 kHz mono float32 the capturer delivers, chunked into 20 ms buffers
+and handed to the real `AppleSpeechTranscriber`, the real `RetainedAudioRecorder`
+and the real `MarkdownTranscriptStore`. Phrase A, Pause, 25 s paused, Resume,
+phrase B, Stop. Run once for `.raw` and once for `.compressed`.
+
+Both runs:
+
+1. One session directory, and in it `transcript.md`, one audio file and
+   `.scribekit/` — nothing reopened, nothing duplicated.
+2. The transcript and the audio file stopped growing at the pause and had not
+   changed 25 s later (314 bytes and 464,896 bytes for CAF; 88,144 for M4A).
+3. The document read, in order: phrase A at 6:08:31,
+   `> **Paused:** 6:08:36`, `> **Resumed:** 6:09:01, after 25 s paused`, a new
+   `### 6:09 PM` minute heading, and phrase B at **6:09:01** — the wall clock
+   after the real pause, not 6:08:38. Footer: `**Duration:** 36 s`,
+   `**Captured:** 5 s`.
+4. The recording was 4.94 s, equal to the captured clock to within 2×10⁻¹⁴ s,
+   and contained none of the 25 s pause.
+5. Phrase B was written at media offsets 2.42–4.94 s. That stretch of the
+   recording was extracted and transcribed **independently**, and came back as
+   the same sentence — so a post-resume offset still seeks to its own audio.
+6. No duplicate speech, no offset reset, and Stop closed the recording, the
+   transcript and the lease.
+
+`audio.m4a` survived the pause with its writer left open and finalised cleanly
+at Stop: `AVURLAsset` reported its duration and `AVAudioFile` read it back.
+Nothing reopens or segments the container.
+
+**Not done.** The interface was not driven by hand: the Pause and Resume
+controls in the window and the menu bar are covered by unit tests and by
+`MeetingMenuBarPresentation`, not by a click-through. No live ScreenCaptureKit
+meeting was recorded for this interval.
+
+**Networking and sandbox.** Unchanged. The entitlements file was not touched,
+nothing added here references `URLSession`, `Network` or any socket API, and no
+dependency was added.
+
 ### Interval 11 validation
 
 Focused, on synthetic speech, with no microphone and no meeting audio.
@@ -1556,6 +1686,25 @@ intervals; the capture observations above were taken through the same path.
 ## Known limitations
 
 - Interval 2, 3 and 4 limitations still hold.
+- **A pause is a cut in the recording, not a silence in it.** The file holds
+  captured audio only, so the resume is audible as a join and the recording
+  alone does not say how long the pause lasted. The transcript does.
+- **`**Duration:**` and `**Captured:**` are different measurements.** The first
+  is the meeting's wall-clock length, the second the recording's; neither is
+  derived from the other, and only a paused meeting states both.
+- **The media-offset base is read from captured frames, not from the
+  recogniser's own clock.** `TranscriptionAudioInput` does not advance its
+  elapsed clock for a buffer whose conversion fails, so a conversion failure
+  would slide the base and the recogniser's run-local offsets apart by the
+  length of the buffers it lost. This is the Interval 8 edge, unchanged in
+  kind; no conversion has ever failed here.
+- **A resume that fails is reported but not retried automatically.** The
+  meeting stays paused and the user retries it. Nothing watches for the source
+  to come back.
+- **Crash recovery still does not resume.** A meeting that was paused when
+  ScribeKit stopped is detectable and honestly described, and that is all: the
+  next launch offers to mark it interrupted, exactly as for any other
+  unfinished session.
 - **Confidence has no documented scale, so the thresholds are empirical.** They
   separate cleanly on this Mac's en-US model over synthesised speech. Another
   locale, another model, or real speech over a real meeting's audio may sit
@@ -1723,10 +1872,10 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 12, as the roadmap now has it: derived notes that never modify the raw
+Interval 13, as the roadmap now has it: derived notes that never modify the raw
 transcript.
 
-The separation it needs already exists in the shape this interval built.
+The separation it needs already exists in the shape Interval 11 built.
 `.scribekit/review.json` is the first thing ScribeKit keeps beside a transcript
 that is *about* the transcript rather than part of it: versioned, optional,
 never load-bearing, read through a boundary with no write side, and pointing at
@@ -1734,27 +1883,24 @@ spans by index rather than copying their words. A notes artifact is the same
 problem with a user writing the content instead of the recogniser, and it should
 reuse that shape rather than invent a second one.
 
-Two things it will have to decide that this interval deliberately did not. A
-derived artifact the user edits needs a write boundary History does not have
-today, and opening one is the moment to decide what "History is read-only"
-narrows to — the answer is probably a separate store for ScribeKit's own
-sidecars, leaving the transcript, the recording and the record on the read-only
-side where they are. And reviewed state belongs with it: marking a passage as
-dealt with is the same write, and was left out here rather than half-built.
+Two things it will have to decide. A derived artifact the user edits needs a
+write boundary History does not have today, and opening one is the moment to
+decide what "History is read-only" narrows to — the answer is probably a
+separate store for ScribeKit's own sidecars, leaving the transcript, the
+recording and the record on the read-only side where they are. And reviewed
+state belongs with it: marking a passage as dealt with is the same write, and
+was left out of Interval 11 rather than half-built.
 
-Nothing in this interval needs revisiting first. The one thing worth measuring
-when there is real usage is whether the confidence thresholds hold outside
-synthesised en-US speech; they are stated in one place,
-`TranscriptReviewPolicy`, so moving them is a one-line change with a table test
-behind it.
+Nothing in this interval needs revisiting first. The timeline question that
+used to block pause and resume is answered: two clocks, media and wall, with
+the mapping in one place — `mediaOffsetBase` in `MeetingRuntime` and the epoch
+list in `TranscriptMarkdownFormatter`. Continuing an *interrupted* meeting into
+the same session is the same shape and is now mostly a persistence question:
+the epochs and the captured duration would have to be recoverable from
+`session.json` rather than rebuilt in memory, which is why
+`MeetingState.recovering` is still unused.
 
-Pause and resume still needs a timeline decision before it needs code: what a
-second recognition run means for transcript offsets, and what a discontinuity
-means for a single retained audio file. The same question blocks continuing an
-interrupted meeting into the same session, which is why `MeetingState.recovering`
-is still unused.
-
-Two things stay worth measuring when there is real usage to measure: view work
-during a long hidden meeting, still unmeasured beyond five minutes, and whether
-a real user's folder ever approaches the size where History's in-memory search
-stops being the right shape.
+Three things stay worth measuring when there is real usage to measure: whether
+the confidence thresholds hold outside synthesised en-US speech, view work
+during a long hidden meeting, and whether a real user's folder ever approaches
+the size where History's in-memory search stops being the right shape.

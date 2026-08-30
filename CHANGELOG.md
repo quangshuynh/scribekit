@@ -6,6 +6,37 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Pausing and resuming a running meeting, from the main window and from the
+  menu bar, which drive the same `MeetingRuntime` actions. Pause tears down the
+  capture stream, finalises the audio the recogniser already holds and leaves
+  the meeting open; Resume rebuilds the stream for the sources the meeting was
+  started with and continues the same session, transcript and recording. No
+  second session directory, no second transcript, no second audio file.
+- Two explicit timelines. Captured media time advances only while capture runs
+  and is what transcript offsets, retained audio and review playback are
+  measured in, so a passage at offset *t* is still second *t* of the audio file
+  after any number of pauses. Wall-clock time keeps running while paused and is
+  what the transcript's timestamps, the elapsed display and the footer's
+  `**Duration:**` state.
+- Structural pause and resume markers in the transcript, written as
+  blockquotes beside the existing gap markers. They state what the user did and
+  claim nothing about missed speech, and recognised text is untouched.
+- `**Captured:**` in the transcript footer, written only for a meeting that was
+  paused, so a reader is told the recording's length as well as the meeting's.
+- `pausedAt` and `capturedDuration` in the session record, added additively at
+  schema version 1 the way `audioRetention` and `audioPath` were. A ScribeKit
+  that stops while a meeting is paused leaves a record saying so, and the
+  recovery screen says so too. Nothing resumes capture by itself.
+
+### Changed
+
+- The retained recording holds captured audio only. A pause inserts no silence
+  and buffers nothing: the audio after a resume continues from the frame before
+  the pause, so a five-minute pause adds nothing to the file.
+- A resume that fails leaves the meeting paused with its artifacts untouched
+  and reports why. A source that has quit is named rather than substituted, and
+  the resume can be retried when it comes back.
+
 - Post-meeting review of uncertain recognition. A finished meeting records the
   passages worth a second listen, and History's detail pane lists them in
   transcript order with the recognised wording exactly as the transcript has
