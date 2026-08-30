@@ -79,6 +79,14 @@ final class HistoryModel {
     /// it or selecting another meeting stops playback and releases the lease.
     let player: RetainedAudioPlayer
 
+    /// The selected meeting's notes and review marks.
+    ///
+    /// The only thing on the History screen that writes. It reaches
+    /// `.scribekit/derived.json` and nothing else; the transcript, the
+    /// recording, the session record and the review sidecar stay on the
+    /// read-only side ``HistoryStoring`` defines.
+    let derived: DerivedSessionModel
+
     private let service: HistoryService
     private let saveLocation: SaveLocationPersisting
 
@@ -93,14 +101,19 @@ final class HistoryModel {
     ///   - player: Plays retained audio for review. Holds a security-scoped
     ///     lease for exactly as long as a recording is being read. A fresh one
     ///     by default; a test substitutes one built on an access double.
+    ///   - derived: Owns the selected meeting's notes and review marks. A
+    ///     fresh one by default; a test substitutes one built on a store
+    ///     double.
     init(
         service: HistoryService = HistoryService(),
         saveLocation: SaveLocationPersisting = SecurityScopedSaveLocationStore(),
-        player: RetainedAudioPlayer? = nil
+        player: RetainedAudioPlayer? = nil,
+        derived: DerivedSessionModel? = nil
     ) {
         self.service = service
         self.saveLocation = saveLocation
         self.player = player ?? RetainedAudioPlayer()
+        self.derived = derived ?? DerivedSessionModel()
     }
 
     /// The sessions and their text, as the last load produced them.
@@ -140,6 +153,7 @@ final class HistoryModel {
     /// listing meetings from somewhere the user did not choose.
     func load() async {
         player.stop()
+        derived.clear()
         state = .loading
         index = .empty
         results = []
@@ -176,6 +190,21 @@ final class HistoryModel {
     ///   current listing.
     func document(for id: URL) -> TranscriptSearchDocument? {
         documents.first { $0.id == id }
+    }
+
+    /// Reads the derived state of whichever meeting is selected.
+    ///
+    /// Called when the selection changes. A meeting that is no longer in the
+    /// listing, or no selection at all, leaves the derived model empty rather
+    /// than showing the previous meeting's notes.
+    ///
+    /// - Parameter id: The selected session's directory, or `nil`.
+    func selectSession(_ id: URL?) async {
+        guard let id, let document = document(for: id) else {
+            derived.clear()
+            return
+        }
+        await derived.load(document.session, destination: destination)
     }
 
     /// Reveals a file in the Finder.

@@ -19,6 +19,7 @@ import Foundation
 ///   .scribekit/
 ///     session.json
 ///     review.json
+///     derived.json
 /// ```
 ///
 /// This is URL arithmetic only. It creates nothing, writes nothing, and makes
@@ -35,6 +36,9 @@ nonisolated struct SessionArtifactLayout: Equatable, Sendable {
 
     /// Name of the review sidecar inside ``metadataDirectory``.
     static let reviewFileName = "review.json"
+
+    /// Name of the user-derived sidecar inside ``metadataDirectory``.
+    static let derivedFileName = "derived.json"
 
     /// The session's own directory.
     let directory: URL
@@ -77,6 +81,17 @@ nonisolated struct SessionArtifactLayout: Equatable, Sendable {
     /// file existed.
     var reviewURL: URL {
         metadataDirectory.appending(path: Self.reviewFileName, directoryHint: .notDirectory)
+    }
+
+    /// The user-derived sidecar: notes the user wrote and the review
+    /// candidates they marked as dealt with.
+    ///
+    /// The only file in a session directory ScribeKit writes on the user's
+    /// behalf after the meeting has closed. Everything beside it — the
+    /// transcript, the recording, `session.json` and `review.json` — is source
+    /// material and stays byte-identical while this one is written.
+    var derivedURL: URL {
+        metadataDirectory.appending(path: Self.derivedFileName, directoryHint: .notDirectory)
     }
 
     /// The audio file a retention mode would use.

@@ -1073,6 +1073,13 @@ No line endings are normalised, no JSON is rewritten, no modification date is
 touched, no index file is written beside a transcript, and no malformed record
 is repaired.
 
+Writing notes or a reviewed mark does not weaken it. Those go to
+`.scribekit/derived.json` through the only boundary that can reach it, and a
+filesystem test fingerprints `transcript.md`, the recording, `session.json` and
+`review.json` before a save, saves notes and marks and unmarks a passage, and
+expects the fingerprints — contents and modification dates — to be identical,
+with `derived.json` the only file that appeared.
+
 Enforced by the read-only store boundary, and checked two ways. A filesystem
 test fingerprints every file under a save folder with SHA-256 plus its
 modification date, loads twice, searches four times, and expects the
@@ -1224,12 +1231,99 @@ reported confidence and flagged nothing says nothing was flagged; a session
 whose recogniser reported no confidence at all says that too, rather than
 letting an empty list imply the recogniser was sure.
 
-There is no editing and no mark-as-reviewed. Marking would mean History
-writing, and History's read-only store boundary is the thing that makes
-"opening History leaves every artifact byte-identical" a property of the type
-rather than a rule someone has to remember. Trading that for a checkbox was not
-worth it in this interval; if reviewed state is wanted later, it needs its own
-narrow write boundary rather than a hole in this one.
+There is no transcript editing. Each candidate now carries its state — Reviewed
+or Needs Review — and the button that changes it, and the section header says
+how many of the meeting's passages are marked. That is the user's own
+disposition and it goes to the derived sidecar; `review.json` is not touched by
+it, because what the recogniser observed is not revised by someone having looked
+at it.
+
+## Source and derived artifacts
+
+The line Interval 13 draws, and the one every later feature has to stay on:
+
+| Source, read-only | Derived, user-owned |
+| --- | --- |
+| `transcript.md`, retained audio, `session.json`, `review.json` | `.scribekit/derived.json` |
+| `HistoryStoring` — no method with a write side | `DerivedSessionStoring` — reads and writes one file |
+
+`HistoryStoring` was not given a write method. Notes and reviewed marks are
+writes, so they got their own protocol, and that protocol can address
+`layout.derivedURL` and nothing else — a failed derived write cannot damage a
+source artifact because there is no path from the type to one. `HistoryService`
+still owns access for reads; `DerivedSessionService` is its counterpart for the
+sidecar, an actor that opens security-scoped access for the length of one read
+or one write and closes it again. Nothing in History holds a claim on the user's
+folder while notes are merely being typed; the only lease that outlives a call
+is still `RetainedAudioPlayer`'s, held while audio is playing.
+
+## Derived state
+
+`.scribekit/derived.json`, beside `session.json` and `review.json`, schema
+versioned from its first release and probed for its version before anything else
+is interpreted.
+
+It holds `schemaVersion`, `sessionID`, `revision`, `notes`, `reviewedSpanIndexes`
+and `updatedAt`, and nothing else. No transcript text, no confidence, no review
+reasons, no audio metadata, no source names: all of that stays in the artifacts
+that own it, and this file holds only what the user decided. Reviewed marks are
+stored sorted and deduplicated and dates are ISO-8601, so the same state always
+serialises to the same bytes.
+
+A candidate is identified by `spanIndex` — the position `review.json` already
+numbers it by, and the same index `TranscriptDocument` gives that span when the
+file is read back. Nothing is identified by wording. A mark whose index no longer
+names a candidate resolves to nothing: it is never shown against another
+passage, and it is left in the file rather than discarded, because a sidecar that
+has outlived a review record is not a licence to throw away what the user marked.
+
+Four refusals, and each of them leaves the file exactly as it is: bytes that are
+not a record, a schema version this build does not know, a `sessionID` naming
+another meeting, and a `revision` that is not the one the editor loaded. A
+refused sidecar disables notes and marks for that meeting and is never
+overwritten. None of it is load-bearing: a meeting whose derived state cannot be
+read still lists, opens, previews, searches and plays exactly as it would
+otherwise, and History reports no problem for it — the detail pane says what was
+found and what ScribeKit refused to do about it.
+
+## Save and conflict semantics
+
+Two save models, because the two actions differ. A reviewed mark is a discrete
+decision and is written as it is made. Notes are typed, so they are held in
+memory and written when the user presses Save — no debounce, no timer, no write
+per keystroke. Marking a passage writes the notes already on disk, not the draft;
+saving notes carries the marks already on disk through unchanged. Neither action
+can revise the other.
+
+"Saved" is only ever said after a write returned. A failed save leaves the draft
+in the editor, leaves the loaded state alone, and shows what went wrong; nothing
+is reverted and no source artifact is involved. Writes are atomic
+(`Data.write(options: .atomic)`), so there is no partial `derived.json`.
+
+The conflict policy is last-writer-refused, not last-writer-wins. Every record
+carries a `revision` token, minted on each write; a save reads what is on disk
+first and refuses unless its revision is the one the editor loaded — including
+the case where the editor saw no file and one has since appeared. A filesystem
+modification date would not do, because two writes inside the same second can
+carry the same date. ScribeKit has one process and one History window, so this is
+not synchronisation: it is the smallest thing that makes an interleaved or
+external write a refusal with a message rather than silent data loss. There is no
+locking, no merge and no CRDT, and a refused save keeps the user's text so they
+can copy it out or reopen the meeting.
+
+## Notes UX
+
+A Notes section between Review and the transcript preview: a plain
+`TextEditor` over Markdown source, a Save button that is disabled when there is
+nothing to save, and one line of status — *No notes yet*, *Unsaved changes*,
+*Saving…*, *Saved <date>*, or the reason the last write failed. No formatting
+toolbar, no rendering, no attachments, no document management. Empty by default,
+and nothing generates a word of it.
+
+Unsaved text is discarded when the selection changes or History reloads, and the
+pane says so rather than implying a draft is kept. A meeting with no session
+record has no identity to attach derived state to and says that instead of
+offering an editor.
 
 ## Logging
 
@@ -1237,6 +1331,38 @@ None was added. No `OSLog` category, no transcript text, no PCM, no meeting
 titles, no telemetry.
 
 ## Validation status
+
+### Interval 13 validation
+
+Focused, on a synthetic session folder written by the real formatter and the
+real record and review encoders: a transcript with two spans, a 4 KB recording,
+`session.json` and a `review.json` with two candidates. The four source files
+were SHA-256'd before anything was written.
+
+The sequence, driven through the same types the pane drives — `HistoryService`
+for the listing, `DerivedSessionModel` over `DerivedSessionService` and the real
+`FileManagerDerivedSessionStore` for the writes:
+
+1. The meeting listed as Completed with both candidates resolved to spans.
+2. The second passage was marked Reviewed.
+3. A fresh model reopened the meeting: the mark was there, and the other
+   candidate was still unmarked.
+4. It was marked Unreviewed and stayed that way across another reopen.
+5. Notes of five lines containing `#`, `**bold**`, `*italic*`, a backticked
+   command, a `- [ ]` and a blockquote were typed. The pane said *Unsaved
+   changes*; after Save it said *Saved*, and a third model read back the text
+   byte for byte, including both trailing newlines.
+6. Editing again returned it to *Unsaved changes*, and saving again to *Saved*.
+7. All four source hashes were identical to the ones taken at the start, and
+   `.scribekit/` held exactly `derived.json`, `review.json` and `session.json`.
+8. Security-scoped access was balanced: seven starts, seven stops, none left
+   open.
+9. `derived.json` was then replaced with `{ broken`. The meeting still listed,
+   the notes area refused to open, a save attempt wrote nothing, the damaged
+   bytes were preserved exactly, and the source hashes were still identical.
+
+No network call is possible from any of this: the derived types touch
+`Foundation` and the filesystem only.
 
 ### Interval 12 validation
 
@@ -1685,6 +1811,24 @@ intervals; the capture observations above were taken through the same path.
 
 ## Known limitations
 
+- Notes are not searchable. `TranscriptSearchIndex` is built from transcripts
+  and session metadata, and derived state is deliberately not in it: mixing
+  user-written text into transcript matches would need its own ranking and its
+  own way of showing where a hit came from, and neither was worth building
+  before the notes exist to search.
+- Unsaved notes do not survive leaving a meeting. The draft lives in
+  `DerivedSessionModel`, and selecting another meeting or reloading History
+  clears it. The pane says so; a persisted draft is a second unsaved artifact
+  and was not worth one.
+- Derived state needs a recorded session identity, so a legacy transcript with
+  no `session.json` cannot have notes or marks. Attaching them to a directory
+  path instead would break the moment a folder was renamed.
+- The conflict check is a revision token compared immediately before the write,
+  not a lock. Two writers interleaving between that check and the atomic
+  replace is possible in principle; with one process and one History window it
+  is not reachable in practice, and the failure mode would be a lost derived
+  edit, never a damaged source artifact.
+
 - Interval 2, 3 and 4 limitations still hold.
 - **A pause is a cut in the recording, not a silence in it.** The file holds
   captured audio only, so the resume is audible as a join and the recording
@@ -1872,35 +2016,23 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 13, as the roadmap now has it: derived notes that never modify the raw
-transcript.
+Interval 14, as the roadmap has it. Nothing in Interval 13 needs revisiting
+first: the write boundary it opened is one protocol wide, it can address one
+file, and the regression that proves it fingerprints every source artifact
+around a save.
 
-The separation it needs already exists in the shape Interval 11 built.
-`.scribekit/review.json` is the first thing ScribeKit keeps beside a transcript
-that is *about* the transcript rather than part of it: versioned, optional,
-never load-bearing, read through a boundary with no write side, and pointing at
-spans by index rather than copying their words. A notes artifact is the same
-problem with a user writing the content instead of the recogniser, and it should
-reuse that shape rather than invent a second one.
-
-Two things it will have to decide. A derived artifact the user edits needs a
-write boundary History does not have today, and opening one is the moment to
-decide what "History is read-only" narrows to — the answer is probably a
-separate store for ScribeKit's own sidecars, leaving the transcript, the
-recording and the record on the read-only side where they are. And reviewed
-state belongs with it: marking a passage as dealt with is the same write, and
-was left out of Interval 11 rather than half-built.
-
-Nothing in this interval needs revisiting first. The timeline question that
-used to block pause and resume is answered: two clocks, media and wall, with
-the mapping in one place — `mediaOffsetBase` in `MeetingRuntime` and the epoch
-list in `TranscriptMarkdownFormatter`. Continuing an *interrupted* meeting into
-the same session is the same shape and is now mostly a persistence question:
-the epochs and the captured duration would have to be recoverable from
-`session.json` rather than rebuilt in memory, which is why
-`MeetingState.recovering` is still unused.
+Two things it inherits. The derived sidecar now exists and is versioned, so a
+later user-owned artifact — anything the user decides rather than the recogniser
+observes — belongs in it additively rather than in a third file, and the
+refusals it already has (damaged, newer, foreign, stale) are the behaviour a new
+field inherits for free. And the conflict policy is deliberately the smallest
+one that is honest: if a second window over the same folder ever becomes real,
+the token comparison is where that conversation starts, not a lock somewhere
+else.
 
 Three things stay worth measuring when there is real usage to measure: whether
 the confidence thresholds hold outside synthesised en-US speech, view work
 during a long hidden meeting, and whether a real user's folder ever approaches
-the size where History's in-memory search stops being the right shape.
+the size where History's in-memory search stops being the right shape. Whether
+notes should be searchable belongs on that list now too, and it is a question
+about ranking rather than about storage.

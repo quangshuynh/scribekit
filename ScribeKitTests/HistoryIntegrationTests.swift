@@ -258,6 +258,63 @@ struct HistoryIntegrationTests {
         }
     }
 
+    @Test("Notes and reviewed marks change the derived sidecar and nothing else")
+    func derivedWritesLeaveSourceArtifactsIdentical() async throws {
+        try await withSaveFolder { destination in
+            let directory = try writeSession(
+                "2026-08-29-derived-boundary",
+                in: destination,
+                title: "Derived Boundary",
+                texts: ["A closure captures the variables it refers to.", "Escaping closures outlive the call."],
+                retention: .raw,
+                review: try SessionReviewMetadata(
+                    sessionID: UUID(),
+                    recognizerConfidenceAvailable: true,
+                    candidates: [TranscriptReviewCandidate(
+                        spanIndex: 1, startTime: 20, endTime: 24, confidence: 0.2, reasons: [.lowConfidence]
+                    )]
+                ).encoded()
+            )
+            let report = try await makeService().load(destination)
+            let session = try #require(report.sessions.first)
+            let sessionID = try #require(session.sessionID)
+            let before = try fingerprints(of: destination)
+
+            let service = DerivedSessionService(
+                store: FileManagerDerivedSessionStore(),
+                access: FakeSecurityScopedAccess()
+            )
+            var state = try await service.save(
+                DerivedSessionState(sessionID: sessionID, notes: "# Notes\n\n- **bold** and *italic*\n"),
+                in: directory,
+                destination: destination,
+                expectedRevision: nil
+            )
+            state = try await service.save(
+                state.settingReviewed(true, spanIndex: 1),
+                in: directory,
+                destination: destination,
+                expectedRevision: state.revision
+            )
+            state = try await service.save(
+                state.settingReviewed(false, spanIndex: 1),
+                in: directory,
+                destination: destination,
+                expectedRevision: state.revision
+            )
+
+            let after = try fingerprints(of: destination)
+            let derivedPath = SessionArtifactLayout(directory: directory)
+                .derivedURL.path(percentEncoded: false)
+            #expect(after.keys.sorted() == (before.keys + [derivedPath]).sorted())
+            #expect(after.filter { $0.key != derivedPath } == before)
+
+            let reloaded = try await makeService().load(destination)
+            #expect(reloaded.sessions.map(\.title) == report.sessions.map(\.title))
+            #expect(reloaded.documents.first?.review == report.documents.first?.review)
+        }
+    }
+
     // MARK: - Review
 
     @Test("A meeting's review sidecar is read back and points at the words the transcript has")

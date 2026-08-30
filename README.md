@@ -60,6 +60,9 @@ history and search work end to end.
   bar. See *Pausing a meeting* below.
 - Post-meeting review of uncertain recognition, with playback of the retained
   audio for the passage in question. See *Reviewing uncertain passages* below.
+- Marking a reviewed passage as dealt with, and local Markdown notes about a
+  meeting, kept in a file of their own beside the transcript and never in it.
+  See *Notes about a meeting* below.
 - Incremental autosave with no timer: a finalised span reaches the file as soon
   as it is recognised, the file is flushed to the storage device every 25
   appends, and Stop flushes and closes the transcript before it reports the
@@ -118,9 +121,11 @@ history and search work end to end.
   from. It is deterministic substring matching, not semantic or AI search: no
   embeddings, no vector database, no cloud service, and no index file written
   anywhere near your transcripts.
-- History that reads and never writes. Listing, previewing, refreshing and
-  searching leave every transcript, recording and session record byte-identical,
-  including their modification dates. A meeting whose session record is damaged,
+- History that reads its source material and never writes it. Listing,
+  previewing, refreshing and searching leave every transcript, recording,
+  session record and review sidecar byte-identical, including their
+  modification dates, and your notes and reviewed marks are written to a
+  separate file that cannot reach any of them. A meeting whose session record is damaged,
   missing or written by a newer ScribeKit is reported as such and left exactly
   as it is, and never stops the rest of the folder from listing.
 - A directory holding a ScribeKit transcript with no session record — written
@@ -347,6 +352,31 @@ a passage leaves every file in the session folder byte-identical. Meetings
 recorded before this existed simply have no review information and work exactly
 as they did.
 
+Each passage carries **Mark Reviewed** and **Mark Unreviewed**, which record
+that you have dealt with it. The mark is your own disposition, not a claim about
+the words: it is written the moment you make it, to a separate file, and
+`review.json` — what the recogniser observed — is never touched.
+
+## Notes about a meeting
+
+A meeting's detail pane has a notes area you can type into. It is plain Markdown
+source, kept verbatim: ScribeKit does not render it, reflow it, trim it or
+generate a word of it, and there is no AI here. Notes stay on your Mac and go
+nowhere.
+
+Notes are saved when you press **Save**, and ScribeKit says *Saved* only after
+the file was actually written. Until then it says *Unsaved changes*; if a save
+fails it says why and your text stays in the editor. Leaving the meeting before
+saving discards the text you had not saved.
+
+Your notes and your reviewed marks are the only things ScribeKit writes on your
+behalf after a meeting has closed, and they go to one file of their own —
+`.scribekit/derived.json` in the meeting's folder. `transcript.md`, the
+recording, `session.json` and `review.json` are source material and stay
+byte-identical however much you write. Delete `derived.json` and you lose your
+notes and your marks; the meeting itself is exactly as it was. A meeting with no
+ScribeKit session record has no identity to attach notes to, and says so.
+
 ## Roadmap
 
 1. **Foundation** — domain models, configuration UI, tests, CI, docs.
@@ -365,6 +395,15 @@ as they did.
 
 ## Known limitations
 
+- Notes are not searchable. History's search runs over titles, transcripts and
+  source names, exactly as it did; what you write in the notes area does not
+  match a query.
+- Unsaved notes are discarded when you select another meeting or reload
+  History. There is no draft that survives leaving the screen, and the pane
+  says so.
+- Notes and reviewed marks need a meeting with a ScribeKit session record. A
+  transcript from before session records existed has no identity to attach them
+  to, so its notes area is unavailable.
 - A pause is a boundary in the recording, not a silence in it. The audio file
   holds captured audio only, so the moment a pause ended is audible as a cut.
   That is deliberate — inserting the pause as silence would put minutes of
