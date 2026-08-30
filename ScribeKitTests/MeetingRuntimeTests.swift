@@ -555,7 +555,7 @@ struct MeetingRuntimeTests {
         #expect(!persistence.isOpen)
     }
 
-    @Test("A recogniser that will not start closes the transcript it had opened")
+    @Test("A recogniser that will not start closes the transcript it had opened, unfinished")
     func recognitionFailureClosesTheSession() async {
         let (model, _, transcriber, persistence) = await makeMeeting()
         transcriber.startError = .systemFailure("no model")
@@ -563,10 +563,12 @@ struct MeetingRuntimeTests {
         await model.start(request([meet]))
 
         #expect(!persistence.isOpen)
-        #expect(persistence.entries.last == .finished(.completed))
+        // The meeting never captured a second, so it did not finish: it never
+        // began.
+        #expect(persistence.entries.last == .finished(.failed))
     }
 
-    @Test("Capture that will not start closes the transcript it had opened")
+    @Test("Capture that will not start closes the transcript it had opened, unfinished")
     func captureFailureClosesTheSession() async {
         let (model, capturer, _, persistence) = await makeMeeting()
         capturer.startError = .permissionDenied
@@ -574,7 +576,7 @@ struct MeetingRuntimeTests {
         await model.start(request([meet]))
 
         #expect(!persistence.isOpen)
-        #expect(persistence.entries.last == .finished(.completed))
+        #expect(persistence.entries.last == .finished(.failed))
     }
 
     @Test("Finalised speech is written and partial guesses never are")

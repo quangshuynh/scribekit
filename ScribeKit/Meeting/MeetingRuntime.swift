@@ -464,7 +464,10 @@ final class MeetingRuntime {
         } catch {
             transcriptionState = .failed(message: message(for: error, sources: request.sources))
             captureState = .idle
-            await closeSession()
+            // Nothing was captured, so the meeting did not finish: it never
+            // began. Recording it as completed would list an empty transcript
+            // in History under the status a meeting that ran and closed gets.
+            await closeSession(outcome: .failed)
             await refreshAvailability()
             return
         }
@@ -476,7 +479,7 @@ final class MeetingRuntime {
             await transcriber.stop()
             transcriptionState = .idle
             captureState = .failed(message: message(for: error, sources: request.sources))
-            await closeSession()
+            await closeSession(outcome: .failed)
         }
     }
 
@@ -859,7 +862,15 @@ final class MeetingRuntime {
     /// The subsystems return to idle without a failure of their own, because
     /// nothing failed in them; ``persistenceState`` carries the reason.
     private func stopSubsystemsAfterPersistenceFailure() {
-        guard canStop else { return }
+        guard canStop else {
+            // A pause reached its drained boundary and then could not write
+            // its marker: capture and recognition have already stopped, and
+            // the recording is the only thing still open. Closing it here is
+            // what keeps the meeting from staying "running" for the rest of
+            // the process's life with a writer nothing will ever finish.
+            _ = finishRetainedAudio()
+            return
+        }
         captureState = .stopping
         transcriptionState = .stopping
         Task { @MainActor [weak self] in
