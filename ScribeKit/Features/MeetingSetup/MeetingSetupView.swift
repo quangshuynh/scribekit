@@ -754,7 +754,8 @@ struct MeetingSetupView: View {
         if let message = runtime.persistenceState.failureMessage { return message }
         if let message = runtime.audioRetentionState.failureMessage { return message }
         if runtime.isRunning {
-            return "Meeting in progress. It keeps running if you hide or close this window."
+            return "Meeting in progress. It keeps running if you hide or close this window; the menu bar item "
+                + "shows it and can stop it."
         }
         if case .saved = runtime.persistenceState { return "Meeting finished. The transcript is saved and closed." }
         return "Choose applications and a save folder, then start the meeting."

@@ -29,9 +29,11 @@ final class ScribeKitAppDelegate: NSObject, NSApplicationDelegate {
     /// Keeps the application running when its window closes.
     ///
     /// Closing the window is not quitting. A meeting keeps capturing,
-    /// transcribing and writing, and the window can be opened again. The
-    /// application stays with no meeting running too, because whether it is
-    /// still there should not depend on whether a window happens to be open.
+    /// transcribing and writing, the menu bar keeps showing it, and the window
+    /// can be opened again from there. With no meeting running the application
+    /// still stays: its menu bar item is its remaining interface, and quitting
+    /// out from under it would make that item disappear whenever the last
+    /// window was closed.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// Answers a deliberate Quit.
