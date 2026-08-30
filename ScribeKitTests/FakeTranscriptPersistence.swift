@@ -30,6 +30,7 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         var appendError: TranscriptPersistenceError?
         var finishError: TranscriptPersistenceError?
         var startDelay: Duration = .zero
+        var onFinish: (@Sendable () -> Void)?
     }
 
     private let state = Mutex(State())
@@ -71,6 +72,14 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         state.withLock { $0.startDelay = duration }
     }
 
+    /// Observes the moment the session is closed, so a test can check what the
+    /// rest of the meeting looked like just before its record was written.
+    ///
+    /// - Parameter body: Called before the session is recorded as finished.
+    func observeFinish(_ body: @escaping @Sendable () -> Void) {
+        state.withLock { $0.onFinish = body }
+    }
+
     func startSession(
         _ session: MeetingSession,
         localeIdentifier: String,
@@ -105,6 +114,7 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
     func finishSession(endedAt: Date, outcome: SessionCompletionOutcome) async throws {
         let delay = state.withLock { $0.startDelay }
         if delay > .zero { try? await Task.sleep(for: delay) }
+        state.withLock { $0.onFinish }?()
 
         let error: TranscriptPersistenceError? = state.withLock { state in
             defer { state.finishError = nil }

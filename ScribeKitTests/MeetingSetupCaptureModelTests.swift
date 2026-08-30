@@ -95,21 +95,41 @@ struct MeetingSetupCaptureModelTests {
     private func makeMeeting(
         availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
     ) async -> (MeetingSetupCaptureModel, FakeCapturer, FakeSpeechTranscriber, FakeTranscriptPersistence) {
+        let (model, capturer, transcriber, persistence, _) = await makeRetainingMeeting(availability: availability)
+        return (model, capturer, transcriber, persistence)
+    }
+
+    /// Builds a model over fake capture, recognition, transcript writing and
+    /// audio retention.
+    ///
+    /// - Parameter availability: What the recogniser reports about itself.
+    /// - Returns: The model and the four doubles behind it.
+    private func makeRetainingMeeting(
+        availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
+    ) async -> (
+        MeetingSetupCaptureModel,
+        FakeCapturer,
+        FakeSpeechTranscriber,
+        FakeTranscriptPersistence,
+        FakeAudioRetention
+    ) {
         let transcriber = FakeSpeechTranscriber()
         transcriber.availabilityResult = availability
         let persistence = FakeTranscriptPersistence()
+        let audio = FakeAudioRetention()
         var capturer: FakeCapturer!
         let model = MeetingSetupCaptureModel(
             monitor: AudioCaptureActivityMonitor(minimumPublishInterval: .zero),
             transcriber: transcriber,
             persistence: persistence,
+            audio: audio,
             makeCapturer: { consumer in
                 capturer = FakeCapturer(consumer: consumer)
                 return capturer
             }
         )
         await model.prepare()
-        return (model, capturer, transcriber, persistence)
+        return (model, capturer, transcriber, persistence, audio)
     }
 
     /// The folder a test meeting writes to. Nothing is created there; the
@@ -120,8 +140,17 @@ struct MeetingSetupCaptureModelTests {
     ///
     /// - Parameter sources: The applications to capture.
     /// - Returns: The request.
-    private func request(_ sources: [CaptureSource]) -> MeetingStartRequest {
-        MeetingStartRequest(title: "Interval Six", sources: sources, destination: destination)
+    private func request(
+        _ sources: [CaptureSource],
+        title: String = "Interval Six",
+        retention: AudioRetentionMode = .none
+    ) -> MeetingStartRequest {
+        MeetingStartRequest(
+            title: title,
+            sources: sources,
+            destination: destination,
+            audioRetention: retention
+        )
     }
 
     /// A synthetic buffer of the shape ScreenCaptureKit delivers.
@@ -804,6 +833,194 @@ struct MeetingSetupCaptureModelTests {
         capturer.interrupt(.interrupted("The stream was stopped by the user"))
 
         #expect(await wait { !persistence.isOpen })
+        #expect(persistence.outcomes == [.completed])
+    }
+
+    // MARK: - Audio retention
+
+    @Test("Keeping no audio opens no recording and writes no buffer")
+    func noneModeRetainsNothing() async {
+        let (model, capturer, transcriber, persistence, audio) = await makeRetainingMeeting()
+
+        await model.start(request([meet]))
+        capturer.deliver(buffer(frames: 960))
+        capturer.deliver(buffer(frames: 960))
+        transcriber.emit(.final(segment("Transcribed but not recorded.")))
+        #expect(await wait { persistence.segments.count == 1 })
+        await model.stop()
+
+        #expect(audio.entries == [.started(mode: .none, url: nil)])
+        #expect(audio.appendCount == 0)
+        #expect(model.audioRetentionState == .idle)
+        #expect(persistence.outcomes == [.completed])
+    }
+
+    @Test("Retaining audio records every captured buffer to the session's file", arguments: [
+        (AudioRetentionMode.raw, "audio.caf"),
+        (AudioRetentionMode.compressed, "audio.m4a")
+    ])
+    func retainingModesRecordCapturedAudio(mode: AudioRetentionMode, name: String) async {
+        let (model, capturer, _, _, audio) = await makeRetainingMeeting()
+
+        await model.start(request([meet], retention: mode))
+        capturer.deliver(buffer(frames: 960))
+        capturer.deliver(buffer(frames: 960))
+
+        #expect(audio.appendCount == 2)
+        if case let .retaining(url) = model.audioRetentionState {
+            #expect(url.lastPathComponent == name)
+        } else {
+            Issue.record("Expected the meeting to be recording audio")
+        }
+
+        await model.stop()
+
+        #expect(audio.entries.last == .finished)
+        if case let .retained(url) = model.audioRetentionState {
+            #expect(url.lastPathComponent == name)
+        } else {
+            Issue.record("Expected the recording to be reported as saved")
+        }
+    }
+
+    @Test("An audio file that cannot be created stops the meeting before it captures anything")
+    func audioStartFailurePreventsStart() async {
+        let (model, capturer, transcriber, persistence, audio) = await makeRetainingMeeting()
+        audio.failStart()
+
+        await model.start(request([meet], retention: .raw))
+
+        #expect(model.captureState == .idle)
+        #expect(model.transcriptionState == .idle)
+        #expect(model.audioRetentionState.failureMessage != nil)
+        #expect(transcriber.startCount == 0)
+        #expect(capturer.startCount == 0)
+        #expect(!persistence.isOpen)
+        // The transcript was created and is closed again, but the meeting never
+        // ran, so nothing records it as completed.
+        #expect(persistence.outcomes == [.failed])
+    }
+
+    @Test("A session is recorded as completed only after the recording has been closed")
+    func completionFollowsTheRecording() async {
+        let (model, capturer, _, persistence, audio) = await makeRetainingMeeting()
+        let recordingWasClosed = Mutex(false)
+        persistence.observeFinish { recordingWasClosed.withLock { $0 = !audio.isOpen } }
+
+        await model.start(request([meet], retention: .raw))
+        capturer.deliver(buffer(frames: 960))
+        await model.stop()
+
+        #expect(recordingWasClosed.withLock { $0 })
+        #expect(audio.entries.last == .finished)
+        #expect(persistence.outcomes == [.completed])
+    }
+
+    @Test("A recording that cannot be finalised is not a completed meeting")
+    func finishFailureIsNotACompletion() async {
+        let (model, capturer, transcriber, persistence, audio) = await makeRetainingMeeting()
+        await model.start(request([meet], retention: .compressed))
+        capturer.deliver(buffer(frames: 960))
+        transcriber.emit(.final(segment("This still reaches the transcript.")))
+        #expect(await wait { persistence.segments.count == 1 })
+        audio.failFinish()
+
+        await model.stop()
+
+        #expect(model.audioRetentionState.failureMessage != nil)
+        #expect(model.audioRetentionState.url?.lastPathComponent == "audio.m4a")
+        // The transcript finished normally and is reported as such; the session
+        // record is what refuses to claim the meeting completed.
+        #expect(persistence.segments.count == 1)
+        #expect(persistence.outcomes == [.failed])
+        if case .saved = model.persistenceState {} else {
+            Issue.record("Expected the transcript to be reported as saved")
+        }
+    }
+
+    @Test("A recording that stops being written ends the meeting rather than losing audio quietly")
+    func writeFailureEndsTheMeeting() async {
+        let (model, capturer, _, persistence, audio) = await makeRetainingMeeting()
+        await model.start(request([meet], retention: .raw))
+        capturer.deliver(buffer(frames: 960))
+
+        audio.reportFailure()
+
+        #expect(await wait { !persistence.isOpen })
+        #expect(await wait { model.captureState == .idle && model.transcriptionState == .idle })
+        #expect(model.audioRetentionState.failureMessage != nil)
+        #expect(model.audioRetentionState.url?.lastPathComponent == "audio.caf")
+        // The file is closed and left where it is; nothing deletes it.
+        #expect(audio.entries.last == .cancelled)
+        #expect(persistence.outcomes == [.failed])
+    }
+
+    @Test("A transcript that stops being saved still closes the recording rather than discarding it")
+    func transcriptFailureKeepsTheRecording() async {
+        let (model, capturer, transcriber, persistence, audio) = await makeRetainingMeeting()
+        await model.start(request([meet], retention: .raw))
+        capturer.deliver(buffer(frames: 960))
+        persistence.failAppends(with: TranscriptPersistenceError(.writeFailed))
+
+        transcriber.emit(.final(segment("This will not reach the file.")))
+
+        #expect(await wait { model.persistenceState.failureMessage != nil })
+        #expect(await wait { audio.entries.last == .finished })
+        #expect(persistence.outcomes == [.failed])
+        if case .retained = model.audioRetentionState {} else {
+            Issue.record("Expected the recording to be closed rather than abandoned")
+        }
+    }
+
+    @Test("Enabling audio retention does not change a word of the transcript")
+    func retentionDoesNotChangeTheTranscript() async {
+        let spoken = ["Today we are learning about closures.", "A closure captures its environment."]
+
+        var written: [[String]] = []
+        for mode in [AudioRetentionMode.none, .raw, .compressed] {
+            let (model, capturer, transcriber, persistence, _) = await makeRetainingMeeting()
+            await model.start(request([meet], retention: mode))
+            capturer.deliver(buffer(frames: 960))
+            for (index, text) in spoken.enumerated() {
+                transcriber.emit(.final(segment(text, start: Double(index) * 2)))
+            }
+            #expect(await wait { persistence.segments.count == spoken.count })
+            await model.stop()
+            written.append(persistence.segments.map(\.text))
+        }
+
+        #expect(written == [spoken, spoken, spoken])
+    }
+
+    @Test("A second meeting records into its own session directory")
+    func restartRecordsIntoANewSession() async {
+        let (model, capturer, _, _, audio) = await makeRetainingMeeting()
+
+        await model.start(request([meet], title: "First Meeting", retention: .raw))
+        capturer.deliver(buffer(frames: 960))
+        await model.stop()
+        await model.start(request([browser], title: "Second Meeting", retention: .raw))
+        capturer.deliver(buffer(frames: 960))
+        await model.stop()
+
+        let started: [URL] = audio.entries.compactMap {
+            if case let .started(_, url) = $0 { url } else { nil }
+        }
+        #expect(started.count == 2)
+        #expect(started[0] != started[1])
+        #expect(started.allSatisfy { $0.lastPathComponent == "audio.caf" })
+    }
+
+    @Test("Capture stopping by itself still closes the recording before the session is recorded")
+    func captureInterruptionClosesTheRecording() async {
+        let (model, capturer, _, persistence, audio) = await makeRetainingMeeting()
+        await model.start(request([meet], retention: .compressed))
+        capturer.deliver(buffer(frames: 960))
+
+        capturer.interrupt(.interrupted("The stream was stopped by the user"))
+
+        #expect(await wait { !persistence.isOpen })
+        #expect(audio.entries.last == .finished)
         #expect(persistence.outcomes == [.completed])
     }
 }
