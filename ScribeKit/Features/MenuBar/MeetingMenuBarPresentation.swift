@@ -44,6 +44,12 @@ nonisolated struct MeetingMenuBarPresentation: Equatable, Sendable {
     /// Whether the Stop item should be offered.
     let canStop: Bool
 
+    /// Whether the Pause item should be offered.
+    let canPause: Bool
+
+    /// Whether the Resume item should be offered.
+    let canResume: Bool
+
     /// The transcript to reveal in the Finder, when one exists.
     let transcriptURL: URL?
 
@@ -58,18 +64,24 @@ nonisolated struct MeetingMenuBarPresentation: Equatable, Sendable {
     ///   - transcript: Where the transcript is, when it has been created.
     ///   - audio: Where the retained recording is, when there is one.
     ///   - canStop: Whether the runtime would act on a stop request.
+    ///   - canPause: Whether the runtime would act on a pause request.
+    ///   - canResume: Whether the runtime would act on a resume request.
     init(
         status: MeetingRuntimeStatus,
         meeting: MeetingSnapshot?,
         transcript: URL?,
         audio: URL?,
-        canStop: Bool
+        canStop: Bool,
+        canPause: Bool = false,
+        canResume: Bool = false
     ) {
         self.title = meeting?.title
         self.failureMessage = status.failureMessage
         self.transcriptURL = transcript
         self.audioURL = audio
         self.canStop = canStop
+        self.canPause = canPause
+        self.canResume = canResume
         self.showsElapsed = status.isActive
 
         switch status {
@@ -82,6 +94,9 @@ nonisolated struct MeetingMenuBarPresentation: Equatable, Sendable {
         case .transcribing:
             symbolName = "waveform.circle.fill"
             statusLine = "Transcribing"
+        case .paused:
+            symbolName = "pause.circle.fill"
+            statusLine = "Paused"
         case .stopping:
             symbolName = "hourglass"
             statusLine = "Stopping…"
@@ -101,7 +116,9 @@ nonisolated struct MeetingMenuBarPresentation: Equatable, Sendable {
 
         var details: [String] = []
         if status.isActive, let meeting {
-            if let sources = meeting.sourceSummary { details.append("Capturing \(sources)") }
+            if let sources = meeting.sourceSummary {
+                details.append(status == .paused ? "Paused; \(sources) not being captured" : "Capturing \(sources)")
+            }
             details.append(Self.retentionDescription(meeting.audioRetention))
         }
         self.details = details
