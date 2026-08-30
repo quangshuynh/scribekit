@@ -5,7 +5,7 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 10 — transcript history and local search. Complete.
+Interval 11 — uncertainty review with retained-audio playback. Complete.
 
 ## Current implementation
 
@@ -28,7 +28,15 @@ Interval 10 — transcript history and local search. Complete.
   dropped audio fell), `AppleSpeechTranscriber`,
   `TranscriptionEventPublisher` / `TranscriptionEventTally`, and
   `SpeechAvailabilityProviding` / `SystemSpeechAvailability`.
-- `ScribeKit/History/`, new for this interval: `TranscriptDocument` /
+- `ScribeKit/Review/`, new for this interval: `TranscriptReviewReason` /
+  `TranscriptReviewPriority` / `TranscriptReviewCandidate` /
+  `TranscriptReviewPolicy` (which spans are worth reviewing, and how urgently —
+  pure), `SessionReviewMetadata` / `SessionReviewError` / `SessionReviewStoring`
+  / `FileManagerSessionReviewStore` (the versioned `.scribekit/review.json`
+  sidecar and its one write), and `RetainedAudioPlaybackPlan` (the seek, pure) /
+  `RetainedAudioPlayer` (`@MainActor @Observable`, `AVPlayer` over an
+  `AVURLAsset`, owning a `SecurityScopedLease` for the length of playback).
+- `ScribeKit/History/`: `TranscriptDocument` /
   `TranscriptSpan` / `TranscriptHeaderField` (reading a written transcript back,
   no I/O), `HistorySession` / `HistorySessionStatus` / `HistoryAudio` /
   `HistoryAudioFormat` / `TranscriptSearchDocument`, `HistoryStoring` /
@@ -37,7 +45,7 @@ Interval 10 — transcript history and local search. Complete.
   an actor), and `TranscriptSearchIndex` / `TranscriptSearch` /
   `HistorySearchResult` / `HistoryMatchKind` / `TranscriptExcerpt` (a pure
   matcher).
-- `ScribeKit/Features/History/`, new for this interval: `HistoryModel`
+- `ScribeKit/Features/History/`: `HistoryModel`
   (`@MainActor @Observable`), `HistoryView` and `HistorySessionDetailView`.
   `ScribeKit/Features/ScribeKitRootView.swift` is the window's two tabs.
 - `ScribeKit/Persistence/`: `TranscriptPersisting` (the whole boundary between
@@ -1014,12 +1022,183 @@ terms rather than a Cocoa error string, and the healthy sessions still list. The
 damaged sessions sit outside the selectable list because there is nothing to
 select for them.
 
+## Uncertainty signal
+
+`SpeechTranscriber` genuinely reports confidence, and this is what was measured
+before anything was designed on top of it.
+
+`SpeechTranscriber.ResultAttributeOption.transcriptionConfidence` attaches
+`AttributeScopes.SpeechAttributes.ConfidenceAttribute` — a `Double` — to the
+runs of a result's attributed text. ScribeKit now requests it alongside
+`.audioTimeRange`, and `AppleSpeechTranscriber.confidence(of:)` takes the
+**lowest** value any run carried: the weakest word is the one a reviewer would
+want to hear again, and averaging would hide it behind the words around it.
+
+Two facts about the attribute, both observed rather than assumed, by running the
+real API over synthesised speech on this Mac's en-US model:
+
+1. **Only finalised results carry it.** A volatile hypothesis has no confidence
+   attached, so a partial segment's confidence is `nil` and nothing substitutes
+   a value.
+2. **The values separate right from wrong.** Correctly recognised spans reported
+   a lowest-word confidence of 0.60, 0.82, 0.95, 0.97 and 0.98. A span
+   containing two misrecognised words ("boat hole" for "borehole") bottomed out
+   at 0.14, and one containing a mis-split word ("An isotropic" for
+   "Anisotropic") at 0.33. The two populations do not overlap.
+
+`TranscriptReviewPolicy.lowConfidence` is 0.5 and sits between them;
+`veryLowConfidence` is 0.25, where the clearly wrong words fell. Apple documents
+no scale for the value, so it is used for those two comparisons and nothing
+else — no number derived from it reaches the interface.
+
+A second signal was tried and rejected. Counting the volatile hypotheses that
+precede a final looked like "the recogniser changed its mind repeatedly", but
+39 of them preceded a single 7.2-second final: the cadence is roughly five per
+second, so the count measures how long a span is, not how hard it was. Shipping
+it would have been a duration proxy wearing the label of uncertainty, so it is
+not in the code.
+
+What is left is two reasons, and the interface keeps them apart because they are
+different kinds of claim. `lowConfidence` is the recogniser's own judgement.
+`nearInterruption` is ScribeKit's observation of its own pipeline: the span is
+the first one finalised after a gap the transcript already records. Priority is
+a pure function of the two — low confidence that is severe or coincides with a
+gap is High, low confidence alone is Medium, a gap alone is Low — and is
+table-tested.
+
+## Review metadata
+
+`.scribekit/review.json`, beside `session.json`, schema-versioned from its first
+release and probed for its version before anything else is interpreted.
+
+It holds what review needs and nothing else: the session's identity, whether the
+recogniser reported any confidence at all in this meeting, and one entry per
+flagged span carrying that span's **position in the document**, its
+audio-relative start and end, its confidence, and its reasons. It holds no
+transcript text. The words shown for review are read back from `transcript.md`
+by index, so the sidecar cannot drift from the document or become a second copy
+of it, and a candidate naming a span the transcript does not have is dropped
+rather than shown against the wrong words.
+
+The index is exact rather than approximate. `MarkdownTranscriptStore` records a
+candidate only after the span has actually reached the file, and numbers it by
+how many spans were written before it — which is the index `TranscriptDocument`
+gives that span when the file is read back.
+
+Writing it is best effort, and deliberately so. It happens after the transcript
+has been flushed and closed and before the record is updated, and a failure does
+not fail the meeting: a transcript and a recording that both closed cleanly are
+not thrown away over a file that only makes a later convenience possible. A
+session with no sidecar has no review information, which is exactly the state
+every session recorded before this interval is in, and History says so plainly.
+
+Reading it is on the read-only side. `HistoryStoring` gained `reviewData(at:)`
+and no write method; a missing, unreadable, damaged or newer-format sidecar
+yields `nil` and is not even reported as a problem, because review metadata is
+never load-bearing.
+
+## Playback and the lease
+
+`AVPlayer` over an `AVURLAsset`. The asset is read from disk as it plays, so a
+multi-hour recording costs what a short one does and no part of the file is
+collected in memory — the rule retention writes under, applied to reading back.
+`AVPlayerItem.forwardPlaybackEndTime` stops playback at the end of the window,
+so nothing has to poll a clock to know when to stop.
+
+The seek is the offset itself. A candidate's `startTime` is seconds from the
+first captured frame and a retained recording's time zero is that same frame, so
+second *t* of the file is offset *t* of the transcript. The twelve-hour clock in
+the Markdown is never used for this: it is a rendering of a moment, not a
+position in a file. Playback begins two seconds before the span and ends 1.5
+seconds after it, clamped at zero for a span near the start of a meeting.
+
+`RetainedAudioPlayer` owns an explicit `SecurityScopedLease` for the length of
+playback — the first thing in ScribeKit that holds access longer than a call.
+Every exit goes through one `teardown()`: stop, failure, a new span replacing the
+old one, and `deinit`. `HistoryModel` owns the player, so leaving History,
+refreshing it or selecting another meeting stops playback and gives the claim
+back; a view never owns it.
+
+An M4A that was never finalised does not open, and is reported as that, with the
+reason, rather than repaired. A meeting that kept no recording lists its
+passages and offers no playback.
+
+## Review UX
+
+The detail pane gained a Review section between the actions and the transcript
+preview. It states how many passages are worth a second listen and lists them in
+transcript order, each with its priority word, the transcript's own timestamp,
+the recognised wording verbatim, one line per reason, and playback controls.
+
+Three empty states, kept distinct because they mean different things: a session
+with no sidecar says it has no review information; a session whose recogniser
+reported confidence and flagged nothing says nothing was flagged; a session
+whose recogniser reported no confidence at all says that too, rather than
+letting an empty list imply the recogniser was sure.
+
+There is no editing and no mark-as-reviewed. Marking would mean History
+writing, and History's read-only store boundary is the thing that makes
+"opening History leaves every artifact byte-identical" a property of the type
+rather than a rule someone has to remember. Trading that for a checkbox was not
+worth it in this interval; if reviewed state is wanted later, it needs its own
+narrow write boundary rather than a hole in this one.
+
 ## Logging
 
 None was added. No `OSLog` category, no transcript text, no PCM, no meeting
 titles, no telemetry.
 
 ## Validation status
+
+### Interval 11 validation
+
+Focused, on synthetic speech, with no microphone and no meeting audio.
+
+**The signal.** A standalone program built against the real Speech framework ran
+`SpeechAnalyzer` with a `SpeechTranscriber` over speech synthesised by `say`,
+with `.transcriptionConfidence` requested. It reported per-word confidences on
+finalised results and none at all on volatile ones. Two runs: five ordinary
+sentences gave lowest-word confidences of 0.60, 0.82, 0.95, 0.97 and 0.98, all
+correctly recognised; a sentence with two hard words gave 0.14 for "boat hole"
+(spoken: "borehole") and 0.33 for "isotropic" (spoken: "anisotropic"). This is
+what the thresholds are set from.
+
+**End to end.** A harness drove the real pipeline with ScreenCaptureKit replaced
+and nothing else: speech synthesised in process with `AVSpeechSynthesizer`,
+converted to the 48 kHz mono float32 the capturer delivers, chunked into 20 ms
+buffers and handed to the real `AppleSpeechTranscriber` and the real
+`RetainedAudioRecorder` together, with the real `MarkdownTranscriptStore`
+writing the transcript and the sidecar, and the real `HistoryService` reading it
+back.
+
+1. The recogniser finalised the passage with a confidence of 0.107 and the
+   wording "Isotropic diffusion smoothed the butter hole telemetry." — a genuine
+   misrecognition. The sidecar carried one candidate, span 0, priority High,
+   reason `lowConfidence`, offsets 4.24–7.23 s.
+2. History read it back with the recognised wording byte-identical to the
+   transcript's, the timestamp the document states, and the reason attached.
+3. The playback plan seeked to 2.24–8.73 s. That stretch of `audio.caf` was
+   then extracted and transcribed **independently**, and came back as exactly
+   the flagged wording — so the seek lands on the passage rather than near it.
+4. `RetainedAudioPlayer` reached `playing`, `stop()` returned it to `idle`, and
+   the injected access double showed every start balanced by a stop. The
+   transcript's SHA-256 was identical before and after review and playback.
+
+**Memory.** The process footprint grew 5.4 MB while a 1.4 MB recording played,
+which is `AVPlayer`'s own machinery rather than the file. This is a sanity
+check, not a proof of streaming: the recording was small enough that loading it
+whole would not have shown. Streaming rests on `AVURLAsset` being file-backed.
+
+**Networking.** Unchanged and unchecked-by-need: the app still carries no
+`com.apple.security.network.client` entitlement, and nothing added in this
+interval references `URLSession`, `Network` or any socket API. The entitlements
+file was not touched.
+
+**Not done.** The interface itself was not driven by hand: the Review section,
+its three empty states and its controls are covered by the unit tests and by the
+model, not by a click-through. No live ScreenCaptureKit meeting was recorded for
+this interval, so the flagged passage came from synthesised speech fed to the
+same entry point capture uses rather than from audio a Mac played.
 
 `xcodebuild ... clean test` passes on Xcode 26.6: **463 tests in 44 suites**, no
 compiler warnings. The `AppleSpeechTranscriber` suite starts and stops the real
@@ -1377,6 +1556,33 @@ intervals; the capture observations above were taken through the same path.
 ## Known limitations
 
 - Interval 2, 3 and 4 limitations still hold.
+- **Confidence has no documented scale, so the thresholds are empirical.** They
+  separate cleanly on this Mac's en-US model over synthesised speech. Another
+  locale, another model, or real speech over a real meeting's audio may sit
+  differently, and nothing has measured that.
+- **A flagged passage is a whole finalised span.** Confidence is per word, and
+  the lowest one flags the span it is in, so review points at the sentence
+  rather than at the word inside it. The reviewer hears the sentence.
+- **Review information is only as good as the sidecar.** A meeting killed before
+  it finished writes none, because the sidecar is written when the session
+  closes; a meeting whose sidecar write failed has none either, and neither
+  failure is surfaced anywhere except as the absence History states.
+- **There is no reviewed state.** A passage cannot be marked as dealt with,
+  because History has no write side and this interval did not open one.
+- **There is no correction.** Review shows and plays; it never proposes,
+  replaces or edits a word, and `transcript.md` has no editor.
+- **Older sessions have no review information and no precise seek.** A session
+  recorded before this interval has no sidecar, so it has no candidates and
+  nothing offers to seek into its recording. No offset is reconstructed for one.
+- **Playback stops at the end of the window, not at the end of the recording.**
+  There is no scrubber, no waveform, no continuous listening and no way to play
+  a meeting from the top; the controls exist to hear one passage.
+- **A recording that will not open is reported and left.** ScribeKit does not
+  repair a truncated MPEG-4 container, and says so rather than failing silently.
+- **Playback was proved on short files.** Streaming rests on `AVURLAsset` being
+  file-backed rather than on a measurement over a multi-hour recording.
+- **The Review interface was not driven by hand.** It is covered by tests and by
+  the end-to-end harness described above, not by a click-through of the app.
 - **History lists one folder, one level deep.** The save folder the user chose,
   its immediate children, and nothing else. A session moved out of it is gone
   from history; so is every session in a folder the user has since replaced.
@@ -1405,9 +1611,10 @@ intervals; the capture observations above were taken through the same path.
   be read, not routed around.
 - **History is read-only.** No rename, no delete, no export, no editing, no
   tags and no folders. The files are the user's to manage.
-- **No playback.** History says whether a recording is there and how large it
-  is, and reveals it in the Finder. It never opens or decodes one, and makes no
-  claim that a recording plays.
+- **Playback is for review and nothing else.** History plays the stretch of a
+  recording around a flagged passage. It offers no way to play a meeting from
+  the top, no scrubber and no waveform, and it still never decodes a recording
+  merely to list it.
 - **Pause and resume are not implemented, and were deliberately left out.**
   Doing it honestly means deciding what a resumed run means for two timelines
   at once: the transcript's offsets, which are measured from the first captured
@@ -1441,9 +1648,9 @@ intervals; the capture observations above were taken through the same path.
 - Background CPU and memory were sampled on one Mac in a Debug build over
   20-second windows in a single five-minute meeting. No multi-hour hidden run
   has been measured, and no battery claim is made.
-- Retention writes audio; it does not play it. There is no playback, waveform,
-  scrubber or uncertainty review, and a retained recording is opened in another
-  application.
+- Retention writes audio, and playback plays one flagged passage of it. There
+  is still no waveform and no scrubber, and a whole recording is played in
+  another application.
 - A recording is not encrypted. It is an ordinary audio file in the folder the
   user chose, as private as that folder is.
 - A partly written `audio.m4a` does not open, because an MPEG-4 container is
@@ -1507,10 +1714,6 @@ intervals; the capture observations above were taken through the same path.
   restart is not, and is stated as a length alone.
 - Bounded recovery from a recogniser failure is unit tested only; no live
   recogniser failure was reproduced.
-- Confidence is not requested. `SpeechTranscriber` can attach a
-  `transcriptionConfidence` attribute; it is left off until there is a review
-  interface that would use it, rather than surfacing a number with nowhere to
-  go.
 - Stopping waits up to two seconds when the recogniser's results sequence does
   not end on its own, which happens when a run received no audio at all.
 - Memory and CPU were observed, not benchmarked; formal energy measurement is
@@ -1520,29 +1723,30 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 11, as the roadmap now has it: post-meeting review of uncertain
-passages against the retained recording, which is where playback and
-transcript-to-audio seek belong.
+Interval 12, as the roadmap now has it: derived notes that never modify the raw
+transcript.
 
-The alignment it needs is already on disk and now also in memory in the right
-shape. A retained recording's time zero and a `TranscriptSegment`'s offset are
-the same captured frame, and `TranscriptSpan` preserves the clock time and the
-minute heading of every finalised span exactly as the transcript states them.
-Combined with a session's recorded `startedAt`, that is enough to turn a search
-result into a seek without re-reading anything or inventing an offset. Nothing
-about it will decay.
+The separation it needs already exists in the shape this interval built.
+`.scribekit/review.json` is the first thing ScribeKit keeps beside a transcript
+that is *about* the transcript rather than part of it: versioned, optional,
+never load-bearing, read through a boundary with no write side, and pointing at
+spans by index rather than copying their words. A notes artifact is the same
+problem with a user writing the content instead of the recogniser, and it should
+reuse that shape rather than invent a second one.
 
-What Interval 11 has to decide first is `transcriptionConfidence`, which is
-deliberately not requested today. Capturing it changes what the recogniser is
-asked for and what a session is allowed to state about its own uncertainty, and
-that decision belongs with the feature that surfaces it rather than ahead of it.
+Two things it will have to decide that this interval deliberately did not. A
+derived artifact the user edits needs a write boundary History does not have
+today, and opening one is the moment to decide what "History is read-only"
+narrows to — the answer is probably a separate store for ScribeKit's own
+sidecars, leaving the transcript, the recording and the record on the read-only
+side where they are. And reviewed state belongs with it: marking a passage as
+dealt with is the same write, and was left out here rather than half-built.
 
-Two things it will inherit rather than build. Reading a transcript back is
-solved: `TranscriptDocument` gives spans with their timestamps, and
-`HistoryService` gives the recording beside them. And the sandbox story is
-settled: a bounded lease per operation, released afterwards — though playback is
-the first thing that will want access held for longer than a call, and that
-should be an explicit, owned lease rather than a leak.
+Nothing in this interval needs revisiting first. The one thing worth measuring
+when there is real usage is whether the confidence thresholds hold outside
+synthesised en-US speech; they are stated in one place,
+`TranscriptReviewPolicy`, so moving them is a one-line change with a table test
+behind it.
 
 Pause and resume still needs a timeline decision before it needs code: what a
 second recognition run means for transcript offsets, and what a discontinuity
@@ -1550,8 +1754,7 @@ means for a single retained audio file. The same question blocks continuing an
 interrupted meeting into the same session, which is why `MeetingState.recovering`
 is still unused.
 
-Nothing in this interval needs revisiting first. Two things are worth measuring
-when there is real usage to measure: view work during a long hidden meeting,
-still unmeasured beyond five minutes, and whether a real user's folder ever
-approaches the size where History's in-memory search stops being the right
-shape.
+Two things stay worth measuring when there is real usage to measure: view work
+during a long hidden meeting, still unmeasured beyond five minutes, and whether
+a real user's folder ever approaches the size where History's in-memory search
+stops being the right shape.

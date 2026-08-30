@@ -56,6 +56,8 @@ history and search work end to end.
   wall-clock timestamp taken from the session start plus the span's own audio
   offset. The file is append-only, so it is readable in any editor while the
   meeting is still running.
+- Post-meeting review of uncertain recognition, with playback of the retained
+  audio for the passage in question. See *Reviewing uncertain passages* below.
 - Incremental autosave with no timer: a finalised span reaches the file as soon
   as it is recognised, the file is flushed to the storage device every 25
   appends, and Stop flushes and closes the transcript before it reports the
@@ -157,8 +159,6 @@ All of the following are *planned*, not available:
 
 - Pausing and resuming a meeting.
 - Continuing an interrupted meeting into the same session.
-- Post-meeting review of uncertain passages, against the retained audio.
-- Playback of a retained recording inside ScribeKit.
 - Optional derived notes that never modify the raw transcript.
 
 ## Audio retention modes
@@ -268,6 +268,35 @@ written transcript back into its header fields and its finalised spans,
 its own store because recording an interruption is a write, and history never
 writes.
 
+## Reviewing uncertain passages
+
+After a meeting, its detail pane in History lists the passages worth a second
+listen: the recognised wording exactly as the transcript has it, the timestamp
+it was written under, a High, Medium or Low priority, and the reason it was
+flagged.
+
+There are two reasons, and they are different kinds of thing. *Recognition
+confidence was low* is Apple's own judgement, read from the confidence the
+recogniser attaches to each word it finalises; ScribeKit uses it to decide
+whether a passage is flagged and never shows it as a number or a percentage,
+because Apple documents no scale for it. *Near audio that was not transcribed*
+is ScribeKit's observation of its own pipeline: the passage is the first one
+finalised after a stretch of audio recognition never covered.
+
+When the meeting kept a recording, each passage offers Play Audio, which seeks
+to that passage's own position in the recording — a couple of seconds before it,
+stopping shortly after — with pause and stop beside it. The recording is read
+from disk as it plays and is never modified. A meeting that kept no recording
+still lists its passages and says there is no audio to play, and a recording
+from a meeting that was killed before it could be finalised is reported as one
+that will not open rather than quietly skipped.
+
+Review never changes the transcript. Nothing is corrected, replaced, rewritten
+or suggested, `transcript.md` carries no confidence annotation, and listening to
+a passage leaves every file in the session folder byte-identical. Meetings
+recorded before this existed simply have no review information and work exactly
+as they did.
+
 ## Roadmap
 
 1. **Foundation** — domain models, configuration UI, tests, CI, docs.
@@ -279,8 +308,9 @@ writes.
 7. **Crash and session recovery**.
 8. **Optional audio retention**.
 9. **Background and menu bar operation**.
-10. **Transcript history and local search** *(current)*.
-11. Uncertainty review against the retained audio, and derived notes.
+10. **Transcript history and local search**.
+11. **Uncertainty review against the retained audio** *(current)*.
+12. Derived notes that never modify the raw transcript.
 
 ## Known limitations
 
