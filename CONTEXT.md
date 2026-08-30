@@ -5,7 +5,7 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 9 — background and menu bar meeting lifecycle. Complete.
+Interval 10 — transcript history and local search. Complete.
 
 ## Current implementation
 
@@ -28,6 +28,18 @@ Interval 9 — background and menu bar meeting lifecycle. Complete.
   dropped audio fell), `AppleSpeechTranscriber`,
   `TranscriptionEventPublisher` / `TranscriptionEventTally`, and
   `SpeechAvailabilityProviding` / `SystemSpeechAvailability`.
+- `ScribeKit/History/`, new for this interval: `TranscriptDocument` /
+  `TranscriptSpan` / `TranscriptHeaderField` (reading a written transcript back,
+  no I/O), `HistorySession` / `HistorySessionStatus` / `HistoryAudio` /
+  `HistoryAudioFormat` / `TranscriptSearchDocument`, `HistoryStoring` /
+  `FileManagerHistoryStore` / `HistoryError` (a read-only filesystem boundary),
+  `HistoryService` / `HistoryReport` / `HistoryProblem` (the discovery policy,
+  an actor), and `TranscriptSearchIndex` / `TranscriptSearch` /
+  `HistorySearchResult` / `HistoryMatchKind` / `TranscriptExcerpt` (a pure
+  matcher).
+- `ScribeKit/Features/History/`, new for this interval: `HistoryModel`
+  (`@MainActor @Observable`), `HistoryView` and `HistorySessionDetailView`.
+  `ScribeKit/Features/ScribeKitRootView.swift` is the window's two tabs.
 - `ScribeKit/Persistence/`: `TranscriptPersisting` (the whole boundary between
   a meeting and the filesystem) with `TranscriptPersistenceError`;
   `TranscriptMarkdownFormatter` (pure string rendering, no I/O);
@@ -63,7 +75,7 @@ Interval 9 — background and menu bar meeting lifecycle. Complete.
 - `ScribeKit/App/`: `ScribeKitApp` has a single `Window` scene and a
   `MenuBarExtra`; `ScribeKitAppDelegate` is new and owns the runtime.
 - `ScribeKit/Models/`: new for this interval, `MeetingSnapshot`.
-- `ScribeKitTests/`: Swift Testing suites (389 tests, 38 suites).
+- `ScribeKitTests/`: Swift Testing suites (463 tests, 44 suites).
 
 Audio retention writes a file; nothing plays one. Pause and resume do not
 exist.
@@ -781,6 +793,227 @@ worth preventing is writing it twice. An interruption is therefore at worst
 recorded without its note, never noted twice, and a note that cannot be appended
 is reported.
 
+## History discovery
+
+`HistoryService.load(_:)` lists the immediate children of the folder the user
+chose and describes each one. One level, no recursive walk, nothing outside that
+folder — the same scope recovery uses, and the same reason: a session directory
+is a direct child of the chosen folder, and nothing else in the user's
+filesystem is ScribeKit's to enumerate.
+
+History and recovery ask different questions and are kept apart. Recovery asks
+"is there an unfinished meeting", considers only records marked `inProgress`,
+and may write one thing: the interruption the user asks it to record. History
+asks "what is in this folder", shows every session it can describe, and writes
+nothing. They share the session layout and the record format, not a service.
+
+The read boundary makes that structural. `HistoryStoring` has four methods —
+list directories, read a record's bytes, describe a file, read a transcript —
+and no method that creates, replaces, appends to or deletes anything. "Opening
+History leaves every artifact byte-identical" is therefore a property of the
+type, not a rule someone has to remember. `SessionRecoveryStoring` keeps its
+write side because recovery legitimately writes.
+
+The service is an actor, so filesystem work is off the main actor and one load
+happens at a time. The scan is sequential rather than a task per transcript:
+local storage read in order, not hundreds of concurrent reads. It runs when
+asked — no timer, no watcher, no repeat scan, nothing left running afterwards.
+
+`HistoryModel` loads when History appears, when the user presses Refresh, and
+when `runtime.status.isActive` goes false, which is a meeting finishing. Each
+load replaces the previous report and search index wholesale, so a session whose
+folder has gone does not linger.
+
+## History statuses
+
+Every status a record can carry is shown: `completed`, `failed`, `interrupted`
+and `inProgress`, plus `unrecorded` for a transcript with no record.
+`HistorySessionStatus` is `SessionRecoveryStatus` plus that fifth case — history
+is deliberately broader than recovery, which only ever considers `inProgress`.
+
+A failed meeting's transcript is listed like any other. ScribeKit was running and
+said so at the time; hiding what reached the file would lose the only account of
+what happened.
+
+A meeting that is running appears as In Progress and its transcript is read as it
+grows. That is safe with the existing writer without changing anything: the
+writer only appends, takes no lock, and never rewrites what is already in the
+file, so a read during a meeting sees a prefix of the finished document. No lock
+is taken, no lease is held, and History cannot start, stop or touch the meeting.
+`endedAt` and duration are absent for it, because nothing has written them.
+
+Ordering is `startedAt` descending, tie-broken on directory path, so repeated
+loads of the same folder produce the same list. A session with no record has no
+recorded start, so it sorts on its transcript's modification date — the only
+date it actually has.
+
+## Legacy transcripts
+
+A directory holding `transcript.md` and no `.scribekit/session.json` is listed
+as a legacy meeting when the transcript carries the evidence ScribeKit wrote it:
+a `#` title heading, a `**Captured by:** ScribeKit` header field, and the
+`## Transcript` heading that opens the body. All three are written by
+`TranscriptMarkdownFormatter.header`, so the test is deterministic and a
+Markdown file the user happens to keep in the folder is not mistaken for a
+meeting.
+
+What such a session states is limited to what its transcript states: title,
+source names and locale from the header, size and modification date from the
+filesystem. It has no session identity, no start, no end and no duration, and
+those are shown as absent rather than derived. The transcript's `**Date:**` and
+`**Started:**` fields are *not* turned back into a `Date`: the clock is
+twelve-hour local time with no zone in it, so reconstructing a moment would mean
+guessing which zone the meeting was held in.
+
+Recovery is unchanged by this. A session with no record is not an unfinished
+meeting and never becomes a recovery candidate; history reads the same folder
+without changing what recovery considers, which was verified live with a legacy
+directory present.
+
+## Transcript parsing
+
+`TranscriptDocument.parse` reads a written transcript back into its title, its
+header fields and its finalised spans. It is pure — a string in, a value out,
+no filesystem — and it returns what the document says rather than a corrected
+version of it.
+
+Structure is never inferred from the shape of a line. The grammar the formatter
+writes puts a `**h:mm:ss**` clock line, a blank line, then exactly one
+paragraph, so the parser consumes that paragraph *positionally*, whatever it
+contains, and only tests a line against a structural pattern when it is not
+expecting recognised text. A sentence that reads `---`, opens with `>` or looks
+like a heading therefore stays speech. The format did not have to promise that
+recognised words avoid punctuation, which it cannot.
+
+A span keeps the clock time and the minute heading exactly as written —
+`10:01:33` and `10:01 AM`. No offset is derived from them: the seconds line
+carries no period of its own and the heading above it does, so the pair is what
+the document actually states. That is the alignment Interval 11 needs to seek a
+recording, preserved rather than approximated.
+
+Only spans become searchable text. The header block, minute headings, gap
+blockquotes, the interruption notice and the footer are things ScribeKit wrote
+*about* the meeting and are structure, not speech.
+
+## Search scope and ranking
+
+`TranscriptSearch` is plain substring matching, case-insensitive and
+locale-independent. No fuzzy matching, no stemming, no embeddings, no ranking
+model, no network: a query occurs in the text or it does not, and the same query
+over the same folder always produces the same list in the same order.
+
+Searched: recognised speech, the meeting title, and the captured application
+names. Not searched: everything ScribeKit wrote about the meeting, so a query
+for `Transcription gap`, `Captured by` or `Duration` finds nothing — otherwise
+every transcript would answer to them.
+
+Ranking is by why a session matched, in this order: exact title, title prefix,
+title substring, recognised speech, source name. Within one kind: more
+occurrences first, then the earliest occurrence, then the newer session, then
+the directory path. Every step is a total order over facts already computed, so
+there is no scoring model to tune and no tie left to chance.
+
+An empty query is the absence of a query rather than a failed one: every session
+is returned, in the order the load produced.
+
+## Search excerpts
+
+A transcript match carries a bounded excerpt — at most 160 characters — that is
+a verbatim substring of the span it came from. The matched range is reported as
+a character offset and length rather than wrapped in markup, and truncation is
+reported as two booleans rather than by putting an ellipsis into the words, so
+the excerpt never stops being the user's own text. The interface applies the
+highlight and draws the ellipses. The excerpt keeps the span's clock time and
+minute heading.
+
+## Search index lifetime
+
+`TranscriptSearchIndex` is built when History loads, replaced by the next load,
+and never written to disk. It holds nothing that is not already in the
+documents: the lower-cased ASCII bytes of each span, for the spans that are pure
+ASCII.
+
+It exists because the naive version was measured and was too slow.
+`String.range(of:options:.caseInsensitive)` costs roughly 140 ms per megabyte of
+transcript in a debug build, which made a keystroke cost 290 ms over 50 one-hour
+meetings and 1.1 s over 200 — with everything already in memory, so it was the
+comparison and not the disk. Matching folded bytes is about fifteen times
+faster.
+
+Spans holding anything outside ASCII keep no folded form and are matched through
+`String.range(of:options:)` instead: ASCII folding would be the wrong answer for
+them, and a byte offset would not be a character offset. A query that is itself
+outside ASCII takes that path for every span, so one query is never answered by
+two matchers that could disagree.
+
+Nothing here is a second persistence system. Drop the index and the folder is
+still the whole truth; rebuild it and you get the same answers.
+
+## History sandbox behaviour
+
+Access is owned by the service and by nothing else in history. One load takes
+`SecurityScopedAccess.withAccess` on the save folder for exactly its own
+duration and releases it, including on failure, so History holds no claim on the
+user's folder while it is merely being looked at. The Finder and Open actions
+take the same bounded access around the call.
+
+The destination comes from the same security-scoped bookmark the meeting screen
+uses, restored through `SaveLocationPersisting`. When it cannot be restored or
+opened, History says so and looks nowhere else. No entitlement changed.
+
+## History and the active meeting
+
+History owns no meeting. `HistoryModel` never constructs a `MeetingRuntime`,
+never starts or stops capture, and never attaches a transcription consumer; the
+runtime is handed to `HistoryView` for one purpose, to reload the list when a
+meeting finishes. Switching tabs while a meeting runs changes what is on screen
+and nothing else, which is covered by tests and was verified live.
+
+## Artifact immutability
+
+The invariant: opening History, refreshing it, previewing a transcript and
+searching leave every transcript, recording and session record byte-identical.
+No line endings are normalised, no JSON is rewritten, no modification date is
+touched, no index file is written beside a transcript, and no malformed record
+is repaired.
+
+Enforced by the read-only store boundary, and checked two ways. A filesystem
+test fingerprints every file under a save folder with SHA-256 plus its
+modification date, loads twice, searches four times, and expects the
+fingerprints to be identical; another proves a load adds no file to the folder.
+Live, the nine files of the three Interval 9 validation sessions were hashed
+before and after a full History session and were identical, modification dates
+and sizes included.
+
+## History UX
+
+The main window is `ScribeKitRootView`, a `TabView` with two tabs, Meeting and
+History. A tab bar rather than a split view or a second window: there is one
+meeting and one folder of past meetings, and both tabs read the same runtime, so
+nothing about the choice can affect ownership. The window's minimum size grew to
+620 x 560 to fit History's two columns.
+
+History itself is a `NavigationSplitView`. The sidebar holds a search field, the
+list of meetings and a footer with the count and Refresh; the detail pane shows
+the selected meeting. Each row states the title, the status as a word rather
+than a colour, the date, and — when the query matched speech — the excerpt with
+its match emphasised and the transcript timestamp it came from.
+
+The detail pane states status, start, end, duration, applications, language,
+transcript size, audio state and the session folder, then Show Transcript in
+Finder, Open Transcript and Show Audio in Finder, then a preview of the first 50
+spans. Nothing claims a capability ScribeKit lacks: there is no editor, a
+session with no recording offers no audio action, and a session whose record
+named a recording that is not in the folder says exactly that rather than being
+shown as one that kept none.
+
+Failures are scoped. A folder that cannot be opened replaces the list with one
+sentence; a session directory that cannot be described appears in its own
+bounded "Could Not Be Read" area above the list, with a message in ScribeKit's
+terms rather than a Cocoa error string, and the healthy sessions still list. The
+damaged sessions sit outside the selectable list because there is nothing to
+select for them.
+
 ## Logging
 
 None was added. No `OSLog` category, no transcript text, no PCM, no meeting
@@ -788,7 +1021,7 @@ titles, no telemetry.
 
 ## Validation status
 
-`xcodebuild ... clean test` passes on Xcode 26.6: **389 tests in 38 suites**, no
+`xcodebuild ... clean test` passes on Xcode 26.6: **463 tests in 44 suites**, no
 compiler warnings. The `AppleSpeechTranscriber` suite starts and stops the real
 recogniser twice, which is where its 4.2 s comes from — two bounded drains of a
 run that received no audio.
@@ -806,6 +1039,81 @@ answer — no locales and `.unsupportedSystem` when there is no recogniser,
 structurally valid records and correct installed-state mapping when there is —
 and the lifecycle test, which still needs a real installed model and returns
 without one. Neither downloads anything.
+
+### Interval 10 live validation
+
+Run against `~/Documents/ScribeKitValidation`, the three completed sessions
+Interval 9 left, with three scenario directories added for the run and removed
+afterwards: a copy of a real transcript with no session record, a directory with
+a truncated `session.json`, and a directory holding a shopping list called
+`transcript.md`.
+
+- **History lists the folder.** Three real completed sessions, newest first,
+  each with its recorded status, times and sizes. The audio sizes shown —
+  67,276 and 2,391,327 bytes — match the files on disk exactly.
+- **Search.** Typing `menu` narrowed three meetings to one and showed
+  `The **menu** bar item shows the meeting title and the elapsed time, stopping
+  from the menu bar finishes the transcript and the audio file.` at
+  `10:56:34 AM · 24 matches`. That is the exact wording at that exact timestamp
+  in the file, and the two sessions with header-only transcripts correctly did
+  not match. Clearing the field returned all three.
+- **Detail.** The 10:56 session's preview reproduced its spans and timestamps
+  verbatim.
+- **Legacy.** The record-less copy listed as `Legacy` with "Transcript last
+  written", no start, end or duration, its header's applications and language,
+  "No audio file beside the transcript", and **no** Show Audio in Finder button.
+- **Damaged.** The truncated record appeared under "Could Not Be Read" with
+  "This meeting's session record is damaged and was left untouched. Its
+  transcript is unaffected." The other four meetings listed normally.
+- **Not a meeting.** The shopping list was not listed, and produced no problem
+  row.
+- **Recovery unchanged.** With the legacy directory present, the meeting screen
+  still offered it as nothing: only the damaged record was reported, and no
+  record-less session became a recovery candidate.
+- **Finder actions.** Show Transcript in Finder revealed `transcript.md` in the
+  legacy session's folder; Show Audio in Finder revealed
+  `2026-08-30-untitled-meeting/audio.m4a`.
+- **A meeting during History.** A new `History Validation` meeting captured
+  QuickTime Player playing the synthetic validation speech. Switching to History
+  while it ran left it running: the transcript grew 810 → 1208 → 1715 bytes
+  across the switch and the refresh, the menu bar still read
+  `History Validation · Transcribing · 02:08`, and History listed the meeting as
+  `In Progress` with no end time and read its transcript live.
+- **Stop and refresh.** Stop Meeting from the menu bar closed it normally —
+  `status: completed`, `endedAt`, footer `Duration: 2 min 18 s`, audio closed at
+  1,142,181 bytes. History refreshed itself when the meeting finished, without a
+  manual Refresh: the row changed to `Completed` and gained its end time and
+  duration.
+- **Immutability.** The nine files of the three Interval 9 sessions were hashed
+  with SHA-256 before the run and after all of the above: identical, with
+  identical modification dates and sizes.
+
+### Interval 10 performance
+
+Measured on this Mac in a debug build (`@testable` requires one; the release
+configuration cannot host these tests), over synthetic one-hour meetings of 240
+spans each, loading from a real temporary folder:
+
+| Sessions | Spans | Transcript bytes | Load + index | Search | Memory |
+| --- | --- | --- | --- | --- | --- |
+| 50 | 12,001 | 2.0 MB | 0.21 s | 25–39 ms | +5 MB |
+| 200 | 48,001 | 7.9 MB | 0.82 s | 100–160 ms | +17 MB |
+| 500 | 120,001 | 19.9 MB | 2.05 s | 250–390 ms | +36 MB |
+
+Search covers four queries: a phrase in one meeting, a phrase in all of them, a
+title fragment, and one that matches nothing; the range is across those. An
+empty query costs well under a millisecond at every size, because it returns the
+sessions without touching text.
+
+Memory is about 1.8 times the transcript's own size, which is the text plus its
+folded copy, and it is bounded by the folder rather than by how long History
+stays open.
+
+The trigger for an on-disk index: a folder where a load exceeds a second or a
+query exceeds about 100 ms in a release build. That is somewhere past 200
+one-hour meetings on this hardware. At that point the answer is SQLite FTS5 over
+the same spans, rebuilt from the Markdown and still disposable — not a change of
+where the truth lives.
 
 ### Interval 9 live validation
 
@@ -1069,6 +1377,37 @@ intervals; the capture observations above were taken through the same path.
 ## Known limitations
 
 - Interval 2, 3 and 4 limitations still hold.
+- **History lists one folder, one level deep.** The save folder the user chose,
+  its immediate children, and nothing else. A session moved out of it is gone
+  from history; so is every session in a folder the user has since replaced.
+- **No filesystem watcher.** History reads on appear, on Refresh and when a
+  meeting finishes. A session added by something else while History is open
+  appears at the next refresh.
+- **Search is substring matching, and nothing more.** No stemming, so `closures`
+  does not find `closure`; no fuzzy matching, so a recogniser's misheard word is
+  found only by searching what it actually wrote; no phrase matching across two
+  finalised spans, because a span is the unit the file stores.
+- **Search cannot find ScribeKit's own writing**, by design. The header, minute
+  headings, gap markers, the interruption notice and the footer are not
+  searchable text; titles and application names are searched as metadata.
+- **Whole transcripts live in memory while History is open.** Roughly 1.8 times
+  the transcript bytes, bounded by the folder. Comfortable to 200 one-hour
+  meetings on this Mac; past that an on-disk index is the answer, and the
+  threshold is recorded above.
+- **A legacy session states less than it looks like it could.** Its transcript
+  names a date and a start time, but in a twelve-hour local clock with no zone,
+  so no `Date` is reconstructed from it. It sorts on its transcript's
+  modification date, which changes if the file is copied.
+- **A session ScribeKit cannot describe is named by its folder and nothing
+  else.** A damaged, unreadable or newer-format record is reported and left
+  exactly as it is; history does not fall back to reading the transcript beside
+  it as a legacy session, because a record that exists is evidence that should
+  be read, not routed around.
+- **History is read-only.** No rename, no delete, no export, no editing, no
+  tags and no folders. The files are the user's to manage.
+- **No playback.** History says whether a recording is there and how large it
+  is, and reveals it in the Finder. It never opens or decodes one, and makes no
+  claim that a recording plays.
 - **Pause and resume are not implemented, and were deliberately left out.**
   Doing it honestly means deciding what a resumed run means for two timelines
   at once: the transcript's offsets, which are measured from the first captured
@@ -1181,31 +1520,38 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 10, as the roadmap has it: transcript history, search and uncertainty
-review, and derived notes. The ground for it is now in place — every meeting
-leaves a dated directory with a Markdown transcript, a schema-versioned record
-and, optionally, a recording whose time origin matches the transcript's — and
-the runtime is no longer somewhere a second screen would have to fight for
-ownership. A history screen is a second view over the same save folder that
-recovery already scans, and it can be built without touching the meeting
-pipeline at all.
+Interval 11, as the roadmap now has it: post-meeting review of uncertain
+passages against the retained recording, which is where playback and
+transcript-to-audio seek belong.
 
-Two candidates sit behind it, and both should follow rather than precede it.
+The alignment it needs is already on disk and now also in memory in the right
+shape. A retained recording's time zero and a `TranscriptSegment`'s offset are
+the same captured frame, and `TranscriptSpan` preserves the clock time and the
+minute heading of every finalised span exactly as the transcript states them.
+Combined with a session's recorded `startedAt`, that is enough to turn a search
+result into a seek without re-reading anything or inventing an offset. Nothing
+about it will decay.
 
-Post-meeting review against a retained recording needs playback, a
-transcript-to-audio seek and `transcriptionConfidence`, which is deliberately
-not requested today. The alignment it depends on is already written to disk and
-will not decay, so there is no cost to waiting.
+What Interval 11 has to decide first is `transcriptionConfidence`, which is
+deliberately not requested today. Capturing it changes what the recogniser is
+asked for and what a session is allowed to state about its own uncertainty, and
+that decision belongs with the feature that surfaces it rather than ahead of it.
 
-Pause and resume needs a timeline decision before it needs any code: what a
+Two things it will inherit rather than build. Reading a transcript back is
+solved: `TranscriptDocument` gives spans with their timestamps, and
+`HistoryService` gives the recording beside them. And the sandbox story is
+settled: a bounded lease per operation, released afterwards — though playback is
+the first thing that will want access held for longer than a call, and that
+should be an explicit, owned lease rather than a leak.
+
+Pause and resume still needs a timeline decision before it needs code: what a
 second recognition run means for transcript offsets, and what a discontinuity
-means for a single retained audio file. It is a format question, and the
-interval that answers it should own both artifacts at once. The same question
-blocks continuing an interrupted meeting into the same session, which is why
-`MeetingState.recovering` is still unused — recovery does not resume capture,
-so nothing enters that state.
+means for a single retained audio file. The same question blocks continuing an
+interrupted meeting into the same session, which is why `MeetingState.recovering`
+is still unused.
 
-Nothing in this interval needs revisiting first. The one thing worth measuring
-before Interval 12's formal benchmark is view work during a long hidden
-meeting: no coalescing boundary was built, because none was justified by a
-five-minute run, and a multi-hour one may say otherwise.
+Nothing in this interval needs revisiting first. Two things are worth measuring
+when there is real usage to measure: view work during a long hidden meeting,
+still unmeasured beyond five minutes, and whether a real user's folder ever
+approaches the size where History's in-memory search stops being the right
+shape.
