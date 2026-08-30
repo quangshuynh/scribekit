@@ -20,6 +20,8 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         case started(directory: URL)
         case segment(TranscriptSegment)
         case gap(TranscriptGap)
+        case paused(capturedDuration: Double)
+        case resumed(capturedDuration: Double)
         case finished(SessionCompletionOutcome)
     }
 
@@ -29,6 +31,7 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         var startError: TranscriptPersistenceError?
         var appendError: TranscriptPersistenceError?
         var finishError: TranscriptPersistenceError?
+        var pauseError: TranscriptPersistenceError?
         var startDelay: Duration = .zero
         var onFinish: (@Sendable () -> Void)?
     }
@@ -111,7 +114,43 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         try append(.gap(gap), isFinalized: true)
     }
 
-    func finishSession(endedAt: Date, outcome: SessionCompletionOutcome) async throws {
+    func recordPause(at date: Date, capturedDuration: Double) async throws {
+        try appendPauseEntry(.paused(capturedDuration: capturedDuration))
+    }
+
+    func recordResume(at date: Date, capturedDuration: Double) async throws {
+        try appendPauseEntry(.resumed(capturedDuration: capturedDuration))
+    }
+
+    /// Thrown by the next `recordPause` or `recordResume`.
+    ///
+    /// - Parameter error: What to throw.
+    func failPauseMarkers(with error: TranscriptPersistenceError) {
+        state.withLock { $0.pauseError = error }
+    }
+
+    /// Records a pause or resume marker, honouring an armed failure.
+    ///
+    /// - Parameter entry: The marker to record.
+    /// - Throws: The refusal, or whatever the test armed.
+    private func appendPauseEntry(_ entry: Entry) throws {
+        let error: TranscriptPersistenceError? = state.withLock { state in
+            guard state.isOpen else { return TranscriptPersistenceError(.noSessionInProgress) }
+            if let armed = state.pauseError {
+                state.pauseError = nil
+                return armed
+            }
+            state.entries.append(entry)
+            return nil
+        }
+        if let error { throw error }
+    }
+
+    func finishSession(
+        endedAt: Date,
+        outcome: SessionCompletionOutcome,
+        capturedDuration: Double
+    ) async throws {
         let delay = state.withLock { $0.startDelay }
         if delay > .zero { try? await Task.sleep(for: delay) }
         state.withLock { $0.onFinish }?()

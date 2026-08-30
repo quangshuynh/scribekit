@@ -113,6 +113,40 @@ final class MeetingRuntime {
     private let processActivity: any MeetingActivityAsserting
     private var recoveryAttempts = 0
 
+    /// How much audio this meeting has captured, in media time.
+    private let mediaClock: CapturedMediaClock
+
+    /// Reads the wall clock. Tests substitute a controllable one so a pause
+    /// can last minutes without anything sleeping.
+    private let now: () -> Date
+
+    /// Seconds of captured audio that came before the current recognition run.
+    ///
+    /// A recogniser restarted by a resume begins its own timeline at zero, so
+    /// its offsets are run-local. This is what turns them back into offsets
+    /// from the meeting's first captured frame — the one origin the transcript,
+    /// the retained recording and review playback all share. It is media time,
+    /// so a pause adds nothing to it; wall-clock time is mapped separately.
+    private var mediaOffsetBase: Double = 0
+
+    /// The capture configuration the meeting started with.
+    ///
+    /// A resume rebuilds the stream from this rather than from the setup
+    /// screen, so a meeting keeps the sources it was started with even if the
+    /// selection has been edited since.
+    private var captureConfiguration: AudioCaptureConfiguration?
+
+    /// When the meeting was paused, while it still is.
+    private var pausedAt: Date?
+
+    /// Why the last pause or resume did not happen, when one did not.
+    ///
+    /// Kept apart from ``captureState`` deliberately: a resume that fails
+    /// leaves the meeting paused, and overwriting the paused state with a
+    /// failure would lose the fact that the transcript and the recording are
+    /// still open and still resumable.
+    private(set) var pauseFailureMessage: String?
+
     /// How many transcription events have been handled, counted over the
     /// transcriber's whole life so it can be compared with its tally.
     private var handledEventCount = 0
@@ -154,6 +188,7 @@ final class MeetingRuntime {
     ///   - processActivity: Keeps the process out of App Nap while a meeting
     ///     runs. The default asserts against the real process; tests
     ///     substitute a double so the assertion's lifetime is testable.
+    ///   - now: Reads the wall clock. Tests substitute a controllable one.
     ///   - makeCapturer: Builds the capturer around the audio consumers. The
     ///     default builds the ScreenCaptureKit implementation; tests
     ///     substitute a fake.
@@ -165,6 +200,7 @@ final class MeetingRuntime {
         transcript: LiveTranscriptModel? = nil,
         elapsed: MeetingElapsedClock? = nil,
         processActivity: (any MeetingActivityAsserting)? = nil,
+        now: @escaping () -> Date = { Date() },
         makeCapturer: (AudioSampleConsuming) -> AudioCapturing = {
             ScreenCaptureKitAudioCapturer(consumer: $0)
         }
@@ -176,7 +212,12 @@ final class MeetingRuntime {
         self.transcript = transcript ?? LiveTranscriptModel()
         self.elapsed = elapsed ?? MeetingElapsedClock()
         self.processActivity = processActivity ?? ProcessMeetingActivity()
-        self.capturer = makeCapturer(BroadcastingAudioSampleConsumer([monitor, transcriber, audio]))
+        self.now = now
+        let mediaClock = CapturedMediaClock()
+        self.mediaClock = mediaClock
+        self.capturer = makeCapturer(
+            BroadcastingAudioSampleConsumer([mediaClock, monitor, transcriber, audio])
+        )
         monitor.onUpdate = { [weak self] activity in
             Task { @MainActor [weak self] in self?.activity = activity }
         }
@@ -299,6 +340,21 @@ final class MeetingRuntime {
     /// Whether the interface should offer to stop.
     var canStop: Bool { captureState.canStop || transcriptionState.canStop }
 
+    /// Whether the interface should offer to pause.
+    var canPause: Bool { captureState == .capturing && transcriptionState == .transcribing }
+
+    /// Whether the interface should offer to resume.
+    var canResume: Bool { captureState.canResume }
+
+    /// Seconds of audio this meeting has captured.
+    ///
+    /// Media time: it does not advance while the meeting is paused, which is
+    /// what keeps it equal to the length of the retained recording and to the
+    /// end of the transcript's own offsets. The user-facing elapsed time in
+    /// ``elapsed`` is deliberately the other one — wall-clock meeting length,
+    /// which does keep running while paused.
+    var capturedDuration: Double { mediaClock.seconds }
+
     /// Starts a meeting: the transcript file, then the audio file, then
     /// recognition, then capture.
     ///
@@ -334,7 +390,7 @@ final class MeetingRuntime {
             return
         }
 
-        let startedAt = Date()
+        let startedAt = now()
         let session = request.makeSession(createdAt: startedAt)
         meeting = MeetingSnapshot(session: session, localeIdentifier: localeIdentifier)
         persistenceState = .preparing
@@ -343,6 +399,10 @@ final class MeetingRuntime {
         audioRetentionState = request.audioRetention.retainsAudio ? .preparing : .idle
         recoveryAttempts = 0
         droppedEventBaseline = transcriber.eventTally.dropped
+        mediaClock.reset()
+        mediaOffsetBase = 0
+        pausedAt = nil
+        pauseFailureMessage = nil
         monitor.reset()
         activity = .none
         transcript.begin(at: startedAt)
@@ -365,6 +425,7 @@ final class MeetingRuntime {
         }
 
         let captureConfiguration = AudioCaptureConfiguration(sources: request.sources)
+        self.captureConfiguration = captureConfiguration
         do {
             let url = try audio.startSession(
                 mode: request.audioRetention,
@@ -402,6 +463,105 @@ final class MeetingRuntime {
             captureState = .failed(message: message(for: error, sources: request.sources))
             await closeSession()
         }
+    }
+
+    /// Suspends capture without ending the meeting.
+    ///
+    /// The order is the front of a stop and no more: capture stops so no
+    /// further audio arrives, the recogniser finalises what it has already
+    /// accepted, and every event it produced is handled and written. The
+    /// transcript file, the retained recording, the session record and the
+    /// folder lease all stay open, and the meeting is left in
+    /// ``AudioCaptureState/paused`` rather than reported as finished.
+    ///
+    /// The media-time base for the next recognition run is taken only after
+    /// the drain, so the last spans finalised out of pre-pause audio are still
+    /// timed against the run they came from.
+    ///
+    /// The meeting is only described as paused once it has actually reached
+    /// that boundary. A pause whose marker could not be written fails the
+    /// transcript the way any other failed write does, and the meeting ends
+    /// rather than sitting in a state the file does not record.
+    func pause() async {
+        guard canPause else { return }
+        pauseFailureMessage = nil
+        captureState = .stopping
+        transcriptionState = .stopping
+        await capturer.stop()
+        await transcriber.stop()
+        transcriptionState = .idle
+        await drainPendingEvents()
+
+        // Taken after the drain, so pre-pause spans keep the base they were
+        // recognised under, and read from the media clock rather than the wall
+        // clock, so a pause adds nothing to the transcript's own timeline.
+        let captured = mediaClock.seconds
+        mediaOffsetBase = captured
+
+        let date = now()
+        guard persistenceState.isActive else {
+            captureState = .paused
+            pausedAt = date
+            return
+        }
+        do {
+            try await persistence.recordPause(at: date, capturedDuration: captured)
+            pausedAt = date
+            captureState = .paused
+        } catch {
+            captureState = .idle
+            await failPersistence(error)
+        }
+    }
+
+    /// Starts capture again for the meeting that is paused.
+    ///
+    /// The same session, the same transcript, the same recording and the same
+    /// sources: the capture configuration is the one snapshotted at the start,
+    /// so a setup screen edited in the meantime configures the next meeting and
+    /// cannot reach this one.
+    ///
+    /// A resume that fails leaves the meeting paused with its artifacts
+    /// untouched and says why, so the user can retry it when the source comes
+    /// back rather than losing the meeting to a missing application.
+    func resume() async {
+        guard canResume, let captureConfiguration else { return }
+        pauseFailureMessage = nil
+
+        do {
+            try await transcriber.start(configuration: configuration)
+        } catch {
+            pauseFailureMessage = message(for: error, sources: meeting?.sources ?? [])
+            return
+        }
+
+        do {
+            try await capturer.start(configuration: captureConfiguration)
+        } catch {
+            // Recognition is put back the way it was: the meeting is still
+            // paused, and a recogniser left running with no audio would be a
+            // second thing to go wrong on the next attempt.
+            await transcriber.stop()
+            await drainPendingEvents()
+            pauseFailureMessage = message(for: error, sources: meeting?.sources ?? [])
+            return
+        }
+
+        let date = now()
+        if persistenceState.isActive {
+            do {
+                try await persistence.recordResume(at: date, capturedDuration: mediaOffsetBase)
+            } catch {
+                await capturer.stop()
+                await transcriber.stop()
+                captureState = .idle
+                await failPersistence(error)
+                return
+            }
+        }
+        pausedAt = nil
+        transcriptionState = .transcribing
+        captureState = .capturing
     }
 
     /// Stops the meeting, in the order that loses nothing.
@@ -463,8 +623,9 @@ final class MeetingRuntime {
         let layout = persistenceState.layout
         do {
             try await persistence.finishSession(
-                endedAt: Date(),
-                outcome: audioFailure == nil ? outcome : .failed
+                endedAt: now(),
+                outcome: audioFailure == nil ? outcome : .failed,
+                capturedDuration: mediaClock.seconds
             )
             persistenceState = layout.map { .saved($0) } ?? .idle
         } catch {
@@ -532,6 +693,7 @@ final class MeetingRuntime {
     /// - Parameter event: What the transcriber reported.
     private func handle(_ event: TranscriptionEvent) async {
         defer { completeHandling() }
+        let event = rebased(event)
         transcript.apply(event)
 
         guard transcriber.eventTally.dropped <= droppedEventBaseline else {
@@ -551,6 +713,55 @@ final class MeetingRuntime {
             if let gap = interruption.gap { await persist(gap) }
             if case .recognitionFailed = interruption { await recoverRecognition() }
         }
+    }
+
+    /// Moves an event from the recognition run's own timeline onto the
+    /// meeting's.
+    ///
+    /// A run that started at a resume counts from its own first frame, so
+    /// everything it reports is short by the audio captured before the pause.
+    /// Adding ``mediaOffsetBase`` puts it back on the one timeline the
+    /// transcript, the retained recording and review playback share, so a
+    /// resumed span's offset still names the same second of the audio file.
+    /// A meeting that was never paused has a base of zero and is unaffected.
+    ///
+    /// - Parameter event: The event as the recogniser reported it.
+    /// - Returns: The same event with session-global offsets.
+    private func rebased(_ event: TranscriptionEvent) -> TranscriptionEvent {
+        guard mediaOffsetBase > 0 else { return event }
+        switch event {
+        case let .partial(segment):
+            return .partial(rebased(segment))
+        case let .final(segment):
+            return .final(rebased(segment))
+        case let .interrupted(.audioDropped(seconds, startTime)):
+            return .interrupted(.audioDropped(
+                seconds: seconds,
+                startTime: startTime.map { $0 + mediaOffsetBase }
+            ))
+        case .interrupted:
+            return event
+        }
+    }
+
+    /// The same span with its offsets measured from the meeting's first
+    /// captured frame rather than the recognition run's.
+    ///
+    /// The text, the identity, the locale and the recogniser's confidence are
+    /// untouched: this is arithmetic on the timeline and nothing else.
+    ///
+    /// - Parameter segment: The span as the recogniser reported it.
+    /// - Returns: The span with session-global offsets.
+    private func rebased(_ segment: TranscriptSegment) -> TranscriptSegment {
+        TranscriptSegment(
+            id: segment.id,
+            text: segment.text,
+            startTime: segment.startTime + mediaOffsetBase,
+            endTime: segment.endTime + mediaOffsetBase,
+            state: segment.state,
+            localeIdentifier: segment.localeIdentifier,
+            confidence: segment.confidence
+        )
     }
 
     /// Records that an event has been fully handled and releases a stop that
@@ -613,7 +824,11 @@ final class MeetingRuntime {
     private func failPersistence(message: String) async {
         guard persistenceState.isActive else { return }
         persistenceState = .failed(message: message, layout: persistenceState.layout)
-        try? await persistence.finishSession(endedAt: Date(), outcome: .failed)
+        try? await persistence.finishSession(
+            endedAt: now(),
+            outcome: .failed,
+            capturedDuration: mediaClock.seconds
+        )
         stopSubsystemsAfterPersistenceFailure()
     }
 

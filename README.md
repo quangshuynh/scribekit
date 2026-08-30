@@ -56,6 +56,8 @@ history and search work end to end.
   wall-clock timestamp taken from the session start plus the span's own audio
   offset. The file is append-only, so it is readable in any editor while the
   meeting is still running.
+- Pausing and resuming a running meeting, from the main window or the menu
+  bar. See *Pausing a meeting* below.
 - Post-meeting review of uncertain recognition, with playback of the retained
   audio for the passage in question. See *Reviewing uncertain passages* below.
 - Incremental autosave with no timer: a finalised span reaches the file as soon
@@ -157,7 +159,6 @@ connection at all.
 
 All of the following are *planned*, not available:
 
-- Pausing and resuming a meeting.
 - Continuing an interrupted meeting into the same session.
 - Optional derived notes that never modify the raw transcript.
 
@@ -268,6 +269,55 @@ written transcript back into its header fields and its finalised spans,
 its own store because recording an interruption is a write, and history never
 writes.
 
+## Pausing a meeting
+
+Pause stops capturing. It is not a mute, not a hidden window and not a stop:
+the capture stream is torn down, the recogniser finalises the audio it has
+already been given, and the meeting's transcript, its retained recording, its
+session record and the lease on your save folder all stay open. Resume builds a
+stream again for the applications the meeting was *started* with — editing the
+setup screen while a meeting is paused configures the next meeting, not this
+one — and the same transcript and the same recording carry on.
+
+Two clocks run, and they mean different things:
+
+- **Captured time** advances only while capture is running. Transcript offsets
+  and the retained recording are both measured in it, so a passage at offset
+  *t* is second *t* of the audio file, before and after a pause alike. A five
+  minute pause therefore adds nothing to the recording: no silence is inserted,
+  and the audio after the pause continues straight from the last frame before
+  it.
+- **Wall-clock time** keeps running while the meeting is paused. It is what the
+  transcript's human-readable timestamps state, what the elapsed time in the
+  window and the menu bar counts, and what `**Duration:**` in the transcript
+  footer reports. A transcript that was paused also states `**Captured:**`,
+  which is the shorter one — the length of the recording.
+
+The pause itself is written into the transcript as two structural blockquotes:
+
+```
+> **Paused:** 11:42:10. Capture stopped here; nothing was recorded until the meeting resumed.
+
+> **Resumed:** 11:48:32, after 6 min 22 s paused.
+```
+
+They are ScribeKit's own remarks, marked the way gap markers are, and they say
+what happened rather than claiming speech was missed: you paused, so there was
+nothing to miss. Recognised text is untouched, and timestamps already written
+are never recomputed.
+
+Stop works while paused and finishes the meeting normally — recording closed,
+footer written, transcript flushed and closed, session recorded as completed,
+in that order. Quitting while paused asks to stop the meeting first, exactly as
+quitting while transcribing does.
+
+A resume that fails — the application you were capturing has quit, say — leaves
+the meeting paused with its artifacts untouched and says why. Nothing is
+substituted for a missing source, and you can retry the resume once it is back.
+If ScribeKit stops while a meeting is paused, its session record says so, and
+the next launch offers the meeting for recovery rather than resuming capture on
+its own.
+
 ## Reviewing uncertain passages
 
 After a meeting, its detail pane in History lists the passages worth a second
@@ -309,11 +359,20 @@ as they did.
 8. **Optional audio retention**.
 9. **Background and menu bar operation**.
 10. **Transcript history and local search**.
-11. **Uncertainty review against the retained audio** *(current)*.
-12. Derived notes that never modify the raw transcript.
+11. **Uncertainty review against the retained audio**.
+12. **Pausing and resuming a meeting** *(current)*.
+13. Derived notes that never modify the raw transcript.
 
 ## Known limitations
 
+- A pause is a boundary in the recording, not a silence in it. The audio file
+  holds captured audio only, so the moment a pause ended is audible as a cut.
+  That is deliberate — inserting the pause as silence would put minutes of
+  audio in the file that nothing recorded — but it means the recording alone
+  does not tell you how long a pause lasted. The transcript does.
+- The transcript's `**Duration:**` is the meeting's wall-clock length and
+  `**Captured:**`, written only for a meeting that was paused, is the length of
+  the recording. Neither is derived from the other.
 - Recovery preserves what was already durable and no more. ScribeKit detects
   unfinished sessions and preserves finalised transcript content that reached
   durable storage before the interruption; audio still in a system buffer, a

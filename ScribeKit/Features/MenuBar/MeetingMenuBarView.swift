@@ -44,8 +44,24 @@ struct MeetingMenuBarView: View {
             Text(message)
         }
 
+        if let message = runtime.pauseFailureMessage {
+            Text(message)
+        }
+
         if presentation.canStop || presentation.transcriptURL != nil || presentation.audioURL != nil {
             Divider()
+
+            if presentation.canPause {
+                Button("Pause Meeting") {
+                    Task { await runtime.pause() }
+                }
+            }
+
+            if presentation.canResume {
+                Button("Resume Meeting") {
+                    Task { await runtime.resume() }
+                }
+            }
 
             if presentation.canStop {
                 Button("Stop Meeting") {
@@ -83,7 +99,9 @@ struct MeetingMenuBarView: View {
             meeting: runtime.meeting,
             transcript: runtime.persistenceState.layout?.transcriptURL,
             audio: runtime.audioRetentionState.url,
-            canStop: runtime.canStop
+            canStop: runtime.canStop,
+            canPause: runtime.canPause,
+            canResume: runtime.canResume
         )
     }
 

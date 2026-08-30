@@ -26,6 +26,11 @@ nonisolated enum MeetingRuntimeStatus: Equatable, Sendable {
     /// Audio is being captured and recognised.
     case transcribing
 
+    /// Capture is suspended. The meeting is still open: its transcript, its
+    /// recording and its session record are all still there, and resuming
+    /// continues the same one.
+    case paused
+
     /// A stop is under way and the meeting's artifacts are being finished.
     case stopping
 
@@ -43,7 +48,7 @@ nonisolated enum MeetingRuntimeStatus: Equatable, Sendable {
     /// it is answered here rather than by each of them re-deriving it.
     var isActive: Bool {
         switch self {
-        case .preparing, .transcribing, .stopping: true
+        case .preparing, .transcribing, .paused, .stopping: true
         case .idle, .completed, .failed: false
         }
     }
@@ -82,6 +87,11 @@ nonisolated enum MeetingRuntimeStatus: Equatable, Sendable {
             self = .failed(message: message)
         } else if case let .failed(message) = transcription {
             self = .failed(message: message)
+        } else if capture == .paused {
+            // Reported ahead of the "something is still active" cases below:
+            // a paused meeting has an open transcript, which would otherwise
+            // read as a meeting that is still starting up.
+            self = .paused
         } else if capture == .stopping || transcription == .stopping {
             self = .stopping
         } else if capture == .capturing, transcription.isActive {

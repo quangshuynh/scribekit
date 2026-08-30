@@ -234,6 +234,72 @@ struct MarkdownTranscriptStoreTests {
         try await store.startSession(session, localeIdentifier: "en-US", startedAt: startedAt)
     }
 
+    // MARK: - Pause and resume
+
+    @Test("A paused meeting writes truthful markers and keeps one transcript")
+    func pauseAndResumeAreWrittenStructurally() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, fileStore, _) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+
+        try await store.appendFinalSegment(segment("Phrase A.", start: 30))
+        // Paused 40 s into the meeting with 40 s captured, resumed five
+        // minutes later on the wall clock and not a second later in the audio.
+        try await store.recordPause(at: startedAt.addingTimeInterval(40), capturedDuration: 40)
+        try await store.recordResume(at: startedAt.addingTimeInterval(340), capturedDuration: 40)
+        try await store.appendFinalSegment(segment("Phrase B.", start: 41))
+        try await store.finishSession(
+            endedAt: startedAt.addingTimeInterval(400),
+            outcome: .completed,
+            capturedDuration: 100
+        )
+
+        let text = fileStore.file.text
+        #expect(text.contains("> **Paused:** 11:00:40."))
+        #expect(text.contains("> **Resumed:** 11:05:40, after 5 min 0 s paused."))
+        // Media offset 41 s is one second after the resume, which is
+        // 11:05:41 on the wall clock and not 11:00:41.
+        #expect(text.contains("**11:05:41**"))
+        #expect(text.contains("**11:00:30**"))
+        #expect(text.contains("Phrase A."))
+        #expect(text.contains("Phrase B."))
+        #expect(text.contains("**Duration:** 6 min 40 s"))
+        #expect(text.contains("**Captured:** 1 min 40 s"))
+        // Recognised prose is untouched: the only structural additions are the
+        // two blockquote markers.
+        #expect(text.components(separatedBy: "Phrase A.").count == 2)
+        #expect(text.components(separatedBy: "> **").count == 3)
+        #expect(fileStore.files == [layout.transcriptURL])
+    }
+
+    @Test("Pausing records the pause in the session record without closing the session")
+    func pauseUpdatesTheRecordHonestly() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+
+        try await store.recordPause(at: startedAt.addingTimeInterval(40), capturedDuration: 40)
+        let paused = try recoveryStore.loadMetadata(from: layout)
+        #expect(paused.status == .inProgress)
+        #expect(paused.wasPausedWhenInterrupted)
+        #expect(paused.capturedDuration == 40)
+        #expect(await store.currentLayout != nil)
+
+        try await store.recordResume(at: startedAt.addingTimeInterval(340), capturedDuration: 40)
+        let resumed = try recoveryStore.loadMetadata(from: layout)
+        #expect(resumed.status == .inProgress)
+        #expect(!resumed.wasPausedWhenInterrupted)
+
+        try await store.finishSession(
+            endedAt: startedAt.addingTimeInterval(400),
+            outcome: .completed,
+            capturedDuration: 100
+        )
+        let closed = try recoveryStore.loadMetadata(from: layout)
+        #expect(closed.status == .completed)
+        #expect(closed.pausedAt == nil)
+    }
+
     // MARK: - Session creation
 
     @Test("Starting a session creates a dated directory and a transcript in it")

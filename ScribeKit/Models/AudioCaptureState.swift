@@ -22,6 +22,15 @@ nonisolated enum AudioCaptureState: Equatable, Sendable {
     /// The capture stream is running and delivering audio.
     case capturing
 
+    /// The stream has been torn down for a pause, and the meeting it belongs
+    /// to is still open.
+    ///
+    /// Capture holds no system resources here — the stream is gone, not muted
+    /// — but the meeting's transcript, its recording and its session record
+    /// are still open, so this is not ``idle``. Resuming builds a stream again
+    /// for the same sources the meeting started with.
+    case paused
+
     /// A stop was requested and the stream is being torn down.
     case stopping
 
@@ -31,7 +40,7 @@ nonisolated enum AudioCaptureState: Equatable, Sendable {
     /// Whether capture is holding, or is about to hold, system resources.
     var isActive: Bool {
         switch self {
-        case .preparing, .capturing, .stopping: true
+        case .preparing, .capturing, .paused, .stopping: true
         case .idle, .failed: false
         }
     }
@@ -43,18 +52,22 @@ nonisolated enum AudioCaptureState: Equatable, Sendable {
     var canStart: Bool {
         switch self {
         case .idle, .failed: true
-        case .preparing, .capturing, .stopping: false
+        case .preparing, .capturing, .paused, .stopping: false
         }
     }
 
     /// Whether a stop request is meaningful in this state.
     ///
     /// Stopping while preparing is allowed, so a start that is slow to resolve
-    /// sources can still be abandoned.
+    /// sources can still be abandoned, and stopping while paused is allowed,
+    /// because a paused meeting is an open meeting that has to be finished.
     var canStop: Bool {
         switch self {
-        case .preparing, .capturing: true
+        case .preparing, .capturing, .paused: true
         case .idle, .stopping, .failed: false
         }
     }
+
+    /// Whether capture is suspended and could be resumed.
+    var canResume: Bool { self == .paused }
 }

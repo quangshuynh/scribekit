@@ -178,6 +178,13 @@ struct MeetingSetupView: View {
             Text("Started \(candidate.metadata.startedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            if candidate.metadata.wasPausedWhenInterrupted, let pausedAt = candidate.metadata.pausedAt {
+                Text("This meeting was paused at "
+                     + "\(pausedAt.formatted(date: .omitted, time: .standard)) and ScribeKit stopped before it "
+                     + "was resumed or finished. Nothing was captured after the pause.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             if let modified = candidate.transcript.modifiedAt {
                 Text("Transcript last written \(modified.formatted(date: .abbreviated, time: .shortened))"
                      + " · \(candidate.transcript.byteCount) bytes")
@@ -489,6 +496,7 @@ struct MeetingSetupView: View {
             : "Not capturing. \(sources.selectedSources.count) application(s) selected."
         case .preparing: "Starting…"
         case .capturing: "Capturing \(sources.selectedSources.count) application(s)."
+        case .paused: "Paused. Nothing is being captured."
         case .stopping: "Stopping…"
         case .failed: "Capture failed."
         }
@@ -732,6 +740,19 @@ struct MeetingSetupView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
+            if runtime.canResume {
+                Button("Resume") {
+                    Task { await runtime.resume() }
+                }
+                .accessibilityHint("Capture the same applications again and continue this meeting")
+            } else {
+                Button("Pause") {
+                    Task { await runtime.pause() }
+                }
+                .disabled(!runtime.canPause)
+                .accessibilityHint("Stop capturing without ending the meeting")
+            }
+
             Button("Stop") {
                 Task { await runtime.stop() }
             }
@@ -753,6 +774,11 @@ struct MeetingSetupView: View {
     private var meetingStatusDescription: String {
         if let message = runtime.persistenceState.failureMessage { return message }
         if let message = runtime.audioRetentionState.failureMessage { return message }
+        if let message = runtime.pauseFailureMessage { return message }
+        if runtime.canResume {
+            return "Meeting paused. Nothing is being captured; the transcript and any recording stay open until "
+                + "you resume or stop."
+        }
         if runtime.isRunning {
             return "Meeting in progress. It keeps running if you hide or close this window; the menu bar item "
                 + "shows it and can stop it."

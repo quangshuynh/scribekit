@@ -49,11 +49,12 @@ nonisolated enum SessionRecoveryStatus: String, Codable, Sendable, CaseIterable,
 /// before anything else is interpreted, so a file written by a later ScribeKit
 /// is refused rather than misread as this one.
 ///
-/// ``audioRetention`` and ``audioPath`` were added after version 1 was in use
-/// and the version was deliberately not raised. Both are optional and additive:
+/// ``audioRetention``, ``audioPath``, ``pausedAt`` and ``capturedDuration``
+/// were added after version 1 was in use and the version was deliberately not
+/// raised. All four are optional and additive:
 /// a record written before they existed decodes with them absent, which is the
 /// truth about a session that kept no audio, and a build that has never heard
-/// of them ignores the two extra keys. Raising the version would have made
+/// of them ignores the extra keys. Raising the version would have made
 /// every earlier session unreadable in exchange for nothing.
 nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
 
@@ -110,6 +111,24 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     /// would put a fact in the record that nothing measured.
     let interruptedAt: Date?
 
+    /// When the meeting was paused, while it still is.
+    ///
+    /// Set while a meeting is paused and cleared when it resumes, so a record
+    /// found with both this and ``SessionRecoveryStatus/inProgress`` describes
+    /// a meeting that was paused when ScribeKit stopped. `nil` in every record
+    /// written before pausing existed, and in every meeting that was running
+    /// when it was last written.
+    let pausedAt: Date?
+
+    /// Seconds of audio the meeting had captured when the record was last
+    /// written.
+    ///
+    /// Media time, not wall-clock time: it excludes whatever the meeting spent
+    /// paused, which is what makes it the length of the retained recording and
+    /// the offset the next resumed span continues from. `nil` in records
+    /// written before pausing existed.
+    let capturedDuration: Double?
+
     /// Creates a record.
     ///
     /// - Parameters:
@@ -128,6 +147,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - status: Where the session stands.
     ///   - endedAt: When ScribeKit closed the session, if it did.
     ///   - interruptedAt: When ScribeKit recorded an interruption, if it has.
+    ///   - pausedAt: When the meeting was paused, while it still is.
+    ///   - capturedDuration: Seconds of audio captured so far.
     init(
         schemaVersion: Int = SessionRecoveryMetadata.currentSchemaVersion,
         sessionID: UUID,
@@ -140,7 +161,9 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         audioPath: String? = nil,
         status: SessionRecoveryStatus,
         endedAt: Date? = nil,
-        interruptedAt: Date? = nil
+        interruptedAt: Date? = nil,
+        pausedAt: Date? = nil,
+        capturedDuration: Double? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.sessionID = sessionID
@@ -154,6 +177,33 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         self.status = status
         self.endedAt = endedAt
         self.interruptedAt = interruptedAt
+        self.pausedAt = pausedAt
+        self.capturedDuration = capturedDuration
+    }
+
+    /// Whether ScribeKit stopped while this meeting was paused.
+    ///
+    /// Only true for a record that says a meeting was still open, so a
+    /// completed meeting that happened to be paused before its Stop is not
+    /// described as having been abandoned mid-pause.
+    var wasPausedWhenInterrupted: Bool {
+        pausedAt != nil && (status == .inProgress || status == .interrupted)
+    }
+
+    /// The same record with the meeting's pause state brought up to date.
+    ///
+    /// - Parameters:
+    ///   - pausedAt: When the meeting was paused, or `nil` once it resumed.
+    ///   - capturedDuration: Seconds of audio captured so far.
+    /// - Returns: A copy carrying the new pause state.
+    func pausing(at pausedAt: Date?, capturedDuration: Double) -> SessionRecoveryMetadata {
+        copy(
+            status: status,
+            endedAt: endedAt,
+            interruptedAt: interruptedAt,
+            pausedAt: pausedAt,
+            capturedDuration: capturedDuration
+        )
     }
 
     /// The same record marked as closed by ScribeKit.
@@ -163,7 +213,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - endedAt: When it ended.
     /// - Returns: A copy carrying the new status and end time.
     func closed(_ outcome: SessionCompletionOutcome, at endedAt: Date) -> SessionRecoveryMetadata {
-        copy(status: outcome.recoveryStatus, endedAt: endedAt, interruptedAt: interruptedAt)
+        // A closed meeting is not paused, whatever it was doing a moment ago.
+        copy(status: outcome.recoveryStatus, endedAt: endedAt, interruptedAt: interruptedAt, pausedAt: .some(nil))
     }
 
     /// The same record marked as an interruption ScribeKit has now reported.
@@ -172,6 +223,9 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   meeting stopped.
     /// - Returns: A copy carrying ``SessionRecoveryStatus/interrupted``.
     func markingInterruption(recordedAt date: Date) -> SessionRecoveryMetadata {
+        // ``pausedAt`` is carried through: that the meeting was paused when
+        // ScribeKit stopped is a fact it observed and wrote down, and the
+        // recovery screen says so rather than dropping it.
         copy(status: .interrupted, endedAt: endedAt, interruptedAt: date)
     }
 
@@ -199,11 +253,17 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - status: The new status.
     ///   - endedAt: The new end time.
     ///   - interruptedAt: The new interruption time.
+    ///   - pausedAt: The new pause time, wrapped once so that `.some(nil)`
+    ///     clears it and an omitted argument keeps the current one.
+    ///   - capturedDuration: The new captured duration. Defaults to the
+    ///     current one.
     /// - Returns: The copy.
     private func copy(
         status: SessionRecoveryStatus,
         endedAt: Date?,
-        interruptedAt: Date?
+        interruptedAt: Date?,
+        pausedAt: Date?? = nil,
+        capturedDuration: Double? = nil
     ) -> SessionRecoveryMetadata {
         SessionRecoveryMetadata(
             schemaVersion: schemaVersion,
@@ -217,7 +277,9 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
             audioPath: audioPath,
             status: status,
             endedAt: endedAt,
-            interruptedAt: interruptedAt
+            interruptedAt: interruptedAt,
+            pausedAt: pausedAt ?? self.pausedAt,
+            capturedDuration: capturedDuration ?? self.capturedDuration
         )
     }
 }
