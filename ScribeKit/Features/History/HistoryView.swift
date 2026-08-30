@@ -41,7 +41,10 @@ struct HistoryView: View {
         }
         .task { await model.load() }
         .onDisappear { model.stopPlayback() }
-        .onChange(of: selection) { _, _ in model.stopPlayback() }
+        .onChange(of: selection) { _, newValue in
+            model.stopPlayback()
+            Task { await model.selectSession(newValue) }
+        }
         .onChange(of: runtime.status.isActive) { wasActive, isActive in
             guard wasActive, !isActive else { return }
             Task { await model.load() }

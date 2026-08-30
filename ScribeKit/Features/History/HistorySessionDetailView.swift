@@ -7,10 +7,16 @@ import SwiftUI
 
 /// One past meeting, described from its own artifacts.
 ///
-/// Everything shown is read from the session record, the transcript's header
-/// or the filesystem. There is no editor: the transcript preview is text, the
-/// actions hand a file to the Finder or to another application, and ScribeKit
-/// writes nothing here.
+/// Everything describing the meeting is read from the session record, the
+/// transcript's header or the filesystem, and none of it is editable: the
+/// transcript preview is text and the actions hand a file to the Finder or to
+/// another application.
+///
+/// Two things here are the user's own and are written: the notes they type and
+/// the review passages they mark as dealt with. Both go to
+/// `.scribekit/derived.json` through ``DerivedSessionModel`` and reach nothing
+/// else, so the transcript, the recording, the session record and the review
+/// sidecar stay byte-identical however much is written in this pane.
 struct HistorySessionDetailView: View {
 
     /// The History state, used for the file actions and their narrow
@@ -28,6 +34,8 @@ struct HistorySessionDetailView: View {
 
     private var session: HistorySession { document.session }
 
+    private var derived: DerivedSessionModel { model.derived }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -38,6 +46,8 @@ struct HistorySessionDetailView: View {
                 actions
                 Divider()
                 review
+                Divider()
+                notes
                 Divider()
                 preview
             }
@@ -161,13 +171,18 @@ struct HistorySessionDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                Text("\(candidates.count) passage\(candidates.count == 1 ? "" : "s") worth a second listen, "
-                     + "in the order they were spoken.")
+                Text(reviewSummary(for: candidates.map(\.candidate.spanIndex)))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
                 ForEach(candidates, id: \.candidate.spanIndex) { pair in
                     candidateRow(pair.candidate, span: pair.span)
+                }
+
+                if let message = derived.failureMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let message = model.player.failureMessage {
@@ -210,6 +225,9 @@ struct HistorySessionDetailView: View {
                 Text(span.timestampDescription)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+                Text(derived.isReviewed(spanIndex: candidate.spanIndex) ? "Reviewed" : "Needs Review")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Text(span.text)
@@ -222,6 +240,95 @@ struct HistorySessionDetailView: View {
             }
 
             playbackControls(for: candidate)
+            reviewedControl(for: candidate)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// How many of this meeting's flagged passages the user has dealt with.
+    ///
+    /// - Parameter spanIndexes: The span indexes the meeting has candidates
+    ///   for.
+    /// - Returns: The summary sentence.
+    private func reviewSummary(for spanIndexes: [Int]) -> String {
+        let count = spanIndexes.count
+        let passages = "\(count) passage\(count == 1 ? "" : "s") worth a second listen, "
+            + "in the order they were spoken."
+        guard derived.isEditable else { return passages }
+        return passages + " \(derived.reviewedCount(among: spanIndexes)) of \(count) marked reviewed."
+    }
+
+    /// The control that records whether a passage has been dealt with.
+    ///
+    /// The mark is the user's own disposition and is written to the derived
+    /// sidecar as soon as it is made. `review.json` is not touched: what the
+    /// recogniser observed is not revised by the user having looked at it.
+    ///
+    /// - Parameter candidate: The flagged span.
+    /// - Returns: The control view.
+    @ViewBuilder
+    private func reviewedControl(for candidate: TranscriptReviewCandidate) -> some View {
+        if derived.isEditable {
+            let reviewed = derived.isReviewed(spanIndex: candidate.spanIndex)
+            Button(reviewed ? "Mark Unreviewed" : "Mark Reviewed") {
+                Task { await derived.setReviewed(!reviewed, spanIndex: candidate.spanIndex) }
+            }
+            .font(.caption)
+            .disabled(derived.isSaving)
+            .accessibilityHint(reviewed
+                ? "Record that this passage still needs a second listen"
+                : "Record that you have dealt with this passage")
+        }
+    }
+
+    // MARK: - Notes
+
+    /// The user's own notes about the meeting.
+    ///
+    /// Plain Markdown source, typed by the user and stored verbatim beside the
+    /// transcript rather than in it. Nothing generates it, nothing rewrites it,
+    /// and it never reaches `transcript.md`.
+    @ViewBuilder
+    private var notes: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Notes")
+                    .font(.headline)
+                Spacer()
+                if derived.isEditable {
+                    Button("Save") {
+                        Task { await derived.saveNotes() }
+                    }
+                    .disabled(derived.isSaving || !derived.hasUnsavedNotes)
+                    .accessibilityHint("Write these notes beside the transcript. The transcript is unchanged.")
+                }
+            }
+
+            switch derived.state {
+            case let .refused(message), let .unsupported(message):
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            case .idle, .loading:
+                Text("Reading this meeting's notes…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            case .ready:
+                TextEditor(text: Bindable(derived).notesDraft)
+                    .font(.body.monospaced())
+                    .frame(minHeight: 120)
+                    .accessibilityLabel("Notes about this meeting")
+
+                Text(derived.statusDescription)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Text("Your notes are Markdown source, kept in this meeting's folder beside the "
+                     + "transcript and never written into it. They stay on this Mac. Unsaved text is "
+                     + "discarded if you leave this meeting before saving.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
