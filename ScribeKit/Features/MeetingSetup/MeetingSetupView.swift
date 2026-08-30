@@ -7,16 +7,24 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The configuration screen shown before a meeting starts.
+/// The screen that configures a meeting and shows the one that is running.
 ///
 /// The screen collects the settings a session needs — title, audio sources,
-/// audio retention and save location — and runs the meeting itself: capture,
+/// audio retention and save location — and displays the meeting: capture,
 /// on-device recognition and a timestamped Markdown transcript written to the
 /// chosen folder while the meeting is under way.
+///
+/// It does not own the meeting. ``MeetingRuntime`` is handed in and belongs to
+/// the application, so this screen can be closed, hidden or built again
+/// without starting, stopping or duplicating anything. What the screen does
+/// own is the configuration for the *next* meeting, which is exactly the state
+/// that should disappear with it.
 struct MeetingSetupView: View {
+    /// The application's meeting owner, shared with the menu bar.
+    let runtime: MeetingRuntime
+
     @State private var sources: MeetingSetupSourcesModel
     @State private var destination: MeetingSetupDestinationModel
-    @State private var capture = MeetingSetupCaptureModel()
     @State private var recovery = SessionRecoveryModel()
     @State private var title = ""
     @State private var audioRetention: AudioRetentionMode
@@ -27,6 +35,7 @@ struct MeetingSetupView: View {
     /// Creates the setup screen.
     ///
     /// - Parameters:
+    ///   - runtime: The application's meeting owner.
     ///   - sourceProvider: Discovery used to populate the application list. The
     ///     default talks to ScreenCaptureKit; previews and tests can substitute
     ///     their own.
@@ -35,10 +44,12 @@ struct MeetingSetupView: View {
     ///   - preferences: Store for the setup choices remembered between
     ///     launches.
     init(
+        runtime: MeetingRuntime,
         sourceProvider: CaptureSourceProviding = ScreenCaptureKitSourceProvider(),
         saveLocation: SaveLocationPersisting = SecurityScopedSaveLocationStore(),
         preferences: MeetingSetupPreferencesStoring = UserDefaultsMeetingSetupPreferences()
     ) {
+        self.runtime = runtime
         self.preferences = preferences
         _sources = State(initialValue: MeetingSetupSourcesModel(provider: sourceProvider, preferences: preferences))
         _destination = State(initialValue: MeetingSetupDestinationModel(persistence: saveLocation))
@@ -66,11 +77,8 @@ struct MeetingSetupView: View {
         .task {
             destination.restore()
             await checkForUnfinishedSessions()
-            await capture.prepare()
+            await runtime.prepare()
             await sources.refresh()
-        }
-        .onDisappear {
-            Task { await capture.stop() }
         }
         .onChange(of: audioRetention) { _, mode in
             preferences.audioRetention = mode
@@ -90,9 +98,11 @@ struct MeetingSetupView: View {
     ///
     /// Only ever a file scan, and never while a meeting is running: the
     /// session being written right now is legitimately marked in progress, and
-    /// offering it as an interrupted meeting would be nonsense.
+    /// offering it as an interrupted meeting would be nonsense. It runs when
+    /// the screen appears and when a folder is chosen — never on a timer, and
+    /// never because the menu bar changed.
     private func checkForUnfinishedSessions() async {
-        guard !capture.isRunning else { return }
+        guard runtime.allowsRecovery else { return }
         if let url = destination.url {
             await recovery.check(url)
         } else if let warning = destination.warningMessage {
@@ -195,10 +205,17 @@ struct MeetingSetupView: View {
                 Button("Mark as Interrupted") {
                     Task { await recovery.recordInterruption(for: candidate) }
                 }
+                .disabled(!runtime.allowsRecovery)
                 .accessibilityHint("Record the interruption in this meeting's transcript and session record")
 
                 Button("Dismiss") { recovery.dismiss(candidate) }
                     .accessibilityHint("Hide this until the next launch, changing nothing on disk")
+            }
+
+            if !runtime.allowsRecovery {
+                Text("Available once the current meeting has finished.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -216,10 +233,28 @@ struct MeetingSetupView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The meeting being configured, and the one that is running.
+    ///
+    /// The title field configures the *next* meeting. A running meeting keeps
+    /// the title it was started with — it is already in the transcript header
+    /// — so the field is disabled while one runs and the running meeting is
+    /// named separately, rather than letting one text field appear to be two
+    /// different things.
     private var meetingSection: some View {
         Section("Meeting") {
             TextField("Title", text: $title, prompt: Text(MeetingSession.untitledPlaceholder))
+                .disabled(runtime.isRunning)
                 .accessibilityLabel("Meeting title")
+
+            if let meeting = runtime.meeting, runtime.status.isActive {
+                LabeledContent("Running") { Text(meeting.title) }
+                    .accessibilityLabel("Running meeting")
+                    .accessibilityValue(meeting.title)
+
+                Text("Settings on this screen apply to the next meeting. This one keeps what it started with.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -235,7 +270,7 @@ struct MeetingSetupView: View {
                     }
                 }
             case let .loaded(discovered) where discovered.isEmpty:
-                Text("No applications are available to capture.")
+                Text("No applications are available to runtime.")
                     .foregroundStyle(.secondary)
             case let .loaded(discovered):
                 ForEach(discovered) { source in
@@ -284,6 +319,7 @@ struct MeetingSetupView: View {
             set: { sources.setSelection($0, for: source) }
         ))
         .toggleStyle(.checkbox)
+        .disabled(runtime.isRunning)
         .accessibilityHint("Include this application as a meeting audio source")
     }
 
@@ -300,12 +336,12 @@ struct MeetingSetupView: View {
         Section("Capture & Transcription") {
             LabeledContent("Audio") {
                 Text(captureStatusDescription)
-                    .foregroundStyle(capture.captureState == .idle ? .secondary : .primary)
+                    .foregroundStyle(runtime.captureState == .idle ? .secondary : .primary)
             }
             .accessibilityLabel("Capture status")
             .accessibilityValue(captureStatusDescription)
 
-            if case let .failed(message) = capture.captureState {
+            if case let .failed(message) = runtime.captureState {
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -314,12 +350,12 @@ struct MeetingSetupView: View {
 
             LabeledContent("Recognition") {
                 Text(recognitionStatusDescription)
-                    .foregroundStyle(capture.transcriptionState == .idle ? .secondary : .primary)
+                    .foregroundStyle(runtime.transcriptionState == .idle ? .secondary : .primary)
             }
             .accessibilityLabel("Recognition status")
             .accessibilityValue(recognitionStatusDescription)
 
-            if case let .failed(message) = capture.transcriptionState {
+            if case let .failed(message) = runtime.transcriptionState {
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -351,12 +387,12 @@ struct MeetingSetupView: View {
         Section("Transcript File") {
             LabeledContent("Status") {
                 Text(persistenceStatusDescription)
-                    .foregroundStyle(capture.persistenceState == .idle ? .secondary : .primary)
+                    .foregroundStyle(runtime.persistenceState == .idle ? .secondary : .primary)
             }
             .accessibilityLabel("Transcript file status")
             .accessibilityValue(persistenceStatusDescription)
 
-            if let layout = capture.persistenceState.layout {
+            if let layout = runtime.persistenceState.layout {
                 LabeledContent("File") {
                     Text(layout.transcriptURL.path(percentEncoded: false))
                         .lineLimit(1)
@@ -371,7 +407,7 @@ struct MeetingSetupView: View {
                 .accessibilityHint("Reveal the transcript in the Finder")
             }
 
-            if let message = capture.persistenceState.failureMessage {
+            if let message = runtime.persistenceState.failureMessage {
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -398,7 +434,7 @@ struct MeetingSetupView: View {
 
     /// A short description of what the durable transcript is doing.
     private var persistenceStatusDescription: String {
-        switch capture.persistenceState {
+        switch runtime.persistenceState {
         case .idle: destination.url == nil
             ? "No transcript. Choose a save folder first."
             : "No transcript yet. Start a meeting to write one."
@@ -416,25 +452,25 @@ struct MeetingSetupView: View {
     /// language is unavailable is visible rather than implied by its absence.
     @ViewBuilder
     private var localePicker: some View {
-        if capture.availableLocales.isEmpty {
+        if runtime.availableLocales.isEmpty {
             LabeledContent("Language") {
                 Text("No recognition languages are available.")
                     .foregroundStyle(.secondary)
             }
         } else {
             Picker("Language", selection: Binding(
-                get: { capture.localeIdentifier },
-                set: { identifier in Task { await capture.selectLocale(identifier) } }
+                get: { runtime.localeIdentifier },
+                set: { identifier in Task { await runtime.selectLocale(identifier) } }
             )) {
-                ForEach(capture.availableLocales) { locale in
+                ForEach(runtime.availableLocales) { locale in
                     Text(locale.isInstalled ? locale.displayName : "\(locale.displayName) (not installed)")
                         .tag(locale.id)
                 }
             }
-            .disabled(capture.isRunning)
+            .disabled(runtime.isRunning)
             .accessibilityLabel("Recognition language")
 
-            if let message = capture.availability.message {
+            if let message = runtime.availability.message {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -444,7 +480,7 @@ struct MeetingSetupView: View {
 
     /// A short description of what capture is doing.
     private var captureStatusDescription: String {
-        switch capture.captureState {
+        switch runtime.captureState {
         case .idle: sources.selectedSources.isEmpty
             ? "Not capturing. Select at least one application."
             : "Not capturing. \(sources.selectedSources.count) application(s) selected."
@@ -457,8 +493,8 @@ struct MeetingSetupView: View {
 
     /// A short description of what recognition is doing.
     private var recognitionStatusDescription: String {
-        switch capture.transcriptionState {
-        case .idle: capture.availability.canTranscribe
+        switch runtime.transcriptionState {
+        case .idle: runtime.availability.canTranscribe
             ? "Ready, on this Mac."
             : "Unavailable."
         case .preparing: "Preparing the recogniser…"
@@ -474,7 +510,7 @@ struct MeetingSetupView: View {
     /// The figures are aggregates published a few times a second; no audio is
     /// drawn, played back or retained.
     private var captureActivityDescription: String? {
-        let activity = capture.activity
+        let activity = runtime.activity
         guard activity.sampleCount > 0 || activity.unreadableSampleCount > 0 else { return nil }
         var parts = ["\(activity.sampleCount) buffers"]
         if let seconds = activity.capturedDuration {
@@ -500,18 +536,18 @@ struct MeetingSetupView: View {
     /// appended.
     private var transcriptSection: some View {
         Section("Live Transcript") {
-            if capture.transcript.isEmpty {
-                Text(capture.transcriptionState == .transcribing
+            if runtime.transcript.isEmpty {
+                Text(runtime.transcriptionState == .transcribing
                      ? "Listening…"
                      : "Nothing transcribed yet.")
                     .foregroundStyle(.secondary)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(capture.transcript.finalizedSegments) { segment in
+                        ForEach(runtime.transcript.finalizedSegments) { segment in
                             transcriptRow(for: segment)
                         }
-                        if let partial = capture.transcript.partialSegment {
+                        if let partial = runtime.transcript.partialSegment {
                             Text(partial.displayText)
                                 .foregroundStyle(.secondary)
                                 .italic()
@@ -525,11 +561,11 @@ struct MeetingSetupView: View {
                 .frame(height: 160)
             }
 
-            if capture.transcript.untranscribedSeconds > 0 {
+            if runtime.transcript.untranscribedSeconds > 0 {
                 Label(
                     String(
                         format: "%.1f s of audio was not transcribed, so the transcript has gaps.",
-                        capture.transcript.untranscribedSeconds
+                        runtime.transcript.untranscribedSeconds
                     ),
                     systemImage: "exclamationmark.triangle"
                 )
@@ -583,17 +619,17 @@ struct MeetingSetupView: View {
                     Text(mode.displayName).tag(mode)
                 }
             }
-            .disabled(capture.isRunning)
+            .disabled(runtime.isRunning)
             .accessibilityLabel("Audio retention mode")
 
             LabeledContent("Status") {
                 Text(audioStatusDescription)
-                    .foregroundStyle(capture.audioRetentionState == .idle ? .secondary : .primary)
+                    .foregroundStyle(runtime.audioRetentionState == .idle ? .secondary : .primary)
             }
             .accessibilityLabel("Audio file status")
             .accessibilityValue(audioStatusDescription)
 
-            if let url = capture.audioRetentionState.url {
+            if let url = runtime.audioRetentionState.url {
                 LabeledContent("File") {
                     Text(url.path(percentEncoded: false))
                         .lineLimit(1)
@@ -608,7 +644,7 @@ struct MeetingSetupView: View {
                 .accessibilityHint("Reveal the meeting's audio file in the Finder")
             }
 
-            if let message = capture.audioRetentionState.failureMessage {
+            if let message = runtime.audioRetentionState.failureMessage {
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -623,7 +659,7 @@ struct MeetingSetupView: View {
 
     /// A short description of what the audio file is doing.
     private var audioStatusDescription: String {
-        switch capture.audioRetentionState {
+        switch runtime.audioRetentionState {
         case .idle: audioRetention.retainsAudio
             ? "No audio file yet. Start a meeting to record one."
             : "No audio file. Only the transcript is kept."
@@ -671,10 +707,11 @@ struct MeetingSetupView: View {
                 Button(destination.url == nil ? "Choose Folder…" : "Change Folder…") {
                     isChoosingDestination = true
                 }
+                .disabled(runtime.isRunning)
                 .accessibilityHint("Choose where transcripts are saved")
 
                 Button("Forget Folder") { destination.clear() }
-                    .disabled(!destination.canClear)
+                    .disabled(!destination.canClear || runtime.isRunning)
                     .accessibilityHint("Stop remembering the saved folder")
             }
 
@@ -693,17 +730,17 @@ struct MeetingSetupView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Stop") {
-                Task { await capture.stop() }
+                Task { await runtime.stop() }
             }
-            .disabled(!capture.canStop)
+            .disabled(!runtime.canStop)
             .accessibilityHint("Stop capturing, finish the transcript and close it")
 
             Button("Start Meeting") {
                 guard let request = startRequest else { return }
-                Task { await capture.start(request) }
+                Task { await runtime.start(request) }
             }
             .keyboardShortcut(.defaultAction)
-            .disabled(!capture.canStart(startRequest))
+            .disabled(!runtime.canStart(startRequest))
             .help(startHelp)
         }
     }
@@ -711,23 +748,25 @@ struct MeetingSetupView: View {
     /// One sentence describing the meeting as a whole, derived from the
     /// subsystems rather than tracked separately.
     private var meetingStatusDescription: String {
-        if let message = capture.persistenceState.failureMessage { return message }
-        if let message = capture.audioRetentionState.failureMessage { return message }
-        if capture.isRunning { return "Meeting in progress. Speech is transcribed and saved as it is finalised." }
-        if case .saved = capture.persistenceState { return "Meeting finished. The transcript is saved and closed." }
+        if let message = runtime.persistenceState.failureMessage { return message }
+        if let message = runtime.audioRetentionState.failureMessage { return message }
+        if runtime.isRunning {
+            return "Meeting in progress. It keeps running if you hide or close this window."
+        }
+        if case .saved = runtime.persistenceState { return "Meeting finished. The transcript is saved and closed." }
         return "Choose applications and a save folder, then start the meeting."
     }
 
     /// Why the start control is unavailable, when it is.
     private var startHelp: String {
-        if capture.isRunning { return "A meeting is already running." }
+        if runtime.isRunning { return "A meeting is already running." }
         if destination.url == nil { return "Choose a save folder for the transcript first." }
-        if sources.selectedSources.isEmpty { return "Select at least one application to capture." }
-        if !capture.availability.canTranscribe { return "On-device speech recognition is unavailable." }
+        if sources.selectedSources.isEmpty { return "Select at least one application to runtime." }
+        if !runtime.availability.canTranscribe { return "On-device speech recognition is unavailable." }
         return "Capture the selected applications and write a timestamped Markdown transcript."
     }
 }
 
 #Preview {
-    MeetingSetupView()
+    MeetingSetupView(runtime: MeetingRuntime())
 }

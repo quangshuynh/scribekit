@@ -1,5 +1,5 @@
 //
-//  MeetingSetupCaptureModelTests.swift
+//  MeetingRuntimeTests.swift
 //  ScribeKitTests
 //
 
@@ -62,8 +62,8 @@ private nonisolated final class FakeCapturer: AudioCapturing, @unchecked Sendabl
 }
 
 @MainActor
-@Suite("MeetingSetupCaptureModel")
-struct MeetingSetupCaptureModelTests {
+@Suite("MeetingRuntime")
+struct MeetingRuntimeTests {
 
     private let meet = CaptureSource.application(bundleIdentifier: "com.example.Meet", displayName: "Meet")
     private let browser = CaptureSource.application(bundleIdentifier: "com.example.Browser", displayName: "Browser")
@@ -83,7 +83,7 @@ struct MeetingSetupCaptureModelTests {
     /// - Returns: The model and the two fakes behind it.
     private func makeModel(
         availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
-    ) async -> (MeetingSetupCaptureModel, FakeCapturer, FakeSpeechTranscriber) {
+    ) async -> (MeetingRuntime, FakeCapturer, FakeSpeechTranscriber) {
         let (model, capturer, transcriber, _) = await makeMeeting(availability: availability)
         return (model, capturer, transcriber)
     }
@@ -94,7 +94,7 @@ struct MeetingSetupCaptureModelTests {
     /// - Returns: The model and the three doubles behind it.
     private func makeMeeting(
         availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
-    ) async -> (MeetingSetupCaptureModel, FakeCapturer, FakeSpeechTranscriber, FakeTranscriptPersistence) {
+    ) async -> (MeetingRuntime, FakeCapturer, FakeSpeechTranscriber, FakeTranscriptPersistence) {
         let (model, capturer, transcriber, persistence, _) = await makeRetainingMeeting(availability: availability)
         return (model, capturer, transcriber, persistence)
     }
@@ -107,7 +107,7 @@ struct MeetingSetupCaptureModelTests {
     private func makeRetainingMeeting(
         availability: SpeechRecognitionAvailability = .available(localeIdentifier: "en-US")
     ) async -> (
-        MeetingSetupCaptureModel,
+        MeetingRuntime,
         FakeCapturer,
         FakeSpeechTranscriber,
         FakeTranscriptPersistence,
@@ -118,7 +118,7 @@ struct MeetingSetupCaptureModelTests {
         let persistence = FakeTranscriptPersistence()
         let audio = FakeAudioRetention()
         var capturer: FakeCapturer!
-        let model = MeetingSetupCaptureModel(
+        let model = MeetingRuntime(
             monitor: AudioCaptureActivityMonitor(minimumPublishInterval: .zero),
             transcriber: transcriber,
             persistence: persistence,
@@ -495,7 +495,7 @@ struct MeetingSetupCaptureModelTests {
         let (model, _, transcriber) = await makeModel()
         await model.start(request([meet]))
 
-        for _ in 0...MeetingSetupCaptureModel.maximumRecoveryAttempts {
+        for _ in 0...MeetingRuntime.maximumRecoveryAttempts {
             transcriber.emit(.interrupted(.recognitionFailed(message: "resources")))
             try? await Task.sleep(for: .milliseconds(30))
         }
@@ -504,7 +504,7 @@ struct MeetingSetupCaptureModelTests {
             if case .failed = model.transcriptionState { return true }
             return false
         })
-        #expect(transcriber.startCount <= MeetingSetupCaptureModel.maximumRecoveryAttempts + 1)
+        #expect(transcriber.startCount <= MeetingRuntime.maximumRecoveryAttempts + 1)
     }
 
     @Test("Dropped audio is recorded as a gap rather than passed over")
