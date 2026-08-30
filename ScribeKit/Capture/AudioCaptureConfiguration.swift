@@ -46,6 +46,22 @@ nonisolated struct AudioCaptureConfiguration: Equatable, Sendable {
         self.channelCount = channelCount
     }
 
+    /// The format this configuration asks the capture system for.
+    ///
+    /// Sample buffers are still read back for what actually arrived; this is
+    /// what was requested, and it is what a retained audio file is opened for,
+    /// because a container's format is fixed when the file is created and the
+    /// first buffer has not arrived by then.
+    var requestedFormat: CapturedAudioFormat {
+        CapturedAudioFormat(
+            sampleRate: Double(sampleRate),
+            channelCount: channelCount,
+            bitsPerChannel: 32,
+            isFloat: true,
+            isInterleaved: false
+        )
+    }
+
     /// Creates a configuration from the sources the user selected.
     ///
     /// - Parameter sources: The selected capture sources.
