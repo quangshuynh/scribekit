@@ -37,6 +37,8 @@ struct HistorySessionDetailView: View {
                 Divider()
                 actions
                 Divider()
+                review
+                Divider()
                 preview
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -131,6 +133,127 @@ struct HistorySessionDetailView: View {
                 }
                 .accessibilityHint("Reveal this meeting's audio file in the Finder")
             }
+        }
+    }
+
+    // MARK: - Review
+
+    /// The passages this meeting flagged for a second listen.
+    ///
+    /// Review is a view over what the meeting recorded about itself. It shows
+    /// the recognised wording exactly as the transcript has it, says why the
+    /// passage was flagged, and offers to play the audio around it. It never
+    /// proposes a replacement, and there is no editor here or anywhere else.
+    @ViewBuilder
+    private var review: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Review")
+                .font(.headline)
+
+            let candidates = document.reviewCandidates
+            if document.review == nil {
+                Text("This meeting has no review information. ScribeKit records it while a meeting runs, "
+                     + "so meetings recorded before that existed do not have any. The transcript is unaffected.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if candidates.isEmpty {
+                Text(noCandidatesDescription)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(candidates.count) passage\(candidates.count == 1 ? "" : "s") worth a second listen, "
+                     + "in the order they were spoken.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                ForEach(candidates, id: \.candidate.spanIndex) { pair in
+                    candidateRow(pair.candidate, span: pair.span)
+                }
+
+                if let message = model.player.failureMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What to say when the meeting recorded review information and flagged
+    /// nothing.
+    ///
+    /// The two cases are not the same. A meeting whose recogniser reported no
+    /// confidence at all had less to go on than one whose recogniser was
+    /// consistently sure, and saying so avoids implying a judgement nothing
+    /// made.
+    private var noCandidatesDescription: String {
+        if document.review?.recognizerConfidenceAvailable == true {
+            return "Nothing in this meeting was flagged for review."
+        }
+        return "Nothing in this meeting was flagged for review. The recogniser reported no confidence of "
+            + "its own for this meeting, so only ScribeKit's own observations were available."
+    }
+
+    /// One review candidate: what was recognised, when, why it is here, and
+    /// the audio around it.
+    ///
+    /// - Parameters:
+    ///   - candidate: The flagged span's evidence.
+    ///   - span: The span as the transcript wrote it.
+    /// - Returns: The row view.
+    private func candidateRow(_ candidate: TranscriptReviewCandidate, span: TranscriptSpan) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(candidate.priority.displayName)
+                    .font(.caption.weight(.semibold))
+                Text(span.timestampDescription)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(span.text)
+                .textSelection(.enabled)
+
+            ForEach(candidate.reasons, id: \.rawValue) { reason in
+                Text(reason.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            playbackControls(for: candidate)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The playback controls for one candidate, or a sentence saying why there
+    /// are none.
+    ///
+    /// - Parameter candidate: The flagged span.
+    /// - Returns: The controls view.
+    @ViewBuilder
+    private func playbackControls(for candidate: TranscriptReviewCandidate) -> some View {
+        if session.audio == nil {
+            Text("This meeting kept no recording, so there is no audio to play.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            HStack(spacing: 8) {
+                if model.player.loadedSpanIndex == candidate.spanIndex, model.player.isPlaying {
+                    Button("Pause") { model.player.pause() }
+                    Button("Stop") { model.stopPlayback() }
+                } else if model.player.loadedSpanIndex == candidate.spanIndex,
+                          case .paused = model.player.playback {
+                    Button("Resume") { model.player.resume() }
+                    Button("Stop") { model.stopPlayback() }
+                } else {
+                    Button("Play Audio") {
+                        Task { await model.play(candidate, of: session) }
+                    }
+                    .accessibilityHint("Play the retained recording around this passage")
+                }
+            }
+            .font(.caption)
         }
     }
 

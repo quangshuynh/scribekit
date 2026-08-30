@@ -93,6 +93,17 @@ nonisolated protocol HistoryStoring: Sendable {
     ///   but cannot be read.
     func metadataData(at url: URL) throws -> Data?
 
+    /// Reads the bytes of a session's review sidecar.
+    ///
+    /// Absence and failure are the same answer, deliberately: review metadata
+    /// is optional, and a session without readable review information is
+    /// simply a session with none. Nothing about it stops the meeting from
+    /// being listed, opened or searched.
+    ///
+    /// - Parameter url: The sidecar's location.
+    /// - Returns: Its bytes, or `nil` when there is none or it cannot be read.
+    func reviewData(at url: URL) -> Data?
+
     /// Describes a file without opening it.
     ///
     /// - Parameter url: The file's location.
@@ -144,6 +155,11 @@ nonisolated struct FileManagerHistoryStore: HistoryStoring {
         } catch {
             throw HistoryError.metadataUnreadable
         }
+    }
+
+    func reviewData(at url: URL) -> Data? {
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return nil }
+        return try? Data(contentsOf: url)
     }
 
     func fileInfo(at url: URL) -> SessionFileInfo? {

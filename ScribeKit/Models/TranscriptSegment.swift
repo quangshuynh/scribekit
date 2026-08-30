@@ -48,6 +48,20 @@ nonisolated struct TranscriptSegment: Identifiable, Equatable, Sendable {
     /// The BCP-47 identifier of the locale the span was recognised in.
     let localeIdentifier: String
 
+    /// The recogniser's own confidence in the span, when it reported one.
+    ///
+    /// This is Apple's `transcriptionConfidence` attribute, requested through
+    /// `SpeechTranscriber.ResultAttributeOption` and read from the result's
+    /// runs: the lowest value any run of the span carried, because the weakest
+    /// word is what a reviewer would want to hear again. It is `nil` when the
+    /// recogniser attached no confidence to the span, which is a fact about
+    /// this result rather than a reason to invent a number for it.
+    ///
+    /// ScribeKit does not interpret the value as a percentage and never shows
+    /// it as one. It is compared against thresholds to decide whether a span
+    /// is worth reviewing, and nothing else.
+    let confidence: Double?
+
     /// Creates a segment.
     ///
     /// - Parameters:
@@ -57,13 +71,15 @@ nonisolated struct TranscriptSegment: Identifiable, Equatable, Sendable {
     ///   - endTime: Seconds from the start of the recognition run.
     ///   - state: Whether the recogniser has finalised the span.
     ///   - localeIdentifier: The BCP-47 locale the span was recognised in.
+    ///   - confidence: The recogniser's own confidence, when it reported one.
     init(
         id: UUID = UUID(),
         text: String,
         startTime: Double,
         endTime: Double,
         state: RecognitionState,
-        localeIdentifier: String
+        localeIdentifier: String,
+        confidence: Double? = nil
     ) {
         self.id = id
         self.text = text
@@ -71,6 +87,7 @@ nonisolated struct TranscriptSegment: Identifiable, Equatable, Sendable {
         self.endTime = endTime
         self.state = state
         self.localeIdentifier = localeIdentifier
+        self.confidence = confidence
     }
 
     /// How long the span lasts, in seconds, or zero when the recogniser gave

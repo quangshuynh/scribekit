@@ -6,6 +6,32 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Post-meeting review of uncertain recognition. A finished meeting records the
+  passages worth a second listen, and History's detail pane lists them in
+  transcript order with the recognised wording exactly as the transcript has
+  it, its timestamp, a High/Medium/Low priority and the reason it was flagged.
+  Nothing is corrected, replaced or rewritten, and there is no editor.
+- Recognition confidence, as the recogniser itself reports it.
+  `SpeechTranscriber` is now asked for its `transcriptionConfidence` attribute
+  and a finalised span carries the lowest confidence any of its words reported.
+  ScribeKit never shows the value, or anything derived from it, as a number or
+  a percentage: it decides whether a passage is flagged, and nothing else.
+- A review sidecar, `.scribekit/review.json`, versioned from its first release.
+  It holds span positions, audio-relative offsets and the evidence behind them,
+  never transcript text — so `transcript.md` is written exactly as the
+  recogniser produced it and carries no confidence annotation of any kind. A
+  session without a sidecar, or with one this build cannot read, is listed,
+  opened and searched exactly as it would be otherwise.
+- Playback of retained audio from a review passage. `AVPlayer` over an
+  `AVURLAsset`, so a recording is read from disk as it plays rather than loaded
+  into memory, with play, pause and stop, and a seek to the passage's own audio
+  offset with a couple of seconds either side. CAF and finalised M4A both play;
+  an M4A that was never finalised is reported as unopenable rather than
+  repaired, and a meeting that kept no recording offers no playback.
+- An explicitly owned security-scoped claim for playback. The player takes a
+  `SecurityScopedLease` when it starts and releases it when it stops, fails or
+  is released, so access is held for exactly as long as a recording is being
+  read and never longer.
 - Local transcript history. A History tab beside the meeting screen lists the
   meetings in the save folder — completed, failed, interrupted and the one
   running now — newest first, with a detail pane giving each meeting's status,

@@ -124,6 +124,29 @@ private nonisolated final class FakeFile: TranscriptFileAppending {
     }
 }
 
+/// Records the review sidecars a session wrote, and can refuse to write one.
+private nonisolated final class FakeSessionReviewStore: SessionReviewStoring {
+    private struct State {
+        var written: [SessionReviewMetadata] = []
+        var fails = false
+    }
+
+    private let state = Mutex(State())
+
+    /// The sidecars written, in order.
+    var written: [SessionReviewMetadata] { state.withLock { $0.written } }
+
+    /// Makes every write fail, as a read-only or full disk would.
+    func failWrites() { state.withLock { $0.fails = true } }
+
+    func writeReview(_ metadata: SessionReviewMetadata, to layout: SessionArtifactLayout) throws {
+        try state.withLock { state in
+            if state.fails { throw SessionReviewError.writeFailed }
+            state.written.append(metadata)
+        }
+    }
+}
+
 @Suite("MarkdownTranscriptStore")
 struct MarkdownTranscriptStoreTests {
 
@@ -171,16 +194,36 @@ struct MarkdownTranscriptStoreTests {
     /// A store over doubles, with the fakes it writes through.
     private func makeStore(
         access: FakeSecurityScopedAccess = FakeSecurityScopedAccess(),
-        recoveryStore: FakeSessionRecoveryStore = FakeSessionRecoveryStore()
+        recoveryStore: FakeSessionRecoveryStore = FakeSessionRecoveryStore(),
+        reviewStore: FakeSessionReviewStore = FakeSessionReviewStore()
     ) -> (MarkdownTranscriptStore, FakeFileStore, FakeSecurityScopedAccess) {
         let fileStore = FakeFileStore()
         let store = MarkdownTranscriptStore(
             fileStore: fileStore,
             recoveryStore: recoveryStore,
+            reviewStore: reviewStore,
             access: access,
             timeZone: zone
         )
         return (store, fileStore, access)
+    }
+
+    /// A finalised span the recogniser reported a confidence for.
+    ///
+    /// - Parameters:
+    ///   - text: The recognised text.
+    ///   - start: Seconds from the start of the run.
+    ///   - confidence: The recogniser's own confidence.
+    /// - Returns: The segment.
+    private func segment(_ text: String, start: Double, confidence: Double?) -> TranscriptSegment {
+        TranscriptSegment(
+            text: text,
+            startTime: start,
+            endTime: start + 1,
+            state: .final,
+            localeIdentifier: "en-US",
+            confidence: confidence
+        )
     }
 
     /// Starts a session on the store.
@@ -669,6 +712,92 @@ struct MarkdownTranscriptStoreTests {
         #expect(record.endedAt == startedAt.addingTimeInterval(64))
         #expect(!fileStore.file.text.contains("**Ended:**"))
         #expect(!fileStore.file.text.contains("**Duration:**"))
+        #expect(fileStore.file.closeCount == 1)
+        #expect(access.isBalanced)
+    }
+
+    // MARK: - Review metadata
+
+    @Test("A finished session records the spans worth reviewing, by their position in the document")
+    func reviewSidecarNamesSpansByPosition() async throws {
+        let reviewStore = FakeSessionReviewStore()
+        let (store, _, _) = makeStore(reviewStore: reviewStore)
+        _ = try await start(store)
+
+        try await store.appendFinalSegment(segment("Good morning everyone.", start: 0, confidence: 0.95))
+        try await store.appendFinalSegment(segment("The boat hole telemetry.", start: 5, confidence: 0.144))
+        try await store.appendFinalSegment(segment("Let us start with the budget.", start: 9, confidence: 0.82))
+        try await store.finishSession(endedAt: startedAt.addingTimeInterval(60))
+
+        let written = try #require(reviewStore.written.first)
+        #expect(written.recognizerConfidenceAvailable)
+        #expect(written.candidates.map(\.spanIndex) == [1])
+        #expect(written.candidates.first?.startTime == 5)
+        #expect(written.candidates.first?.reasons == [.lowConfidence])
+        #expect(written.candidates.first?.priority == .high)
+    }
+
+    @Test("A span written straight after a gap is flagged as being beside missing audio")
+    func spanAfterAGapIsFlagged() async throws {
+        let reviewStore = FakeSessionReviewStore()
+        let (store, _, _) = makeStore(reviewStore: reviewStore)
+        _ = try await start(store)
+
+        try await store.appendFinalSegment(segment("Before the loss.", start: 0, confidence: 0.99))
+        try await store.recordGap(TranscriptGap(startTime: 1, duration: 2, reason: .audioDropped))
+        try await store.appendFinalSegment(segment("After the loss.", start: 3, confidence: 0.99))
+        try await store.appendFinalSegment(segment("And on from there.", start: 5, confidence: 0.99))
+        try await store.finishSession(endedAt: startedAt.addingTimeInterval(60))
+
+        let written = try #require(reviewStore.written.first)
+        #expect(written.candidates.map(\.spanIndex) == [1])
+        #expect(written.candidates.first?.reasons == [.nearInterruption])
+        #expect(written.candidates.first?.priority == .low)
+    }
+
+    @Test("A meeting whose recogniser reported no confidence says so rather than claiming certainty")
+    func absentConfidenceIsRecorded() async throws {
+        let reviewStore = FakeSessionReviewStore()
+        let (store, _, _) = makeStore(reviewStore: reviewStore)
+        _ = try await start(store)
+
+        try await store.appendFinalSegment(segment("Nothing measured this.", start: 0, confidence: nil))
+        try await store.finishSession(endedAt: startedAt.addingTimeInterval(60))
+
+        let written = try #require(reviewStore.written.first)
+        #expect(!written.recognizerConfidenceAvailable)
+        #expect(written.candidates.isEmpty)
+    }
+
+    @Test("The transcript's bytes are the same whatever confidence the recogniser reported")
+    func confidenceNeverReachesTheTranscript() async throws {
+        let (confident, confidentFiles, _) = makeStore()
+        _ = try await start(confident)
+        try await confident.appendFinalSegment(segment("The boat hole telemetry.", start: 5, confidence: 0.99))
+        try await confident.finishSession(endedAt: startedAt.addingTimeInterval(60))
+
+        let (unsure, unsureFiles, _) = makeStore()
+        _ = try await start(unsure)
+        try await unsure.appendFinalSegment(segment("The boat hole telemetry.", start: 5, confidence: 0.02))
+        try await unsure.finishSession(endedAt: startedAt.addingTimeInterval(60))
+
+        #expect(confidentFiles.file.text == unsureFiles.file.text)
+        #expect(!unsureFiles.file.text.contains("0.02"))
+        #expect(!unsureFiles.file.text.lowercased().contains("confidence"))
+    }
+
+    @Test("A sidecar that cannot be written does not fail a meeting whose transcript is safe")
+    func reviewFailureDoesNotFailTheMeeting() async throws {
+        let reviewStore = FakeSessionReviewStore()
+        reviewStore.failWrites()
+        let (store, fileStore, access) = makeStore(reviewStore: reviewStore)
+        _ = try await start(store)
+
+        try await store.appendFinalSegment(segment("The boat hole telemetry.", start: 5, confidence: 0.1))
+        try await store.finishSession(endedAt: startedAt.addingTimeInterval(60))
+
+        #expect(reviewStore.written.isEmpty)
+        #expect(fileStore.file.text.contains("**Ended:**"))
         #expect(fileStore.file.closeCount == 1)
         #expect(access.isBalanced)
     }

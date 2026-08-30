@@ -57,6 +57,17 @@ the user, readable and useful without ScribeKit, and never dependent on
 ScribeKit metadata: losing or failing to parse anything else in a session
 directory must not make the transcript unusable.
 
+Metadata about a transcript is not transcript material. Anything ScribeKit
+records *about* what was said — how sure the recogniser was, which passages
+deserve a second listen, and whatever later intervals add — lives in a
+versioned sidecar under `.scribekit/`, never in recognised prose and never in a
+form that rewrites, annotates or reorders the Markdown. Such a sidecar is
+optional by construction: it points at spans by position rather than copying
+their words, a session without one behaves exactly as it did before the sidecar
+existed, and failing to write one never fails a meeting whose durable artifacts
+closed cleanly. Nothing derived from it may be presented with more precision
+than the thing it was derived from actually has.
+
 Reading a meeting back is a read. History, search and any later feature that
 lists or inspects past sessions are views over user-owned artifacts: listing,
 indexing, previewing or searching a session must leave its transcript, its

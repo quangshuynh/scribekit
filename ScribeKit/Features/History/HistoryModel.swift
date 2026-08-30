@@ -72,6 +72,13 @@ final class HistoryModel {
     /// dropping it costs nothing but the work of reading the folder again.
     private var index = TranscriptSearchIndex.empty
 
+    /// Plays retained audio for review.
+    ///
+    /// Owned here rather than by a view, so a claim on the user's folder
+    /// cannot outlive the screen that opened it: leaving History, refreshing
+    /// it or selecting another meeting stops playback and releases the lease.
+    let player: RetainedAudioPlayer
+
     private let service: HistoryService
     private let saveLocation: SaveLocationPersisting
 
@@ -83,12 +90,17 @@ final class HistoryModel {
     ///   - saveLocation: Where the chosen folder is remembered. History reads
     ///     the same bookmark the meeting screen does and never looks anywhere
     ///     the user did not choose.
+    ///   - player: Plays retained audio for review. Holds a security-scoped
+    ///     lease for exactly as long as a recording is being read. A fresh one
+    ///     by default; a test substitutes one built on an access double.
     init(
         service: HistoryService = HistoryService(),
-        saveLocation: SaveLocationPersisting = SecurityScopedSaveLocationStore()
+        saveLocation: SaveLocationPersisting = SecurityScopedSaveLocationStore(),
+        player: RetainedAudioPlayer? = nil
     ) {
         self.service = service
         self.saveLocation = saveLocation
+        self.player = player ?? RetainedAudioPlayer()
     }
 
     /// The sessions and their text, as the last load produced them.
@@ -127,6 +139,7 @@ final class HistoryModel {
     /// When it cannot be restored or opened, the screen says so rather than
     /// listing meetings from somewhere the user did not choose.
     func load() async {
+        player.stop()
         state = .loading
         index = .empty
         results = []
@@ -184,6 +197,27 @@ final class HistoryModel {
     /// - Parameter url: The transcript to open.
     func openTranscript(_ url: URL) {
         withDestinationAccess { NSWorkspace.shared.open(url) }
+    }
+
+    /// Plays the retained audio around one review candidate.
+    ///
+    /// Nothing is written: the recording is opened read-only, and listening to
+    /// a passage changes no artifact and no review state.
+    ///
+    /// - Parameters:
+    ///   - candidate: The span to hear.
+    ///   - session: The meeting it belongs to, which names the recording.
+    func play(_ candidate: TranscriptReviewCandidate, of session: HistorySession) async {
+        guard let audio = session.audio else { return }
+        await player.play(
+            RetainedAudioPlaybackPlan(candidate: candidate, audio: audio),
+            in: destination
+        )
+    }
+
+    /// Stops playback and gives up the claim it held on the user's folder.
+    func stopPlayback() {
+        player.stop()
     }
 
     /// Re-runs the search over the documents in memory.

@@ -35,6 +35,12 @@ import Foundation
 /// that could not be finalised reaches this type as
 /// ``SessionCompletionOutcome/failed`` rather than as a completion.
 ///
+/// Beside the transcript the store also keeps what the meeting observed about
+/// its own recognition, in `.scribekit/review.json`. It holds span positions,
+/// audio-relative offsets and the evidence behind them, never transcript text:
+/// the canonical Markdown is written exactly as the recogniser produced it and
+/// carries no confidence annotation of any kind.
+///
 /// Beside the transcript the store keeps one small operational record,
 /// `.scribekit/session.json`, so a meeting that ends without ScribeKit is
 /// recognisable as unfinished the next time it launches. The record is written
@@ -59,10 +65,26 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         let metadata: SessionRecoveryMetadata
         var formatter: TranscriptMarkdownFormatter
         var appendsSinceSynchronize = 0
+
+        /// How many finalised spans have been written, which is the index the
+        /// next one will occupy in the document.
+        var spanIndex = 0
+
+        /// Whether the last thing written was a gap, so the next span is the
+        /// first one finalised after untranscribed audio.
+        var followsInterruption = false
+
+        /// Whether the recogniser reported a confidence of its own for any
+        /// span in this meeting.
+        var sawRecognizerConfidence = false
+
+        /// The spans put forward for review, in the order they were written.
+        var reviewCandidates: [TranscriptReviewCandidate] = []
     }
 
     private let fileStore: any TranscriptFileStoring
     private let recoveryStore: any SessionRecoveryStoring
+    private let reviewStore: any SessionReviewStoring
     private let access: any SecurityScopedResourceAccessing
     private let timeZone: TimeZone
     private var current: OpenSession?
@@ -74,6 +96,8 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
     ///     default; tests substitute a double that can fail on demand.
     ///   - recoveryStore: How the session record is written. The system by
     ///     default; tests substitute a double that can fail on demand.
+    ///   - reviewStore: How the review sidecar is written. The system by
+    ///     default; tests substitute a double that can fail on demand.
     ///   - access: How security-scoped access is started and stopped.
     ///   - timeZone: The zone session names and clock times are written in.
     ///     The current zone by default, so a meeting is filed and timed as the
@@ -81,11 +105,13 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
     init(
         fileStore: any TranscriptFileStoring = FileManagerTranscriptFileStore(),
         recoveryStore: any SessionRecoveryStoring = FileManagerSessionRecoveryStore(),
+        reviewStore: any SessionReviewStoring = FileManagerSessionReviewStore(),
         access: any SecurityScopedResourceAccessing = SystemSecurityScopedResourceAccess(),
         timeZone: TimeZone = .current
     ) {
         self.fileStore = fileStore
         self.recoveryStore = recoveryStore
+        self.reviewStore = reviewStore
         self.access = access
         self.timeZone = timeZone
     }
@@ -175,6 +201,22 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
 
         let text = session.formatter.finalSegment(segment)
         try write(text, to: &session)
+
+        // Review evidence is recorded only once the span has actually reached
+        // the file, so a candidate can never name a span the transcript does
+        // not contain. The index it names is the count of spans written before
+        // it, which is the index the parser gives that span when the document
+        // is read back.
+        if segment.confidence != nil { session.sawRecognizerConfidence = true }
+        if let candidate = TranscriptReviewPolicy.candidate(
+            for: segment,
+            spanIndex: session.spanIndex,
+            followsInterruption: session.followsInterruption
+        ) {
+            session.reviewCandidates.append(candidate)
+        }
+        session.spanIndex += 1
+        session.followsInterruption = false
         current = session
     }
 
@@ -182,6 +224,7 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         guard var session = current else { throw TranscriptPersistenceError(.noSessionInProgress) }
 
         try write(session.formatter.gap(gap), to: &session)
+        session.followsInterruption = true
         current = session
     }
 
@@ -204,11 +247,34 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         // never happened.
         if let failure { throw TranscriptPersistenceError(.flushFailed, underlying: failure) }
 
+        writeReview(for: session)
+
         do {
             try recoveryStore.writeMetadata(session.metadata.closed(outcome, at: endedAt), to: session.layout)
         } catch {
             throw TranscriptPersistenceError(.recoveryMetadataFailed, underlying: error)
         }
+    }
+
+    /// Writes the review sidecar for a session that has just been closed.
+    ///
+    /// Best effort, and deliberately so. The sidecar is optional bookkeeping:
+    /// a meeting whose sidecar could not be written is a meeting with no review
+    /// information, which is exactly the state every session recorded before
+    /// this file existed is in and which History already handles. Failing a
+    /// meeting whose transcript and recording are both safely closed, over a
+    /// file that only makes a later convenience possible, would be the wrong
+    /// trade. Nothing is hidden by it either: History says plainly when a
+    /// session carries no review information.
+    ///
+    /// - Parameter session: The session that has just been flushed and closed.
+    private func writeReview(for session: OpenSession) {
+        let metadata = SessionReviewMetadata(
+            sessionID: session.metadata.sessionID,
+            recognizerConfidenceAvailable: session.sawRecognizerConfidence,
+            candidates: session.reviewCandidates
+        )
+        try? reviewStore.writeReview(metadata, to: session.layout)
     }
 
     /// Names the session's directory, stepping past names already in use.
