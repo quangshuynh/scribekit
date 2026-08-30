@@ -390,7 +390,7 @@ final class MeetingRuntime {
             return
         }
 
-        let startedAt = Date()
+        let startedAt = now()
         let session = request.makeSession(createdAt: startedAt)
         meeting = MeetingSnapshot(session: session, localeIdentifier: localeIdentifier)
         persistenceState = .preparing

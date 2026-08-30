@@ -179,6 +179,20 @@ nonisolated final class FakeAudioRetention: AudioRetaining, @unchecked Sendable 
         }
     }
 
+    /// How many frames of audio reached the retainer, over the whole session.
+    var appendedFrames: Int {
+        entries.reduce(into: 0) { total, entry in
+            if case let .appended(frames) = entry { total += frames }
+        }
+    }
+
+    /// How many times the recording was finalised.
+    var finishCount: Int {
+        entries.reduce(into: 0) { count, entry in
+            if case .finished = entry { count += 1 }
+        }
+    }
+
     /// Thrown by the next `startSession`.
     func failStart(with error: AudioRetentionError = AudioRetentionError(.cannotCreateAudioFile)) {
         state.withLock { $0.startError = error }
