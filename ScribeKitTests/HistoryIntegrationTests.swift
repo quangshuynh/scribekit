@@ -45,6 +45,8 @@ struct HistoryIntegrationTests {
     ///   - status: The status to record.
     ///   - retention: What the record says was kept of the audio.
     ///   - writesRecord: Whether to write `.scribekit/session.json` at all.
+    ///   - review: Raw bytes to write as `.scribekit/review.json`, or `nil`
+    ///     for a session with no review information at all.
     ///   - started: When the meeting began.
     /// - Returns: The session directory.
     @discardableResult
@@ -56,6 +58,7 @@ struct HistoryIntegrationTests {
         status: SessionRecoveryStatus = .completed,
         retention: AudioRetentionMode = .none,
         writesRecord: Bool = true,
+        review: Data? = nil,
         started: Date = TranscriptFixture.startedAt
     ) throws -> URL {
         let layout = SessionArtifactLayout(destination: destination, directoryName: name)
@@ -93,6 +96,11 @@ struct HistoryIntegrationTests {
                 endedAt: status == .completed ? started.addingTimeInterval(120) : nil
             )
             try record.encoded().write(to: layout.metadataURL)
+        }
+
+        if let review {
+            try FileManager.default.createDirectory(at: layout.metadataDirectory, withIntermediateDirectories: true)
+            try review.write(to: layout.reviewURL)
         }
         return layout.directory
     }
@@ -208,7 +216,14 @@ struct HistoryIntegrationTests {
                 in: destination,
                 title: "Closures Walkthrough",
                 texts: ["A closure captures the variables it refers to.", "Escaping closures outlive the call."],
-                retention: .raw
+                retention: .raw,
+                review: try SessionReviewMetadata(
+                    sessionID: UUID(),
+                    recognizerConfidenceAvailable: true,
+                    candidates: [TranscriptReviewCandidate(
+                        spanIndex: 1, startTime: 20, endTime: 24, confidence: 0.2, reasons: [.lowConfidence]
+                    )]
+                ).encoded()
             )
             try writeSession(
                 "2026-08-29-legacy",
@@ -227,7 +242,7 @@ struct HistoryIntegrationTests {
             try Data("# Damaged\n".utf8).write(to: damagedLayout.transcriptURL)
 
             let before = try fingerprints(of: destination)
-            #expect(before.count == 6)
+            #expect(before.count == 7)
 
             let service = makeService()
             let first = try await service.load(destination)
@@ -240,6 +255,68 @@ struct HistoryIntegrationTests {
             #expect(first == second)
             #expect(first.problems.map(\.error) == [.metadataMalformed])
             #expect(try fingerprints(of: destination) == before)
+        }
+    }
+
+    // MARK: - Review
+
+    @Test("A meeting's review sidecar is read back and points at the words the transcript has")
+    func reviewSidecarIsReadBack() async throws {
+        try await withSaveFolder { destination in
+            try writeSession(
+                "2026-08-29-closures-walkthrough",
+                in: destination,
+                title: "Closures Walkthrough",
+                texts: ["A closure captures the variables it refers to.", "Escaping closures outlive the call."],
+                retention: .raw,
+                review: try SessionReviewMetadata(
+                    sessionID: UUID(),
+                    recognizerConfidenceAvailable: true,
+                    candidates: [
+                        TranscriptReviewCandidate(
+                            spanIndex: 1, startTime: 20, endTime: 24, confidence: 0.2, reasons: [.lowConfidence]
+                        ),
+                        TranscriptReviewCandidate(
+                            spanIndex: 47, startTime: 900, endTime: 902, confidence: 0.1, reasons: [.lowConfidence]
+                        )
+                    ]
+                ).encoded()
+            )
+
+            let document = try #require(try await makeService().load(destination).documents.first)
+            let candidates = document.reviewCandidates
+
+            // The candidate naming a span the transcript does not have is
+            // dropped rather than shown against the wrong words.
+            #expect(candidates.count == 1)
+            #expect(candidates[0].candidate.spanIndex == 1)
+            #expect(candidates[0].span.text == "Escaping closures outlive the call.")
+            #expect(candidates[0].candidate.startTime == 20)
+            #expect(document.review?.recognizerConfidenceAvailable == true)
+        }
+    }
+
+    @Test("A session with no review sidecar, or a damaged one, is listed and searched normally", arguments: [
+        nil, Data("{ not json".utf8), Data(#"{"schemaVersion":99}"#.utf8)
+    ] as [Data?])
+    func reviewMetadataIsNeverLoadBearing(sidecar: Data?) async throws {
+        try await withSaveFolder { destination in
+            try writeSession(
+                "2026-08-29-closures-walkthrough",
+                in: destination,
+                title: "Closures Walkthrough",
+                texts: ["A closure captures the variables it refers to."],
+                review: sidecar
+            )
+
+            let report = try await makeService().load(destination)
+            let document = try #require(report.documents.first)
+
+            #expect(report.problems.isEmpty)
+            #expect(document.session.title == "Closures Walkthrough")
+            #expect(document.review == nil)
+            #expect(document.reviewCandidates.isEmpty)
+            #expect(TranscriptSearch.results(for: "closure", in: report.documents).count == 1)
         }
     }
 
