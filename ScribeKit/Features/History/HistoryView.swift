@@ -100,45 +100,75 @@ struct HistoryView: View {
                     .multilineTextAlignment(.center)
                     .accessibilityLabel("History unavailable. \(message)")
             }
-        } else {
-            List(selection: $selection) {
-                if !model.problems.isEmpty { problemsSection }
-                if model.results.isEmpty {
+        } else if model.results.isEmpty {
+            VStack(spacing: 0) {
+                problemsList
+                centred {
                     Text(model.sessionCount == 0
                          ? "No meetings in the save folder yet."
                          : "No meeting matches “\(model.query)”.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(model.results) { result in
-                        row(for: result).tag(result.id)
-                    }
+                        .multilineTextAlignment(.center)
                 }
             }
-            .listStyle(.sidebar)
+        } else {
+            VStack(spacing: 0) {
+                problemsList
+                List(model.results, selection: $selection) { result in
+                    row(for: result)
+                }
+                .listStyle(.sidebar)
+            }
         }
     }
 
-    /// The session directories ScribeKit clearly wrote but could not describe.
+    /// The damaged session directories, above the meetings that did load.
     ///
-    /// They are shown rather than dropped: a damaged record is evidence about
-    /// a meeting, and silently omitting it would tell the user their history
-    /// is complete when it is not. Nothing here offers to repair one.
-    private var problemsSection: some View {
-        Section("Could Not Be Read") {
-            ForEach(model.problems) { problem in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(problem.name)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text(problem.error.errorDescription ?? "")
-                        .font(.caption)
+    /// They sit outside the selectable list because there is nothing to select:
+    /// ScribeKit could not describe them, so it has no detail to show. They are
+    /// shown rather than dropped, because silently omitting a session ScribeKit
+    /// clearly wrote would tell the user their history is complete when it is
+    /// not.
+    @ViewBuilder
+    private var problemsList: some View {
+        if !model.problems.isEmpty {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Could Not Be Read")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
+                    ForEach(model.problems) { problem in
+                        problemRow(for: problem)
+                    }
                 }
-                .accessibilityElement(children: .combine)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
             }
+            .frame(maxHeight: 160)
+            Divider()
         }
+    }
+
+    /// One session directory ScribeKit could not describe.
+    ///
+    /// Nothing here offers to repair one. The record was left exactly as it
+    /// was found.
+    ///
+    /// - Parameter problem: What was wrong, and where.
+    /// - Returns: The row view.
+    private func problemRow(for problem: HistoryProblem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(problem.name)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(problem.error.errorDescription ?? "")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     /// One matching meeting.
