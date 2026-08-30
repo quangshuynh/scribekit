@@ -19,7 +19,8 @@ nonisolated final class FakeSessionRecoveryStore: SessionRecoveryStoring, @unche
     private struct State {
         var directories: [String: [URL]] = [:]
         var metadata: [String: Data] = [:]
-        var transcripts: [String: TranscriptFileInfo] = [:]
+        var transcripts: [String: SessionFileInfo] = [:]
+        var audio: [String: SessionFileInfo] = [:]
         var unreadableTranscripts: Set<String> = []
         var appends: [(url: URL, text: String)] = []
         var writes: [SessionRecoveryMetadata] = []
@@ -49,7 +50,7 @@ nonisolated final class FakeSessionRecoveryStore: SessionRecoveryStoring, @unche
         _ directory: URL,
         in destination: URL,
         metadata: SessionRecoveryMetadata?,
-        transcript: TranscriptFileInfo? = TranscriptFileInfo(byteCount: 512, modifiedAt: nil)
+        transcript: SessionFileInfo? = SessionFileInfo(byteCount: 512, modifiedAt: nil)
     ) throws {
         try addSession(
             directory,
@@ -71,7 +72,7 @@ nonisolated final class FakeSessionRecoveryStore: SessionRecoveryStoring, @unche
         _ directory: URL,
         in destination: URL,
         rawMetadata: Data?,
-        transcript: TranscriptFileInfo? = TranscriptFileInfo(byteCount: 512, modifiedAt: nil)
+        transcript: SessionFileInfo? = SessionFileInfo(byteCount: 512, modifiedAt: nil)
     ) throws {
         let layout = SessionArtifactLayout(directory: directory)
         state.withLock { state in
@@ -79,6 +80,15 @@ nonisolated final class FakeSessionRecoveryStore: SessionRecoveryStoring, @unche
             if let rawMetadata { state.metadata[Self.key(layout.metadataURL)] = rawMetadata }
             if let transcript { state.transcripts[Self.key(layout.transcriptURL)] = transcript }
         }
+    }
+
+    /// Adds a retained recording beside a session's transcript.
+    ///
+    /// - Parameters:
+    ///   - info: The recording's size and modification date.
+    ///   - url: Where the recording is.
+    func addAudio(_ info: SessionFileInfo, at url: URL) {
+        state.withLock { $0.audio[Self.key(url)] = info }
     }
 
     /// Makes listing the save folder fail, as an unreachable volume would.
@@ -164,7 +174,7 @@ nonisolated final class FakeSessionRecoveryStore: SessionRecoveryStoring, @unche
         }
     }
 
-    func transcriptInfo(at url: URL) throws -> TranscriptFileInfo {
+    func transcriptInfo(at url: URL) throws -> SessionFileInfo {
         try state.withLock { state in
             if state.unreadableTranscripts.contains(Self.key(url)) {
                 throw SessionRecoveryError.transcriptUnreadable
@@ -174,6 +184,10 @@ nonisolated final class FakeSessionRecoveryStore: SessionRecoveryStoring, @unche
             }
             return info
         }
+    }
+
+    func audioInfo(at url: URL) -> SessionFileInfo? {
+        state.withLock { $0.audio[Self.key(url)] }
     }
 
     func appendToTranscript(_ text: String, at url: URL) throws {

@@ -28,6 +28,13 @@ import Foundation
 /// once more when the session ends. There is no timer and no flush per audio
 /// buffer.
 ///
+/// The audio file a session may also keep is not written here. The store owns
+/// the transcript, the record and the folder lease, and that lease is what a
+/// retained recording is written under — which is why the recording is closed
+/// before ``finishSession(endedAt:outcome:)`` is called, and why a recording
+/// that could not be finalised reaches this type as
+/// ``SessionCompletionOutcome/failed`` rather than as a completion.
+///
 /// Beside the transcript the store keeps one small operational record,
 /// `.scribekit/session.json`, so a meeting that ends without ScribeKit is
 /// recognisable as unfinished the next time it launches. The record is written
@@ -136,6 +143,8 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
                 startedAt: startedAt,
                 sourceNames: session.selectedSources.map(\.displayName),
                 localeIdentifier: localeIdentifier,
+                audioRetention: session.audioRetention,
+                audioPath: layout.audioURL(for: session.audioRetention)?.lastPathComponent,
                 status: .inProgress
             )
             do {

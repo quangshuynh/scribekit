@@ -24,13 +24,26 @@ nonisolated struct SessionRecoveryCandidate: Identifiable, Equatable, Sendable {
     let destination: URL
 
     /// The transcript as the filesystem describes it.
-    let transcript: TranscriptFileInfo
+    let transcript: SessionFileInfo
+
+    /// The retained recording as the filesystem describes it, when the session
+    /// was keeping one and the file is there.
+    ///
+    /// It is measured, never opened: a recording a killed process left behind
+    /// may or may not play, and ScribeKit reports its size rather than a
+    /// promise it has not verified.
+    let retainedAudio: SessionFileInfo?
 
     /// The session's own identity, so a list of candidates is stable.
     var id: UUID { metadata.sessionID }
 
     /// Where the transcript is.
     var transcriptURL: URL { metadata.transcriptURL(in: layout.directory) }
+
+    /// Where the retained recording is, when there is one to point at.
+    var retainedAudioURL: URL? {
+        retainedAudio == nil ? nil : metadata.audioURL(in: layout.directory)
+    }
 
     /// Creates a candidate.
     ///
@@ -39,16 +52,20 @@ nonisolated struct SessionRecoveryCandidate: Identifiable, Equatable, Sendable {
     ///   - layout: Where its artifacts live.
     ///   - destination: The save folder it was found in.
     ///   - transcript: The transcript's size and modification date.
+    ///   - retainedAudio: The recording's size and modification date, when the
+    ///     session kept one and it is still there.
     init(
         metadata: SessionRecoveryMetadata,
         layout: SessionArtifactLayout,
         destination: URL,
-        transcript: TranscriptFileInfo
+        transcript: SessionFileInfo,
+        retainedAudio: SessionFileInfo? = nil
     ) {
         self.metadata = metadata
         self.layout = layout
         self.destination = destination
         self.transcript = transcript
+        self.retainedAudio = retainedAudio
     }
 }
 
@@ -157,8 +174,9 @@ actor SessionRecoveryService {
     /// session ScribeKit recorded and is passed over in silence; every other
     /// way of failing to read a record is reported.
     ///
-    /// Nothing is written and no transcript is opened for reading, so a scan
-    /// leaves every byte of every transcript exactly as it found it.
+    /// Nothing is written, no transcript is opened for reading and no recording
+    /// is decoded, so a scan leaves every byte of every artifact exactly as it
+    /// found it — a partly written audio file included.
     ///
     /// - Parameter destination: The folder the user chose, restored from its
     ///   security-scoped bookmark.
@@ -191,7 +209,8 @@ actor SessionRecoveryService {
                         metadata: metadata,
                         layout: layout,
                         destination: destination,
-                        transcript: transcript
+                        transcript: transcript,
+                        retainedAudio: metadata.audioURL(in: directory).flatMap(store.audioInfo)
                     ))
                 } catch let error as SessionRecoveryError {
                     problems.append(SessionRecoveryProblem(directory: directory, error: error))

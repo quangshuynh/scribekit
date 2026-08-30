@@ -48,6 +48,13 @@ nonisolated enum SessionRecoveryStatus: String, Codable, Sendable, CaseIterable,
 /// The record is versioned from its first release. ``schemaVersion`` is read
 /// before anything else is interpreted, so a file written by a later ScribeKit
 /// is refused rather than misread as this one.
+///
+/// ``audioRetention`` and ``audioPath`` were added after version 1 was in use
+/// and the version was deliberately not raised. Both are optional and additive:
+/// a record written before they existed decodes with them absent, which is the
+/// truth about a session that kept no audio, and a build that has never heard
+/// of them ignores the two extra keys. Raising the version would have made
+/// every earlier session unreadable in exchange for nothing.
 nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
 
     /// The schema version this build writes and is able to read.
@@ -73,6 +80,19 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
 
     /// The transcript's path relative to the session directory.
     let transcriptPath: String
+
+    /// What the meeting was asked to keep of its audio.
+    ///
+    /// Recorded because it is not discoverable afterwards: a meeting that was
+    /// keeping audio and was killed before its first captured buffer leaves a
+    /// session directory that looks exactly like one that was keeping none.
+    /// `nil` in records written before audio retention existed.
+    let audioRetention: AudioRetentionMode?
+
+    /// The retained recording's path relative to the session directory, when
+    /// the session was keeping one. `nil` otherwise, and no claim that the
+    /// file is there or that it plays.
+    let audioPath: String?
 
     /// Where the session stands.
     let status: SessionRecoveryStatus
@@ -103,6 +123,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - localeIdentifier: The BCP-47 recognition locale.
     ///   - transcriptPath: The transcript's path relative to the session
     ///     directory.
+    ///   - audioRetention: What the meeting was asked to keep of its audio.
+    ///   - audioPath: The recording's path relative to the session directory.
     ///   - status: Where the session stands.
     ///   - endedAt: When ScribeKit closed the session, if it did.
     ///   - interruptedAt: When ScribeKit recorded an interruption, if it has.
@@ -114,6 +136,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         sourceNames: [String],
         localeIdentifier: String,
         transcriptPath: String = SessionArtifactLayout.transcriptFileName,
+        audioRetention: AudioRetentionMode? = nil,
+        audioPath: String? = nil,
         status: SessionRecoveryStatus,
         endedAt: Date? = nil,
         interruptedAt: Date? = nil
@@ -125,6 +149,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         self.sourceNames = sourceNames
         self.localeIdentifier = localeIdentifier
         self.transcriptPath = transcriptPath
+        self.audioRetention = audioRetention
+        self.audioPath = audioPath
         self.status = status
         self.endedAt = endedAt
         self.interruptedAt = interruptedAt
@@ -157,6 +183,16 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         directory.appending(path: transcriptPath, directoryHint: .notDirectory)
     }
 
+    /// Where the retained recording would be, given the session's directory.
+    ///
+    /// - Parameter directory: The session directory the record was read from.
+    /// - Returns: The recording's location, or `nil` when the session was
+    ///   keeping no audio. This is arithmetic on a path; it says nothing about
+    ///   whether a file is there.
+    func audioURL(in directory: URL) -> URL? {
+        audioPath.map { directory.appending(path: $0, directoryHint: .notDirectory) }
+    }
+
     /// Builds a copy with a different lifecycle position.
     ///
     /// - Parameters:
@@ -177,6 +213,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
             sourceNames: sourceNames,
             localeIdentifier: localeIdentifier,
             transcriptPath: transcriptPath,
+            audioRetention: audioRetention,
+            audioPath: audioPath,
             status: status,
             endedAt: endedAt,
             interruptedAt: interruptedAt
@@ -256,14 +294,16 @@ nonisolated extension SessionRecoveryMetadata {
 /// How a meeting ended, as the writer reports it to the session record.
 ///
 /// The two cases are not interchangeable. ``completed`` may only be recorded
-/// once the transcript has been flushed and closed successfully; ``failed``
-/// says the meeting ended because saving stopped working, which is a different
-/// thing to tell a user than a meeting that vanished.
+/// once every durable artifact the meeting enabled — the transcript, and the
+/// retained recording when there is one — has been finished successfully;
+/// ``failed`` says the meeting ended because one of them stopped working,
+/// which is a different thing to tell a user than a meeting that vanished.
 nonisolated enum SessionCompletionOutcome: Equatable, Sendable {
-    /// The transcript was finished normally.
+    /// Every durable artifact was finished normally.
     case completed
 
-    /// The meeting was ended because the transcript could not be saved.
+    /// The meeting ended because a durable artifact could not be saved or
+    /// could not be finalised.
     case failed
 
     /// The status this outcome is recorded as.
