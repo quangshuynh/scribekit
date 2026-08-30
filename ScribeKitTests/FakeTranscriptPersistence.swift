@@ -34,6 +34,7 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         var pauseError: TranscriptPersistenceError?
         var startDelay: Duration = .zero
         var onFinish: (@Sendable () -> Void)?
+        var finishCapturedDurations: [Double] = []
     }
 
     private let state = Mutex(State())
@@ -48,6 +49,9 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
     var segments: [TranscriptSegment] {
         entries.compactMap { if case let .segment(segment) = $0 { segment } else { nil } }
     }
+
+    /// The captured durations the closing footer was told to state, in order.
+    var finishCapturedDurations: [Double] { state.withLock { $0.finishCapturedDurations } }
 
     /// The gaps that reached durable storage.
     var gaps: [TranscriptGap] {
@@ -160,6 +164,7 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
             guard state.isOpen else { return TranscriptPersistenceError(.noSessionInProgress) }
             state.isOpen = false
             state.entries.append(.finished(outcome))
+            state.finishCapturedDurations.append(capturedDuration)
             return state.finishError
         }
         if let error { throw error }

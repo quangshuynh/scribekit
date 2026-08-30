@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- A recogniser that restarts itself no longer restarts the transcript's
+  timeline with it. A new recognition run counts its own offsets from its own
+  first frame, and those offsets were being written to the transcript as they
+  arrived, so every span after a mid-meeting restart claimed a position near
+  the start of the meeting: offsets went backwards, wall-clock timestamps went
+  backwards with them, and review playback would have sought to the wrong
+  second of the recording. The run's offsets are now rebased onto the meeting's
+  own media timeline, and the base changes only once every event the previous
+  run published has been handled, so a report the old run made on its way out
+  is not moved onto the new run's timeline.
+- A recogniser that cannot be brought back now ends the meeting. Recognition
+  that stopped for good left capture running, the transcript and the recording
+  open and the App Nap assertion held, indefinitely and with nothing in the
+  transcript accounting for the untranscribed stretch; because the runtime
+  still considered a meeting active, no further meeting could be started in
+  that process. Capture is stopped, the artifacts are closed and kept, and the
+  session is recorded as failed.
+- A start that fails after the transcript was created is recorded as failed
+  rather than completed. A meeting that could not start recognition or capture
+  never captured a second, and History listed its empty transcript under the
+  same status as a meeting that ran and finished.
+- A pause whose marker cannot be written now closes the retained recording.
+  The transcript failure already ended the meeting, but because capture and
+  recognition had already stopped at the pause boundary, the recording's writer
+  was left open for the life of the process, the activity assertion was never
+  released, and the runtime never returned to idle.
+
 ### Added
 
 - User-derived meeting state in `.scribekit/derived.json`: local Markdown notes

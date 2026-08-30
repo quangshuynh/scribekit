@@ -129,6 +129,20 @@ final class MeetingRuntime {
     /// so a pause adds nothing to it; wall-clock time is mapped separately.
     private var mediaOffsetBase: Double = 0
 
+    /// The base a recognition run started mid-capture must use, and the
+    /// handled-event count at which it may take effect.
+    ///
+    /// A pause can change ``mediaOffsetBase`` the moment it has drained,
+    /// because by then every event the old run published has been handled. A
+    /// recogniser that restarted itself cannot: the restart happens inside the
+    /// handler for the event that reported the failure, so it cannot wait for
+    /// that event — or for the trailing report the old run publishes as it
+    /// closes — without waiting for itself. The change is therefore scheduled
+    /// at exactly the count a drain would have waited for, and applied by
+    /// ``completeHandling()``, so an event still on the old run's timeline is
+    /// never rebased onto the new one.
+    private var pendingMediaOffsetBase: (base: Double, afterHandledEvents: Int)?
+
     /// The capture configuration the meeting started with.
     ///
     /// A resume rebuilds the stream from this rather than from the setup
@@ -401,6 +415,7 @@ final class MeetingRuntime {
         droppedEventBaseline = transcriber.eventTally.dropped
         mediaClock.reset()
         mediaOffsetBase = 0
+        pendingMediaOffsetBase = nil
         pausedAt = nil
         pauseFailureMessage = nil
         monitor.reset()
@@ -449,7 +464,10 @@ final class MeetingRuntime {
         } catch {
             transcriptionState = .failed(message: message(for: error, sources: request.sources))
             captureState = .idle
-            await closeSession()
+            // Nothing was captured, so the meeting did not finish: it never
+            // began. Recording it as completed would list an empty transcript
+            // in History under the status a meeting that ran and closed gets.
+            await closeSession(outcome: .failed)
             await refreshAvailability()
             return
         }
@@ -461,7 +479,7 @@ final class MeetingRuntime {
             await transcriber.stop()
             transcriptionState = .idle
             captureState = .failed(message: message(for: error, sources: request.sources))
-            await closeSession()
+            await closeSession(outcome: .failed)
         }
     }
 
@@ -497,6 +515,7 @@ final class MeetingRuntime {
         // clock, so a pause adds nothing to the transcript's own timeline.
         let captured = mediaClock.seconds
         mediaOffsetBase = captured
+        pendingMediaOffsetBase = nil
 
         let date = now()
         guard persistenceState.isActive else {
@@ -768,6 +787,10 @@ final class MeetingRuntime {
     /// was waiting for it.
     private func completeHandling() {
         handledEventCount += 1
+        if let pending = pendingMediaOffsetBase, handledEventCount >= pending.afterHandledEvents {
+            mediaOffsetBase = pending.base
+            pendingMediaOffsetBase = nil
+        }
         guard let target = drainTarget, handledEventCount >= target else { return }
         let waiting = drainContinuations
         drainTarget = nil
@@ -839,7 +862,15 @@ final class MeetingRuntime {
     /// The subsystems return to idle without a failure of their own, because
     /// nothing failed in them; ``persistenceState`` carries the reason.
     private func stopSubsystemsAfterPersistenceFailure() {
-        guard canStop else { return }
+        guard canStop else {
+            // A pause reached its drained boundary and then could not write
+            // its marker: capture and recognition have already stopped, and
+            // the recording is the only thing still open. Closing it here is
+            // what keeps the meeting from staying "running" for the rest of
+            // the process's life with a writer nothing will ever finish.
+            _ = finishRetainedAudio()
+            return
+        }
         captureState = .stopping
         transcriptionState = .stopping
         Task { @MainActor [weak self] in
@@ -867,6 +898,7 @@ final class MeetingRuntime {
             transcriptionState = .failed(
                 message: "Speech recognition stopped repeatedly and was not restarted again."
             )
+            endMeetingAfterRecognitionFailure()
             return
         }
 
@@ -874,15 +906,47 @@ final class MeetingRuntime {
         transcriptionState = .recovering
         let startedRecovery = Date()
         await transcriber.stop()
+        var restartFailed = false
         do {
             try await transcriber.start(configuration: configuration)
             transcriptionState = .transcribing
+            // The new run counts from its own first frame again, so its
+            // offsets are short by everything captured before it started.
+            pendingMediaOffsetBase = (mediaClock.seconds, transcriber.eventTally.published)
         } catch {
+            restartFailed = true
             transcriptionState = .failed(message: message(for: error, sources: []))
         }
         let lost = Date().timeIntervalSince(startedRecovery)
         transcript.apply(.interrupted(.audioDropped(seconds: lost)))
         await persist(TranscriptGap(duration: lost, reason: .recognizerRestarted))
+        if restartFailed { endMeetingAfterRecognitionFailure() }
+    }
+
+    /// Ends a meeting whose recogniser cannot be brought back.
+    ///
+    /// Capture is stopped, the recogniser's run is closed, the events already
+    /// published are handled, and the artifacts are closed and recorded as a
+    /// failure. Leaving capture running would hold the capture stream, the
+    /// retained recording and the process activity assertion for a meeting
+    /// nothing is transcribing, and would close the transcript over an
+    /// arbitrarily long stretch that no marker in it accounts for.
+    ///
+    /// ``transcriptionState`` is left as it is: it carries why the meeting
+    /// ended, and nothing else records that.
+    private func endMeetingAfterRecognitionFailure() {
+        guard captureState.isActive || persistenceState.isActive || audioRetentionState.isActive else {
+            return
+        }
+        captureState = .stopping
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await capturer.stop()
+            captureState = .idle
+            await transcriber.stop()
+            await drainPendingEvents()
+            await closeSession(outcome: .failed)
+        }
     }
 
     /// Records the capture system ending a stream by itself, stops recognition

@@ -462,7 +462,11 @@ ScribeKit session record has no identity to attach notes to, and says so.
   audio is dropped to keep memory bounded and the lost time is reported as a
   gap in the transcript.
 - A recogniser that stops by itself is restarted at most twice; audio arriving
-  during a restart is not transcribed and is counted as a gap.
+  during a restart is not transcribed and is counted as a gap, and a restarted
+  run's spans keep the meeting's own offsets rather than starting again at
+  zero. A recogniser that cannot be brought back ends the meeting: capture
+  stops, the transcript and the recording are closed and kept, and the session
+  is recorded as failed rather than left capturing audio nothing transcribes.
 - ScreenCaptureKit has no audio-only stream, so the capture filter names a
   display as well as the selected applications. No screen output is added, so
   no frame is delivered or processed, but the permission macOS asks for is the
