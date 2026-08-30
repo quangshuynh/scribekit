@@ -21,6 +21,7 @@ nonisolated final class FakeHistoryStore: HistoryStoring, @unchecked Sendable {
         var metadata: [String: Data] = [:]
         var files: [String: SessionFileInfo] = [:]
         var transcripts: [String: String] = [:]
+        var review: [String: Data] = [:]
         var unreadableMetadata: Set<String> = []
         var unreadableTranscripts: Set<String> = []
         var listingFails = false
@@ -106,6 +107,20 @@ nonisolated final class FakeHistoryStore: HistoryStoring, @unchecked Sendable {
     }
 
     /// Makes listing the save folder fail, as an unreachable volume would.
+    /// Plants the raw bytes of a session's review sidecar.
+    ///
+    /// Bytes rather than a value so a test can plant a damaged sidecar, which
+    /// is what a folder actually holds when one goes wrong.
+    ///
+    /// - Parameters:
+    ///   - data: The sidecar's contents.
+    ///   - directory: The session directory it belongs to.
+    func addReview(_ data: Data, to directory: URL) {
+        state.withLock {
+            $0.review[Self.key(SessionArtifactLayout(directory: directory).reviewURL)] = data
+        }
+    }
+
     func failListing() { state.withLock { $0.listingFails = true } }
 
     /// Makes one session record present but impossible to read.
@@ -153,6 +168,10 @@ nonisolated final class FakeHistoryStore: HistoryStoring, @unchecked Sendable {
             if state.unreadableMetadata.contains(Self.key(url)) { throw HistoryError.metadataUnreadable }
             return data
         }
+    }
+
+    func reviewData(at url: URL) -> Data? {
+        state.withLock { $0.review[Self.key(url)] }
     }
 
     func fileInfo(at url: URL) -> SessionFileInfo? {

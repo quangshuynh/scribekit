@@ -270,6 +270,16 @@ nonisolated struct TranscriptSearchDocument: Identifiable, Equatable, Sendable {
     /// The session the text belongs to.
     let session: HistorySession
 
+    /// What the meeting observed about its own recognition, when a readable
+    /// review sidecar was beside the transcript.
+    ///
+    /// `nil` for every session recorded before review metadata existed, for a
+    /// session whose sidecar could not be written, and for one whose sidecar
+    /// this build cannot interpret. All three mean the same thing to the
+    /// interface: there is no review information for this meeting, and
+    /// everything else about it works normally.
+    let review: SessionReviewMetadata?
+
     /// The finalised spans, in the order the transcript wrote them.
     ///
     /// Only recognised speech. Header fields, minute headings, gap
@@ -286,8 +296,24 @@ nonisolated struct TranscriptSearchDocument: Identifiable, Equatable, Sendable {
     /// - Parameters:
     ///   - session: The session the text belongs to.
     ///   - spans: The finalised spans.
-    init(session: HistorySession, spans: [TranscriptSpan]) {
+    ///   - review: What the meeting observed about its own recognition.
+    init(session: HistorySession, spans: [TranscriptSpan], review: SessionReviewMetadata? = nil) {
         self.session = session
         self.spans = spans
+        self.review = review
+    }
+
+    /// The review candidates that name a span this transcript actually has,
+    /// in transcript order, each paired with the words it points at.
+    ///
+    /// A candidate naming a span the document does not contain is dropped
+    /// rather than shown against the wrong words: review points at the
+    /// transcript, so a sidecar that disagrees with it loses.
+    var reviewCandidates: [(candidate: TranscriptReviewCandidate, span: TranscriptSpan)] {
+        guard let review else { return [] }
+        return review.orderedCandidates.compactMap { candidate in
+            guard candidate.spanIndex >= 0, candidate.spanIndex < spans.count else { return nil }
+            return (candidate, spans[candidate.spanIndex])
+        }
     }
 }

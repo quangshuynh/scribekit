@@ -40,6 +40,8 @@ struct HistoryView: View {
             detail
         }
         .task { await model.load() }
+        .onDisappear { model.stopPlayback() }
+        .onChange(of: selection) { _, _ in model.stopPlayback() }
         .onChange(of: runtime.status.isActive) { wasActive, isActive in
             guard wasActive, !isActive else { return }
             Task { await model.load() }

@@ -188,7 +188,25 @@ actor HistoryService {
             audioRetention: metadata.audioRetention,
             audio: metadata.audioURL(in: directory).flatMap(audio(at:))
         )
-        return TranscriptSearchDocument(session: session, spans: document.spans)
+        return TranscriptSearchDocument(
+            session: session,
+            spans: document.spans,
+            review: review(at: layout.reviewURL)
+        )
+    }
+
+    /// Reads a session's review sidecar, if there is one this build can read.
+    ///
+    /// Review metadata is optional and never load-bearing. A missing,
+    /// unreadable, damaged or newer-format sidecar produces `nil` and the
+    /// session is listed, opened and searched exactly as it would be
+    /// otherwise; nothing is reported as a problem and nothing is repaired.
+    ///
+    /// - Parameter url: Where the sidecar would be.
+    /// - Returns: What the meeting observed, or `nil`.
+    private func review(at url: URL) -> SessionReviewMetadata? {
+        guard let data = store.reviewData(at: url) else { return nil }
+        return try? SessionReviewMetadata.decoded(from: data)
     }
 
     /// Describes a session directory that holds no record.
@@ -231,7 +249,11 @@ actor HistoryService {
             audioRetention: nil,
             audio: legacyAudio(in: layout)
         )
-        return TranscriptSearchDocument(session: session, spans: document.spans)
+        return TranscriptSearchDocument(
+            session: session,
+            spans: document.spans,
+            review: review(at: layout.reviewURL)
+        )
     }
 
     /// Finds a recording beside a transcript that has no record naming one.
