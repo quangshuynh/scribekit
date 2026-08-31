@@ -27,6 +27,10 @@ struct MainPresentationScene: View {
     /// The application's meeting owner, shared with the menu bar.
     let runtime: MeetingRuntime
 
+    /// Assembles and saves diagnostic reports, passed through in the same way
+    /// and for the same reason: the scene holds neither.
+    let diagnostics: MeetingDiagnostics
+
     /// Whether the window is on screen. Owned here rather than by the
     /// application object because it describes this scene's window and nothing
     /// else the application does.
@@ -36,7 +40,7 @@ struct MainPresentationScene: View {
         ZStack {
             MainWindowReader(presence: presence)
             if presence.isPresenting {
-                ScribeKitRootView(runtime: runtime)
+                ScribeKitRootView(runtime: runtime, diagnostics: diagnostics)
             }
         }
         .frame(minWidth: 620, minHeight: 560)

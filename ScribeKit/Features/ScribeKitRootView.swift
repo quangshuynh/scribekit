@@ -22,18 +22,24 @@ struct ScribeKitRootView: View {
     /// The application's meeting owner, shared with the menu bar.
     let runtime: MeetingRuntime
 
+    /// Assembles and saves diagnostic reports.
+    let diagnostics: MeetingDiagnostics
+
     @State private var selection = ScribeKitTabSelection()
 
     /// Creates the window's content.
     ///
-    /// - Parameter runtime: The application's meeting owner.
-    init(runtime: MeetingRuntime) {
+    /// - Parameters:
+    ///   - runtime: The application's meeting owner.
+    ///   - diagnostics: The application's diagnostics owner.
+    init(runtime: MeetingRuntime, diagnostics: MeetingDiagnostics) {
         self.runtime = runtime
+        self.diagnostics = diagnostics
     }
 
     var body: some View {
         TabView(selection: Bindable(selection).tab) {
-            MeetingSetupView(runtime: runtime)
+            MeetingSetupView(runtime: runtime, diagnostics: diagnostics)
                 .tabItem { Label(ScribeKitTab.meeting.title, systemImage: ScribeKitTab.meeting.systemImage) }
                 .accessibilityLabel(ScribeKitTab.meeting.title)
                 .tag(ScribeKitTab.meeting)
@@ -48,5 +54,6 @@ struct ScribeKitRootView: View {
 }
 
 #Preview {
-    ScribeKitRootView(runtime: MeetingRuntime())
+    let runtime = MeetingRuntime()
+    ScribeKitRootView(runtime: runtime, diagnostics: MeetingDiagnostics(runtime: runtime))
 }

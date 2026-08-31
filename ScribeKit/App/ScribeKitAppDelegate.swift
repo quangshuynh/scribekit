@@ -19,6 +19,13 @@ final class ScribeKitAppDelegate: NSObject, NSApplicationDelegate {
     /// The one meeting the application can be running.
     let runtime = MeetingRuntime()
 
+    /// Assembles and saves diagnostic reports about it.
+    ///
+    /// Here for the reason the meeting is: a report has to be exportable with
+    /// the window closed, and the window's own state cannot be what makes that
+    /// possible.
+    private(set) lazy var diagnostics = MeetingDiagnostics(runtime: runtime)
+
     /// What quitting does while a meeting is running.
     private lazy var quit = MeetingQuitCoordinator(
         runtime: runtime,
