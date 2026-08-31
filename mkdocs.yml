@@ -1,0 +1,136 @@
+site_name: ScribeKit
+site_description: >-
+  Native macOS app for live, local-first meeting transcription with selective
+  app audio capture and durable Markdown output.
+site_url: https://quangshuynh.github.io/scribekit/
+site_author: quangshuynh
+
+repo_url: https://github.com/quangshuynh/scribekit
+repo_name: quangshuynh/scribekit
+edit_uri: edit/main/docs/
+
+copyright: Licensed under the MIT License
+
+# Anchors and unrecognised links are only INFO by default, so a strict build
+# would not catch a cross-reference pointing at a heading that moved. Both are
+# raised to warnings so that `mkdocs build --strict` fails on them.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  # The app icon is a transparent PNG, so one asset reads against both the
+  # light and the dark header.
+  logo: images/scribekit-logo2.png
+  favicon: images/scribekit-logo2.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    # Top-level sections become tabs and the second level becomes the sidebar,
+    # which is what keeps seven sections navigable.
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - stylesheets/scribekit.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        # Mermaid renders natively on GitHub and through this fence in
+        # Material, so one diagram source works in both places.
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/quangshuynh/scribekit
+      name: ScribeKit on GitHub
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Requirements: getting-started/requirements.md
+      - Build & Run: getting-started/build-and-run.md
+      - First Meeting: getting-started/first-meeting.md
+      - Save Location: getting-started/save-location.md
+      - Audio Retention: getting-started/audio-retention.md
+  - Using ScribeKit:
+      - Capturing App Audio: using/capturing-app-audio.md
+      - Live Transcription: using/live-transcription.md
+      - Pause & Resume: using/pause-and-resume.md
+      - Background Operation: using/background-operation.md
+      - History & Search: using/history-and-search.md
+      - Review & Playback: using/review-and-playback.md
+      - Meeting Notes: using/meeting-notes.md
+      - Recovery: using/recovery.md
+  - How It Works:
+      - Architecture: internals/architecture.md
+      - Meeting Lifecycle: internals/meeting-lifecycle.md
+      - Audio Capture: internals/audio-capture.md
+      - On-device Speech: internals/on-device-speech.md
+      - Transcript Persistence: internals/transcript-persistence.md
+      - Two-clock Timeline: internals/two-clock-timeline.md
+      - Session Artifacts: internals/session-artifacts.md
+      - Presentation Lifecycle: internals/presentation-lifecycle.md
+  - Reliability:
+      - Failure Semantics: reliability/failure-semantics.md
+      - Crash Recovery: reliability/crash-recovery.md
+      - Performance & Energy Evidence: PERFORMANCE.md
+  - Privacy & Data:
+      - Local-first Model: privacy/local-first.md
+      - Data Handling: privacy/data-handling.md
+      - Permissions: privacy/permissions.md
+      - Network Policy: privacy/network-policy.md
+  - Development:
+      - Building: development/building.md
+      - Testing: development/testing.md
+      - Architecture Boundaries: development/architecture-boundaries.md
+      - Documentation: development/documentation.md
+      - Contributing: development/contributing.md
+  - Reference:
+      - Transcript Format: reference/transcript-format.md
+      - Session Metadata: reference/session-metadata.md
+      - Review Metadata: reference/review-metadata.md
+      - Derived Metadata: reference/derived-metadata.md
+      - Limitations: reference/limitations.md
+      - Releases: reference/releases.md
