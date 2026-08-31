@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- A meeting with the window on screen does less work. The elapsed clock, the
+  capture activity summary and the live transcript were all read inside the
+  setup screen's own body, so each of about eight updates a second — the
+  recogniser publishes roughly 4.8, the capture summary two, the clock one —
+  rebuilt all seven sections of the form. Those three now have views of their
+  own. Measured on an M1, a visible meeting fell from about 25% of one core to
+  about 23%, against a 7.1% floor with no view on screen; hiding the window
+  saves only two to three points, which is a separate finding recorded in
+  `docs/PERFORMANCE.md` rather than something this change addresses.
+
 ### Fixed
 
 - Long meetings no longer die between twenty and twenty-six minutes. The
