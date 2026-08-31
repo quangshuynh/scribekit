@@ -82,6 +82,13 @@ session, or has changed since it was loaded; none of that stops the meeting
 from listing, opening or being searched. Access to the user's folder is opened
 for the length of one read or one write and closed again.
 
+Human-readable wall-clock times in a transcript state their period. A written
+time is read on its own — quoted, searched, seen halfway down a long document —
+so it carries `AM` or `PM` itself rather than depending on a heading above it,
+in one deterministic twelve-hour form that no locale setting can vary or
+abbreviate away. Files already written are not rewritten to match; a reader
+accepts what earlier versions wrote.
+
 A meeting has two clocks and they are not interchangeable. Captured media time
 advances only while capture is running; wall-clock time does not stop when
 capture does. Transcript offsets, retained audio and anything that seeks into
@@ -171,6 +178,15 @@ Presentation may be throttled or skipped while the interface is hidden;
 capture, recognition and persistence may not. Whatever the window is doing,
 audio is captured, speech is recognised, and finalised text and retained audio
 reach their files at full reliability.
+
+A window that is not on screen owns no interface. A closed scene whose view
+graph stays installed is still observed, still evaluated and still laid out, so
+the hierarchy is released when the window goes and built again when it comes
+back — and it is built from the meeting rather than from anything the previous
+one left behind. Presentation may skip any number of intermediate render states
+it was not there for; canonical meeting state and durable artifacts may skip
+nothing. Nothing that ends, pauses, finalises or observes a meeting may live in
+that hierarchy, and no presentation object may be what keeps a meeting alive.
 
 ## Privacy
 

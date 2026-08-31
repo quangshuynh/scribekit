@@ -6,6 +6,35 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- A meeting with the main window closed no longer pays for an interface.
+  Closing a SwiftUI `Window` scene leaves its view graph installed: the
+  hierarchy kept observing the meeting, kept having its bodies evaluated and
+  kept being laid out on the display cycle, which is why Interval 17 measured
+  `orderOut` as saving two to three points of one core out of eighteen. The
+  window scene now holds a shell that builds `ScribeKitRootView` only while the
+  window is on screen and releases it when the window closes or is
+  miniaturised. Measured on an M1 across two Release soaks: a detached meeting
+  costs about 6.3–7.9% of one core against 21.3–26.3% with the window open,
+  which is the headless floor. Nothing about the meeting changed — capture,
+  recognition, the transcript and audio writers, both clocks, the activity
+  assertion, pause, resume, stop, interruption handling and the menu bar are
+  untouched by whether a window exists — and reopening builds a fresh interface
+  over the meeting that has been running all along. `MeetingRuntime` was
+  already owned by the application object and still is.
+
+- Transcript wall-clock times now always say `AM` or `PM`. A span's time was
+  written as `1:28:04`, leaving the period to the minute heading above it,
+  which made a line ambiguous as soon as it was read on its own — quoted out of
+  the document, matched by search, or seen halfway down a long meeting. Span
+  times, minute headings, `Started`, `Ended`, and the pause, resume,
+  transcription-gap and capture-interruption remarks now all use one
+  convention: deterministic twelve-hour local time with an uppercase period,
+  as in `**1:28:04 PM**`. Offsets, retained-audio seek positions and captured
+  media time are unaffected — none of them is wall-clock. Transcripts written
+  before this are not rewritten, not migrated and still read back, list and
+  search exactly as they did; a span that states no period still borrows the
+  heading's.
+
 - A meeting whose capture ends by itself is no longer recorded as completed.
   ScreenCaptureKit ending a stream mid-meeting reached
   `MeetingRuntime.handleCaptureInterruption`, which closed the session through
