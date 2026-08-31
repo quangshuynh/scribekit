@@ -13,10 +13,16 @@ import SwiftUI
 /// it, so moving between them starts, stops and duplicates nothing. A meeting
 /// running on the Meeting tab keeps capturing, recognising and writing while
 /// History is on screen.
+///
+/// Which screen is showing is published as a scene-focus value so the View
+/// menu can change it, because a tab bar is a click target and the menu is how
+/// the same move is made from the keyboard.
 struct ScribeKitRootView: View {
 
     /// The application's meeting owner, shared with the menu bar.
     let runtime: MeetingRuntime
+
+    @State private var selection = ScribeKitTabSelection()
 
     /// Creates the window's content.
     ///
@@ -26,15 +32,18 @@ struct ScribeKitRootView: View {
     }
 
     var body: some View {
-        TabView {
-            Tab("Meeting", systemImage: "waveform") {
-                MeetingSetupView(runtime: runtime)
-            }
-            Tab("History", systemImage: "clock.arrow.circlepath") {
-                HistoryView(runtime: runtime)
-            }
+        TabView(selection: Bindable(selection).tab) {
+            MeetingSetupView(runtime: runtime)
+                .tabItem { Label(ScribeKitTab.meeting.title, systemImage: ScribeKitTab.meeting.systemImage) }
+                .accessibilityLabel(ScribeKitTab.meeting.title)
+                .tag(ScribeKitTab.meeting)
+            HistoryView(runtime: runtime)
+                .tabItem { Label(ScribeKitTab.history.title, systemImage: ScribeKitTab.history.systemImage) }
+                .accessibilityLabel(ScribeKitTab.history.title)
+                .tag(ScribeKitTab.history)
         }
         .frame(minWidth: 620, minHeight: 560)
+        .focusedSceneValue(\.scribeKitTabSelection, selection)
     }
 }
 

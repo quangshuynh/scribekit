@@ -5,7 +5,8 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 20 — permissions, failure UX and first-run readiness. Complete.
+Interval 21 — real first-run validation, accessibility and native macOS
+polish. Complete.
 
 ## Current implementation
 
@@ -83,6 +84,13 @@ Interval 20 — permissions, failure UX and first-run readiness. Complete.
 - `ScribeKit/App/`: `ScribeKitApp` has a single `Window` scene and a
   `MenuBarExtra`; `ScribeKitAppDelegate` is new and owns the runtime.
 - `ScribeKit/Models/`: new for this interval, `MeetingSnapshot`.
+- `ScribeKit/App/`, new for this interval: `MeetingCommands`, the application's
+  own menus, derived from the same `MeetingMenuBarPresentation` the menu bar
+  reads.
+- `ScribeKit/Features/`, new for this interval: `ScribeKitTab` /
+  `ScribeKitTabSelection` (which screen the window shows, published as a
+  scene-focus value) and `HistorySearchFocus` (a standing request for the
+  History search field, published the same way).
 - `ScribeKitTests/`: Swift Testing suites (553 tests, 53 suites).
 
 Audio retention writes a file; nothing plays one. Pause and resume do not
@@ -1491,6 +1499,47 @@ titles, no telemetry.
 
 ## Validation status
 
+### Interval 21 validation
+
+- `xcodebuild … clean test` on macOS: 658 tests in 60 suites, all passing, no
+  new compiler warnings. 14 of those tests and one suite
+  (`AccessibilitySemanticsTests`) are new here.
+- `mkdocs build --strict`: passing.
+
+**Observed on this Mac, from a running build.** The application was launched
+and its accessibility tree, menus and window read through the macOS
+accessibility API. What that showed:
+
+- All four readiness rows reported **Ready** except **Audio source**, which
+  reported **Action needed** with no application selected. Screen & System
+  Audio Recording was already granted, an `en-US` model was already installed,
+  and a save folder was already remembered from an earlier launch — so this is
+  the satisfied path, not a clean-machine first run.
+- The process held **no network sockets** for its whole run.
+- The window opened at 1100×820, clamped to 620×612 when shrunk and grew to
+  fill the display. Nothing is fixed-size.
+- **Two defects, found and fixed here.** The readiness rows published as
+  `AXUnknown` elements carrying no label and no value at all, so VoiceOver had
+  nothing to say about the four things a meeting needs. And the View menu held
+  only *Enter Full Screen*, so the two screens were reachable only by clicking
+  the tab bar.
+- **Search History** (⌘F) was verified enabled only on the History screen, and
+  verified to move keyboard focus onto the search field, which publishes as an
+  `AXTextField` named "Search past meetings".
+
+**What that inspection settled about SwiftUI.** An element made a leaf with
+`accessibilityElement(children: .ignore)` publishes exactly one string: given
+both a label and a value, the value wins and the label never reaches the tree
+at all. Every composed row therefore states everything it has to say in its
+label, and `TranscriptReviewCandidate.accessibilityDescription` takes the
+recognised text for the same reason. Rows built from `LabeledContent` are
+unaffected — those publish a label and a value, and were already correct.
+
+**Not observed, and not claimed.** No VoiceOver pass was driven by hand, and no
+keyboard-only pass was performed by a person. No permission was denied, no disk
+pulled and no model uninstalled, so every Interval 20 failure state remains
+injection-only.
+
 ### Interval 20 validation
 
 - `xcodebuild … clean test` on macOS: 644 tests in 59 suites, all passing, no
@@ -2445,6 +2494,22 @@ intervals; the capture observations above were taken through the same path.
 
 ## Known limitations
 
+- **No recorded VoiceOver or keyboard-only pass.** The accessibility tree of a
+  running build was read through the accessibility API and the strings under it
+  are covered by tests, but nobody has listened to VoiceOver read setup, an
+  active meeting and History, or worked a meeting through without a mouse.
+  ScribeKit claims no conformance to any accessibility standard.
+- **Refusal is still injection-only.** Every Interval 20 blocked and failed
+  state — denied capture access, a missing speech model, an unreachable save
+  folder, a failed transcript or recording — has only ever been produced by an
+  injected failure. The Mac these were checked on satisfied every prerequisite.
+- **The tab bar is not in the Tab-key order.** ⌘1 and ⌘2 are the keyboard route
+  between the two screens.
+- **The Help menu is empty.** The default *ScribeKit Help* item reports that
+  help is unavailable, so it was removed rather than left as a control that
+  does nothing. Linking to the documentation site was deliberately not added:
+  ScribeKit has no network entitlement and opens no external links, and adding
+  the first one for a menu item was not worth the change in posture.
 - **The restart budget is per meeting, not per recognition run.** Two
   self-restarts are all a meeting gets, however many hours and however many
   resumes it spans, and an explicit Resume does not give it more. That is a
@@ -2689,6 +2754,23 @@ intervals; the capture observations above were taken through the same path.
   policy is proved by unit tests rather than by a live overload.
 
 ## Next interval
+
+**Closed by Interval 21.** The application has its own menus, derived from the
+same value the menu bar and the window read, so three surfaces cannot disagree
+about what a meeting can currently do. The two screens have a keyboard route.
+The History search field has a Find command that reaches it. The composed rows
+— readiness, review candidates — publish complete sentences rather than
+fragments or, in the readiness rows' case, nothing at all.
+
+**Open.** The evidence gap Interval 20 named is narrower but not closed: the
+satisfied path has now been seen on a real Mac, and refusal has not. A person
+with VoiceOver on and their hands off the mouse is the next piece of evidence
+worth collecting, and it is the one thing here that cannot be automated. Also
+still open: source disappearance during a running capture,
+`ScreenCaptureKitAudioCapturer.stop()` not calling `removeStreamOutput(_:type:)`
+since Interval 15, and the visible-presentation cost Interval 18 profiled.
+
+## Interval 20's closing note
 
 Interval 20 answered the question a first launch asks. A new user now sees the
 four things a meeting needs before they press anything, each with its state in

@@ -14,8 +14,9 @@ import SwiftUI
 /// already offers, a way back to the window, and Quit. Configuration stays in
 /// the window, because a meeting's configuration is fixed once it starts.
 ///
-/// There is no Pause item. Pause is not implemented, and a control that looked
-/// like one would be a claim ScribeKit cannot keep.
+/// Pause, Resume and Stop appear only while the meeting can take them, from
+/// the same derivation the window and the application's own Meeting menu read,
+/// so the three cannot disagree about what is currently possible.
 struct MeetingMenuBarView: View {
 
     /// The one meeting owner, shared with the main window.

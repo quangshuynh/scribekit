@@ -127,7 +127,21 @@ are consequences of decisions, and several of them are deliberate.
 - **The readiness and ending copy is proved by tests, not by a real refusal.**
   No permission was actually denied, no disk actually pulled, and no model
   actually uninstalled on this Mac to produce these states; they are reached
-  through injected failures.
+  through injected failures. A running build has since been inspected on a Mac
+  where all four prerequisites were satisfied, which confirms the satisfied
+  path and nothing else.
+
+## Accessibility
+
+- **No recorded VoiceOver pass.** The accessibility tree of a running build was
+  inspected and the strings under it are covered by tests, but nobody has
+  driven VoiceOver through setup, an active meeting and History and written
+  down what they heard. ScribeKit claims no conformance to any accessibility
+  standard.
+- **The tab bar is reached with ⌘1 and ⌘2**, not with Tab.
+- **The Help menu is empty.** ScribeKit has no network entitlement and does not
+  open external links, so it does not link to its documentation site from
+  inside the app.
 
 ## Process and CI
 

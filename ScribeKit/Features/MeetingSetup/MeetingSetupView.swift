@@ -266,26 +266,29 @@ struct MeetingSetupView: View {
     /// - Returns: The row view.
     @ViewBuilder
     private func readinessRow(_ row: MeetingStartReadiness.Row) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Label(row.status.label, systemImage: row.status.symbolName)
-                    .labelStyle(.iconOnly)
-                Text(row.prerequisite.title)
-                    .font(.headline)
-                Text(row.status.label)
-                    .font(.caption)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Label(row.status.label, systemImage: row.status.symbolName)
+                        .labelStyle(.iconOnly)
+                    Text(row.prerequisite.title)
+                        .font(.headline)
+                    Text(row.status.label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(row.detail)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                Spacer()
-                readinessAction(for: row)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text(row.detail)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isStaticText)
+            .accessibilityLabel(row.accessibilityDescription)
+
+            readinessAction(for: row)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(row.prerequisite.title)
-        .accessibilityValue("\(row.status.label). \(row.detail)")
     }
 
     /// The control that resolves one prerequisite, when a control can.
@@ -845,7 +848,8 @@ private struct RunningMeetingLabel: View {
                     .monospacedDigit()
             }
             .accessibilityLabel("Running meeting")
-            .accessibilityValue(meeting.title)
+            .accessibilityValue("\(meeting.title), running for "
+                                + MeetingElapsedClock.description(of: runtime.elapsed.elapsed))
 
             Text("Settings on this screen apply to the next meeting. This one keeps what it started with.")
                 .font(.footnote)
@@ -937,7 +941,7 @@ private struct LiveTranscriptSection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .defaultScrollAnchor(.bottom)
-                .frame(height: 160)
+                .frame(minHeight: 160, maxHeight: 320)
             }
 
             if runtime.transcript.untranscribedSeconds > 0 {

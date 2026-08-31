@@ -34,6 +34,9 @@ struct ScribeKitApp: App {
             MainPresentationScene(runtime: delegate.runtime)
         }
         .windowResizability(.contentMinSize)
+        .commands {
+            MeetingCommands(runtime: delegate.runtime)
+        }
 
         MenuBarExtra {
             MeetingMenuBarView(runtime: delegate.runtime, mainWindowID: Self.mainWindowID)
