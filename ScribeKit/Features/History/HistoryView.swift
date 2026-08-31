@@ -20,6 +20,8 @@ struct HistoryView: View {
 
     @State private var model: HistoryModel
     @State private var selection: URL?
+    @State private var searchFocus = HistorySearchFocus()
+    @FocusState private var searchFieldFocused: Bool
 
     /// Creates the screen.
     ///
@@ -40,6 +42,10 @@ struct HistoryView: View {
             detail
         }
         .task { await model.load() }
+        .focusedSceneValue(\.historySearchFocus, searchFocus)
+        .onChange(of: searchFocus.requestCount) { _, _ in
+            searchFieldFocused = true
+        }
         .onDisappear { model.stopPlayback() }
         .onChange(of: selection) { _, newValue in
             model.stopPlayback()
@@ -70,6 +76,7 @@ struct HistoryView: View {
                 .accessibilityHidden(true)
             TextField("Search meetings", text: Bindable(model).query)
                 .textFieldStyle(.plain)
+                .focused($searchFieldFocused)
                 .accessibilityLabel("Search past meetings")
                 .accessibilityHint("Searches meeting titles and the speech in their transcripts")
             if !model.query.isEmpty {

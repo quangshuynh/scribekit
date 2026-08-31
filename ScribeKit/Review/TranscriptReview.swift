@@ -150,6 +150,42 @@ nonisolated struct TranscriptReviewCandidate: Codable, Equatable, Sendable, Iden
         }
         return reasons.count > 1 ? .medium : .low
     }
+
+    /// One sentence describing the candidate for assistive technology.
+    ///
+    /// The screen states a flagged passage in four parts — when it was said,
+    /// how much attention it is worth, why it was put forward and whether it
+    /// has been dealt with — spread across a row that also carries controls.
+    /// Read as separate elements those parts arrive without each other, so the
+    /// row states them once, here, in the order the screen shows them.
+    ///
+    /// It is one string rather than a label and a value because the row is a
+    /// static-text leaf, and such an element publishes a single string.
+    ///
+    /// - Parameters:
+    ///   - timestamp: The wall-clock time the transcript wrote for the span.
+    ///   - text: The span's recognised words, exactly as the transcript has
+    ///     them.
+    ///   - isReviewed: Whether the user has marked the passage reviewed.
+    ///   - hasAudio: Whether the meeting kept a recording to play.
+    /// - Returns: The description.
+    func accessibilityDescription(
+        timestamp: String,
+        text: String,
+        isReviewed: Bool,
+        hasAudio: Bool
+    ) -> String {
+        var parts = [
+            "\(timestamp). \(priority.displayName) priority.",
+            isReviewed ? "Reviewed." : "Needs review.",
+            text
+        ]
+        parts.append(contentsOf: reasons.map(\.explanation))
+        parts.append(hasAudio
+                     ? "Audio is available for this passage."
+                     : "This meeting kept no recording, so there is no audio to play.")
+        return parts.joined(separator: " ")
+    }
 }
 
 /// The rules that turn captured evidence into a review candidate.

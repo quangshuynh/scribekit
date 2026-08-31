@@ -103,6 +103,7 @@ nav:
       - Review & Playback: using/review-and-playback.md
       - Meeting Notes: using/meeting-notes.md
       - Recovery: using/recovery.md
+      - Keyboard & Accessibility: using/keyboard-and-accessibility.md
   - How It Works:
       - Architecture: internals/architecture.md
       - Meeting Lifecycle: internals/meeting-lifecycle.md

@@ -52,3 +52,17 @@ pick. See [Save Location](../getting-started/save-location.md).
 The app ships without the network client entitlement, so the sandbox does not
 permit it to open a network connection at all. See
 [Network Policy](network-policy.md).
+
+## What a real Mac reported
+
+On a development Mac that had already granted Screen & System Audio Recording,
+had an installed `en-US` speech model and had a save folder remembered from an
+earlier launch, the running app reported all four prerequisites as **Ready**
+before any application had been selected, and the process held no network
+sockets at all while it ran.
+
+That is the satisfied path, observed. Refusal has still never been reproduced
+on a real machine: no permission has been denied, no disk pulled and no speech
+model uninstalled to see what ScribeKit says. Those states are reached through
+injected failures in the test suite, and are listed in
+[Limitations](../reference/limitations.md).

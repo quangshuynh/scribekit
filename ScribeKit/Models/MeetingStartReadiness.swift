@@ -168,7 +168,17 @@ nonisolated struct MeetingStartReadiness: Equatable, Sendable {
         /// What assistive technology hears, which is the same claim the screen
         /// makes rather than the icon alone.
         var accessibilityDescription: String {
-            "\(prerequisite.title). \(status.label). \(detail)"
+            "\(prerequisite.title). \(accessibilityValue)"
+        }
+
+        /// The row's state, for a screen that has already named the
+        /// prerequisite.
+        ///
+        /// The status word and the detail travel together: the icon carries no
+        /// meaning of its own, and a detail read without the status it belongs
+        /// to says what is wrong without saying that anything is.
+        var accessibilityValue: String {
+            "\(status.label). \(detail)"
         }
     }
 

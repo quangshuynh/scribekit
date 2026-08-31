@@ -219,30 +219,54 @@ struct HistorySessionDetailView: View {
     /// - Returns: The row view.
     private func candidateRow(_ candidate: TranscriptReviewCandidate, span: TranscriptSpan) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(candidate.priority.displayName)
-                    .font(.caption.weight(.semibold))
-                Text(span.timestampDescription)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Text(derived.isReviewed(spanIndex: candidate.spanIndex) ? "Reviewed" : "Needs Review")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(candidate.priority.displayName)
+                        .font(.caption.weight(.semibold))
+                    Text(span.timestampDescription)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text(derived.isReviewed(spanIndex: candidate.spanIndex) ? "Reviewed" : "Needs Review")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-            Text(span.text)
-                .textSelection(.enabled)
+                Text(span.text)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            ForEach(candidate.reasons, id: \.rawValue) { reason in
-                Text(reason.explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                ForEach(candidate.reasons, id: \.rawValue) { reason in
+                    Text(reason.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isStaticText)
+            .accessibilityLabel(candidateDescription(candidate, span: span))
 
             playbackControls(for: candidate)
             reviewedControl(for: candidate)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Flagged passage at \(span.timestampDescription)")
+    }
+
+    /// What one flagged passage is, without the words that were recognised.
+    ///
+    /// - Parameters:
+    ///   - candidate: The flagged span's evidence.
+    ///   - span: The span as the transcript wrote it.
+    /// - Returns: The description.
+    private func candidateDescription(_ candidate: TranscriptReviewCandidate, span: TranscriptSpan) -> String {
+        candidate.accessibilityDescription(
+            timestamp: span.timestampDescription,
+            text: span.text,
+            isReviewed: derived.isReviewed(spanIndex: candidate.spanIndex),
+            hasAudio: session.audio != nil
+        )
     }
 
     /// How many of this meeting's flagged passages the user has dealt with.
