@@ -3,6 +3,7 @@
 //  ScribeKitTests
 //
 
+import Foundation
 import Synchronization
 import Testing
 @testable import ScribeKit
@@ -117,5 +118,42 @@ struct AudioCaptureActivityMonitorTests {
     @Test("Duration is unknown until a format has been observed")
     func durationNeedsFormat() {
         #expect(AudioCaptureActivity.none.capturedDuration == nil)
+    }
+
+    @Test("A meeting's worth of publishes does not deepen the capture stack")
+    func publishDepthIsConstant() async {
+        let monitor = AudioCaptureActivityMonitor(minimumPublishInterval: .zero)
+        let buffer = sample(frames: 480)
+        let depths = Mutex<[Int]>([])
+        let published = Mutex(0)
+
+        // The observer is installed once and never replaced, so every publish
+        // must reach it through the same number of frames. A monitor that left
+        // a thunk on the stored closure per publish grew this by two frames a
+        // time and exhausted the delivery queue's stack part-way through a
+        // meeting.
+        monitor.onUpdate = { _ in
+            let count = published.withLock { $0 += 1; return $0 }
+            if count == 1 || count == 3_000 || count == 6_000 {
+                depths.withLock { $0.append(Thread.callStackSymbols.count) }
+            }
+        }
+
+        // 6,000 publishes is fifty minutes at the interval capture actually
+        // uses, run on a thread given the same 512 KB stack ScreenCaptureKit's
+        // delivery queue has — past the twenty-odd minutes at which the old
+        // monitor faulted on its guard page.
+        await withCheckedContinuation { continuation in
+            let thread = Thread {
+                for _ in 0..<6_000 { monitor.consume(buffer) }
+                continuation.resume()
+            }
+            thread.stackSize = 512 * 1_024
+            thread.start()
+        }
+
+        let observed = depths.withLock { $0 }
+        #expect(observed.count == 3)
+        #expect(Set(observed).count == 1)
     }
 }

@@ -53,8 +53,22 @@ nonisolated final class AudioCaptureActivityMonitor: AudioSampleConsuming {
     /// Set before capture starts. The handler runs off the main actor and is
     /// responsible for its own hop.
     var onUpdate: (@Sendable (AudioCaptureActivity) -> Void)? {
-        get { handler.withLock { $0 } }
-        set { handler.withLock { $0 = newValue } }
+        get { handler.withLock { $0 }?.notify }
+        set { handler.withLock { $0 = newValue.map(Observer.init(notify:)) } }
+    }
+
+    /// An installed observer, held as a value rather than as a bare function.
+    ///
+    /// A function stored directly as a `Mutex`'s value is re-abstracted every
+    /// time it is copied back out of `withLock`, and the thunk it gains stays
+    /// in the stored value. Publishing twice a second therefore leaves the
+    /// observer a chain of thousands of nested thunks, each of which the next
+    /// publish calls through, until the delivery queue's 512 KB stack reaches
+    /// its guard page part-way through a meeting. Holding the function inside
+    /// a value keeps the stored observer the one that was installed, so the
+    /// call depth of a publish does not depend on how long capture has run.
+    private struct Observer: Sendable {
+        let notify: @Sendable (AudioCaptureActivity) -> Void
     }
 
     /// The shortest gap between two published snapshots.
@@ -66,7 +80,7 @@ nonisolated final class AudioCaptureActivityMonitor: AudioSampleConsuming {
     }
 
     private let state = Mutex(State())
-    private let handler = Mutex<(@Sendable (AudioCaptureActivity) -> Void)?>(nil)
+    private let handler = Mutex<Observer?>(nil)
     private let clock = ContinuousClock()
 
     /// Creates a monitor.
@@ -126,6 +140,6 @@ nonisolated final class AudioCaptureActivityMonitor: AudioSampleConsuming {
     ///
     /// - Parameter activity: The snapshot to publish.
     private func publish(activity: AudioCaptureActivity) {
-        handler.withLock { $0 }?(activity)
+        handler.withLock { $0 }?.notify(activity)
     }
 }
