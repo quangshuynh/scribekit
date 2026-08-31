@@ -26,7 +26,15 @@ final class MeetingSetupSourcesModel {
         /// Discovery finished; the payload is empty when nothing qualified.
         case loaded([CaptureSource])
 
-        /// Discovery failed, with a message describing why.
+        /// ScribeKit was refused the access discovery needs; the message
+        /// says what to do about it.
+        ///
+        /// Kept apart from ``failed(_:)`` because the two need different
+        /// answers from the user: one is a permission to grant, the other is
+        /// something that went wrong.
+        case accessUnavailable(String)
+
+        /// Discovery failed for another reason, with a message describing why.
         case failed(String)
     }
 
@@ -75,6 +83,32 @@ final class MeetingSetupSourcesModel {
     /// Whether discovery is currently running.
     var isDiscovering: Bool { discoveryState == .loading }
 
+    /// What the source part of start readiness knows, in the terms
+    /// ``MeetingStartReadiness`` is derived from.
+    ///
+    /// Derived rather than stored, so a discovery that succeeds after a
+    /// failure leaves nothing of the failure behind.
+    var readiness: CaptureSourceReadiness {
+        switch discoveryState {
+        case .idle:
+            .notAttempted
+        case .loading:
+            .discovering
+        case let .accessUnavailable(message):
+            .accessUnavailable(message: message)
+        case let .failed(message):
+            .discoveryFailed(message: message)
+        case let .loaded(sources) where sources.isEmpty:
+            .noApplicationsFound
+        case let .loaded(sources):
+            .discovered(
+                available: sources.count,
+                selected: selectedSourceIDs.count,
+                droppedSelections: unavailableSelectionNames
+            )
+        }
+    }
+
     /// Whether a source is selected.
     ///
     /// - Parameter source: The source to test.
@@ -117,6 +151,11 @@ final class MeetingSetupSourcesModel {
             discoveryState = .loaded(sources)
             applyRememberedSelectionIfNeeded()
             reconcileSelection(with: sources, previousSources: previousSources)
+        } catch CaptureSourceDiscoveryError.accessUnavailable {
+            discoveryState = .accessUnavailable(
+                message(for: CaptureSourceDiscoveryError.accessUnavailable)
+            )
+            unavailableSelectionNames = []
         } catch {
             discoveryState = .failed(message(for: error))
             unavailableSelectionNames = []

@@ -60,6 +60,8 @@ struct MeetingSetupView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             Form {
+                readinessSection
+                if runtime.outcome != nil { outcomeSection }
                 if recovery.isVisible { recoverySection }
                 meetingSection
                 sourcesSection
@@ -229,6 +231,136 @@ struct MeetingSetupView: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// Whether a meeting can be started right now, and why not when it cannot.
+    ///
+    /// Derived here and read by every control that depends on it, so the
+    /// readiness rows, the Start button's availability and the sentence beside
+    /// it are three renderings of one answer rather than three checks that can
+    /// disagree.
+    private var readiness: MeetingStartReadiness {
+        MeetingStartReadiness(
+            saveLocation: destination.readiness,
+            captureSources: sources.readiness,
+            speech: runtime.availability,
+            meetingIsActive: runtime.isRunning
+        )
+    }
+
+    /// What a first-time user needs before they can start, in one place.
+    ///
+    /// Four compact rows rather than a wizard: everything below configures the
+    /// same four prerequisites in detail, and this says at a glance which of
+    /// them are satisfied. Each row states its status in words as well as an
+    /// icon, so nothing depends on colour.
+    private var readinessSection: some View {
+        Section("Before You Start") {
+            ForEach(readiness.rows) { row in
+                readinessRow(row)
+            }
+        }
+    }
+
+    /// One prerequisite, with the action that resolves it when there is one.
+    ///
+    /// - Parameter row: The prerequisite to present.
+    /// - Returns: The row view.
+    @ViewBuilder
+    private func readinessRow(_ row: MeetingStartReadiness.Row) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Label(row.status.label, systemImage: row.status.symbolName)
+                    .labelStyle(.iconOnly)
+                Text(row.prerequisite.title)
+                    .font(.headline)
+                Text(row.status.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                readinessAction(for: row)
+            }
+            Text(row.detail)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(row.prerequisite.title)
+        .accessibilityValue("\(row.status.label). \(row.detail)")
+    }
+
+    /// The control that resolves one prerequisite, when a control can.
+    ///
+    /// - Parameter row: The prerequisite being presented.
+    /// - Returns: A button, or nothing for a row that is already satisfied.
+    @ViewBuilder
+    private func readinessAction(for row: MeetingStartReadiness.Row) -> some View {
+        if row.status == .satisfied {
+            EmptyView()
+        } else {
+            switch row.prerequisite {
+            case .saveLocation:
+                Button("Choose Folder…") { isChoosingDestination = true }
+                    .disabled(runtime.isRunning)
+                    .accessibilityHint("Choose the folder meetings are saved to")
+            case .captureAccess, .captureSource:
+                Button("Refresh") { Task { await sources.refresh() } }
+                    .disabled(sources.isDiscovering)
+                    .accessibilityHint("Look for applications ScribeKit can record again")
+            case .speechRecognition:
+                Button("Check Again") { Task { await runtime.prepare() } }
+                    .disabled(runtime.isRunning)
+                    .accessibilityHint("Check which speech models are installed again")
+            }
+        }
+    }
+
+    /// What the meeting that ended means for its files, and what to do next.
+    ///
+    /// Shown inline rather than as an alert: it describes something that has
+    /// already finished, the artifacts it names are still there, and an alert
+    /// would have to be dismissed before the folder it points at could be
+    /// opened. A finished meeting and a failed one use the same panel, so
+    /// nothing has to decide which shape of announcement an ending deserves.
+    @ViewBuilder
+    private var outcomeSection: some View {
+        if let outcome = runtime.outcome {
+            Section("Last Meeting") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(
+                        outcome.headline,
+                        systemImage: outcome.isFailure ? "exclamationmark.triangle" : "checkmark.circle"
+                    )
+                    .font(.headline)
+                    Text(outcome.meaning)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text(outcome.nextStep)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let detail = outcome.detail {
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        if let layout = runtime.persistenceState.layout {
+                            Button("Show in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([layout.transcriptURL])
+                            }
+                            .accessibilityHint("Reveal this meeting's transcript in the Finder")
+                        }
+                        Button("Dismiss") { runtime.dismissOutcome() }
+                            .accessibilityHint("Hide this summary; nothing on disk changes")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Last meeting")
+                .accessibilityValue(outcome.accessibilityDescription)
+            }
+        }
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("ScribeKit")
@@ -276,6 +408,10 @@ struct MeetingSetupView: View {
                     sourceRow(for: source)
                 }
                 selectionSummary
+            case let .accessUnavailable(message):
+                Label(message, systemImage: "lock")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Screen and System Audio Recording access unavailable. \(message)")
             case let .failed(message):
                 Label(message, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.secondary)
@@ -469,6 +605,12 @@ struct MeetingSetupView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+
+            if !runtime.availability.canTranscribe {
+                Button("Check Again") { Task { await runtime.prepare() } }
+                    .disabled(runtime.isRunning)
+                    .accessibilityHint("Check which speech models are installed again")
+            }
         }
     }
 
@@ -614,6 +756,12 @@ struct MeetingSetupView: View {
                 Button("Forget Folder") { destination.clear() }
                     .disabled(!destination.canClear || runtime.isRunning)
                     .accessibilityHint("Stop remembering the saved folder")
+
+                if destination.warningMessage != nil {
+                    Button("Try Again") { destination.restore() }
+                        .disabled(runtime.isRunning)
+                        .accessibilityHint("Resolve the remembered folder again, for a disk that has come back")
+                }
             }
 
             Text(destination.isRestored
@@ -654,14 +802,16 @@ struct MeetingSetupView: View {
                 Task { await runtime.start(request) }
             }
             .keyboardShortcut(.defaultAction)
-            .disabled(!runtime.canStart(startRequest))
-            .help(startHelp)
+            .disabled(!readiness.canStart || !runtime.canStart(startRequest))
+            .help(readiness.startExplanation)
+            .accessibilityHint(readiness.startExplanation)
         }
     }
 
     /// One sentence describing the meeting as a whole, derived from the
     /// subsystems rather than tracked separately.
     private var meetingStatusDescription: String {
+        if !runtime.isRunning, let outcome = runtime.outcome { return outcome.headline }
         if let message = runtime.persistenceState.failureMessage { return message }
         if let message = runtime.audioRetentionState.failureMessage { return message }
         if let message = runtime.pauseFailureMessage { return message }
@@ -673,17 +823,7 @@ struct MeetingSetupView: View {
             return "Meeting in progress. It keeps running if you hide or close this window; the menu bar item "
                 + "shows it and can stop it."
         }
-        if case .saved = runtime.persistenceState { return "Meeting finished. The transcript is saved and closed." }
-        return "Choose applications and a save folder, then start the meeting."
-    }
-
-    /// Why the start control is unavailable, when it is.
-    private var startHelp: String {
-        if runtime.isRunning { return "A meeting is already running." }
-        if destination.url == nil { return "Choose a save folder for the transcript first." }
-        if sources.selectedSources.isEmpty { return "Select at least one application to capture." }
-        if !runtime.availability.canTranscribe { return "On-device speech recognition is unavailable." }
-        return "Capture the selected applications and write a timestamped Markdown transcript."
+        return readiness.startExplanation
     }
 }
 

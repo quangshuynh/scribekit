@@ -43,7 +43,8 @@ struct ScribeKitApp: App {
                 meeting: delegate.runtime.meeting,
                 transcript: nil,
                 audio: nil,
-                canStop: false
+                canStop: false,
+                outcome: delegate.runtime.outcome
             )
             Image(systemName: presentation.symbolName)
                 .accessibilityLabel(presentation.accessibilityLabel)

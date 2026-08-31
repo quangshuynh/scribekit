@@ -104,6 +104,23 @@ final class MeetingRuntime {
     /// ``status`` says whether it is live.
     private(set) var meeting: MeetingSnapshot?
 
+    /// How the last meeting of this launch ended, once one has.
+    ///
+    /// Kept because the subsystem states cannot answer it on their own: a
+    /// capture stream that died and a capture start that failed leave the same
+    /// shape behind, and only the outcome the session was closed as separates
+    /// an interrupted meeting from a failed one. Cleared when the next meeting
+    /// starts, so a finished failure never describes a running meeting.
+    private(set) var lastCompletion: MeetingCompletion?
+
+    /// Whether capture reached the point of running in the current or most
+    /// recent meeting.
+    ///
+    /// A start that failed before this became true never began a meeting, and
+    /// what to say about its artifacts is not what to say about a meeting that
+    /// ran for an hour and then lost one.
+    private var didCaptureAudio = false
+
     /// How long the current meeting has been running.
     let elapsed: MeetingElapsedClock
 
@@ -347,6 +364,30 @@ final class MeetingRuntime {
     /// an interruption note into a transcript that is still open.
     var allowsRecovery: Bool { !isRunning }
 
+    /// What to tell the user about the meeting that ended, or `nil` when none
+    /// has ended in this launch.
+    ///
+    /// Derived from the recorded outcome and the subsystem states rather than
+    /// composed where it is shown, so the window and anything else that
+    /// reports an ending make the same claim.
+    var outcome: MeetingOutcomePresentation? {
+        MeetingOutcomePresentation(
+            completion: lastCompletion,
+            capture: captureState,
+            transcription: transcriptionState,
+            persistence: persistenceState,
+            audio: audioRetentionState
+        )
+    }
+
+    /// Stops reporting the meeting that ended.
+    ///
+    /// The panel describing it is dismissed by the user or replaced by the
+    /// next meeting; nothing on disk changes either way.
+    func dismissOutcome() {
+        lastCompletion = nil
+    }
+
     /// Starts or ends the process activity assertion and the elapsed clock as
     /// the meeting starts and stops holding resources.
     ///
@@ -442,6 +483,8 @@ final class MeetingRuntime {
         captureState = .preparing
         audioRetentionState = request.audioRetention.retainsAudio ? .preparing : .idle
         recoveryAttempts = 0
+        lastCompletion = nil
+        didCaptureAudio = false
         droppedEventBaseline = transcriber.eventTally.dropped
         mediaClock.reset()
         mediaOffsetBase = 0
@@ -466,6 +509,10 @@ final class MeetingRuntime {
             transcriptionState = .idle
             captureState = .idle
             audioRetentionState = .idle
+            // Recorded here rather than in closeSession: there is no session to
+            // close, and a start that never created one still has to be
+            // explained as a meeting that did not begin.
+            lastCompletion = MeetingCompletion(outcome: .failed, capturedAudio: false)
             return
         }
 
@@ -505,6 +552,7 @@ final class MeetingRuntime {
         do {
             try await capturer.start(configuration: captureConfiguration)
             captureState = .capturing
+            didCaptureAudio = true
         } catch {
             await transcriber.stop()
             transcriptionState = .idle
@@ -696,8 +744,13 @@ final class MeetingRuntime {
                 capturedDuration: mediaClock.seconds
             )
             persistenceState = layout.map { .saved($0) } ?? .idle
+            lastCompletion = MeetingCompletion(
+                outcome: audioFailure == nil ? outcome : .failed,
+                capturedAudio: didCaptureAudio
+            )
         } catch {
             persistenceState = .failed(message: message(for: error, sources: []), layout: layout)
+            lastCompletion = MeetingCompletion(outcome: .failed, capturedAudio: didCaptureAudio)
         }
     }
 
@@ -901,6 +954,7 @@ final class MeetingRuntime {
             outcome: .failed,
             capturedDuration: mediaClock.seconds
         )
+        lastCompletion = MeetingCompletion(outcome: .failed, capturedAudio: didCaptureAudio)
         stopSubsystemsAfterPersistenceFailure()
     }
 

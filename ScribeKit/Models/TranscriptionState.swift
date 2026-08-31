@@ -40,6 +40,11 @@ nonisolated enum TranscriptionState: Equatable, Sendable {
         }
     }
 
+    /// What went wrong, when something did.
+    var failureMessage: String? {
+        if case let .failed(message) = self { message } else { nil }
+    }
+
     /// Whether a start request is meaningful in this state.
     ///
     /// A failure is a report about the previous attempt, not a latch, so a
