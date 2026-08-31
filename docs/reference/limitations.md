@@ -152,3 +152,21 @@ are consequences of decisions, and several of them are deliberate.
   takes. A force quit is still a crash.
 - **CI runs build and unit tests only** — no linting, formatting, coverage or
   UI tests.
+
+## Diagnostics
+
+- **A diagnostic report is a snapshot, not a history.** It describes what is
+  true when you ask for one; nothing is stored, so it says nothing about a
+  meeting before the last one.
+- **`readiness` and `storage` are absent when the main window has not been
+  open in this launch.** ScribeKit has not evaluated them, which is not the
+  same as their being unready.
+- **A report carries no transcript or recording byte counts.** Reading them
+  would mean opening access to your folder to stat a canonical artifact, which
+  is more than a support field is worth.
+- **Application names and window titles are never reported.** A report says how
+  many applications were discovered and how many were selected, and nothing
+  about which.
+- **ScribeKit does not collect the unified log or crash reports.** Console and
+  `log` are the tools for those; see
+  [Diagnostics & Support](../privacy/diagnostics.md).

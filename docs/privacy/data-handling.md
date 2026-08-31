@@ -13,6 +13,11 @@ panel, under a directory per meeting. Nothing is written anywhere else.
 | Which spans the recogniser was unsure about, by position | `.scribekit/review.json` | Once, after the transcript closed |
 | Your notes and reviewed marks | `.scribekit/derived.json` | When you save a note or make a mark |
 
+The one file ScribeKit writes outside that folder is a diagnostic report, and
+only when you ask for one and pick where it goes. It contains no transcript
+text, no audio and no folder path; see
+[Diagnostics & Support](diagnostics.md).
+
 Outside that folder, ScribeKit remembers only setup preferences: the save
 location as a security-scoped bookmark, the retention mode, the applications
 last selected, and the recognition language.

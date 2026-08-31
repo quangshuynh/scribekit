@@ -23,6 +23,12 @@ struct MeetingSetupView: View {
     /// The application's meeting owner, shared with the menu bar.
     let runtime: MeetingRuntime
 
+    /// The application's diagnostics owner. This screen is the only place that
+    /// derives readiness, the save location's standing and what the last
+    /// recovery scan found, so it publishes them where a report can still read
+    /// them after the window has closed.
+    let diagnostics: MeetingDiagnostics
+
     @State private var sources: MeetingSetupSourcesModel
     @State private var destination: MeetingSetupDestinationModel
     @State private var recovery = SessionRecoveryModel()
@@ -36,6 +42,7 @@ struct MeetingSetupView: View {
     ///
     /// - Parameters:
     ///   - runtime: The application's meeting owner.
+    ///   - diagnostics: The application's diagnostics owner.
     ///   - sourceProvider: Discovery used to populate the application list. The
     ///     default talks to ScreenCaptureKit; previews and tests can substitute
     ///     their own.
@@ -45,11 +52,13 @@ struct MeetingSetupView: View {
     ///     launches.
     init(
         runtime: MeetingRuntime,
+        diagnostics: MeetingDiagnostics,
         sourceProvider: CaptureSourceProviding = ScreenCaptureKitSourceProvider(),
         saveLocation: SaveLocationPersisting = SecurityScopedSaveLocationStore(),
         preferences: MeetingSetupPreferencesStoring = UserDefaultsMeetingSetupPreferences()
     ) {
         self.runtime = runtime
+        self.diagnostics = diagnostics
         self.preferences = preferences
         _sources = State(initialValue: MeetingSetupSourcesModel(provider: sourceProvider, preferences: preferences))
         _destination = State(initialValue: MeetingSetupDestinationModel(persistence: saveLocation))
@@ -84,6 +93,9 @@ struct MeetingSetupView: View {
         }
         .onChange(of: audioRetention) { _, mode in
             preferences.audioRetention = mode
+        }
+        .onChange(of: setupDiagnostics, initial: true) { _, state in
+            diagnostics.publish(state)
         }
         .fileImporter(
             isPresented: $isChoosingDestination,
@@ -246,6 +258,17 @@ struct MeetingSetupView: View {
         )
     }
 
+    /// Everything a diagnostic report needs from this screen, as one value so
+    /// that publishing it is a single comparison rather than four.
+    private var setupDiagnostics: MeetingDiagnostics.SetupState {
+        MeetingDiagnostics.SetupState(
+            readiness: readiness,
+            saveLocation: destination.readiness,
+            sources: sources.readiness,
+            recovery: recovery.state
+        )
+    }
+
     /// What a first-time user needs before they can start, in one place.
     ///
     /// Four compact rows rather than a wizard: everything below configures the
@@ -354,6 +377,17 @@ struct MeetingSetupView: View {
                         }
                         Button("Dismiss") { runtime.dismissOutcome() }
                             .accessibilityHint("Hide this summary; nothing on disk changes")
+                        if outcome.isFailure {
+                            // Secondary, and deliberately last: the sentences
+                            // above already say what happened and what to do,
+                            // and a report is for the conversation that starts
+                            // when following them did not work.
+                            Button("Export Diagnostics…") { diagnostics.export() }
+                                .accessibilityHint(
+                                    "Save a technical report about this Mac and this meeting. "
+                                        + "It contains no transcript text or audio."
+                                )
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -991,5 +1025,6 @@ private struct LiveTranscriptSection: View {
 }
 
 #Preview {
-    MeetingSetupView(runtime: MeetingRuntime())
+    let runtime = MeetingRuntime()
+    MeetingSetupView(runtime: runtime, diagnostics: MeetingDiagnostics(runtime: runtime))
 }

@@ -5,8 +5,7 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 21 — real first-run validation, accessibility and native macOS
-polish. Complete.
+Interval 22 — diagnostics and supportability. Complete.
 
 ## Current implementation
 
@@ -91,7 +90,14 @@ polish. Complete.
   `ScribeKitTabSelection` (which screen the window shows, published as a
   scene-focus value) and `HistorySearchFocus` (a standing request for the
   History search field, published the same way).
-- `ScribeKitTests/`: Swift Testing suites (553 tests, 53 suites).
+- `ScribeKit/Diagnostics/`, new for this interval: `ScribeKitLog` (one
+  subsystem, eight categories), `DiagnosticSafety` (the privacy contract and
+  the sanitiser for framework text), `DiagnosticCategory` (the stable support
+  name for a failure), `DiagnosticNames` (a stable word per state, in place of
+  `String(describing:)`), `DiagnosticReport` with its assembly,
+  `DiagnosticReportWriter`, and `MeetingDiagnostics`, the process-lifetime
+  owner of the export.
+- `ScribeKitTests/`: Swift Testing suites (695 tests, 65 suites).
 
 Audio retention writes a file; nothing plays one. Pause and resume do not
 exist.
@@ -1494,10 +1500,134 @@ offering an editor.
 
 ## Logging
 
-None was added. No `OSLog` category, no transcript text, no PCM, no meeting
-titles, no telemetry.
+One subsystem, the bundle identifier, and eight categories named after
+concerns rather than types: `lifecycle`, `capture`, `recognition`,
+`persistence`, `audio`, `recovery`, `history`, `diagnostics`. The two loggers
+that existed before, each with its own copy of the subsystem constant and a
+category named after the type that printed, now read from `ScribeKitLog`.
+
+Levels are used deliberately. `info` for milestones (start requested, meeting
+active, pause and resume completed, intentional stop, finalisation and what it
+was recorded as, session directory created, transcript opened, recording
+opened and finalised, scan results, report written); `debug` for developer
+detail (pause and resume requested, source discovery); `notice` for the
+unusual but handled (an automatic recogniser restart and its result, a refused
+resume); `error` for a failed operation in a controlled process; `fault` at
+exactly one site, the transcription event buffer overflowing, which is a
+violated invariant rather than a state a user can correct. Readiness states
+are never faults.
+
+Nothing logs per audio buffer, per partial hypothesis, per finalised span, per
+UI update or per file flush. A full 695-test run — thousands of delivered
+buffers — produced about 1,080 lines.
+
+## Diagnostic privacy contract
+
+Stated once, in `DiagnosticSafety`, and applied by everything that logs or
+reports. Never emitted at all: transcript text, partial hypotheses, notes,
+review passages, search queries, clipboard or file contents, audio, meeting
+titles, captured application names and bundle identifiers, window titles,
+absolute paths, path components, home-directory or user names, and
+security-scoped bookmark bytes. `.private` is not treated as permission to log
+content; content is not interpolated.
+
+Framework error text is the one grey area. It is never what a report means: a
+failure is carried as a `DiagnosticCategory` plus, in the log, the system's
+own domain and code. Where such text is logged locally it passes through
+`DiagnosticSafety.sanitized(_:)`, which replaces every path-shaped field with
+`<path>`.
+
+Application identity was considered and rejected. Counts are enough to answer
+a support question; which applications somebody had open is the shape of their
+day.
+
+## Diagnostic report
+
+`DiagnosticReport`, `schemaVersion` 1, pretty-printed JSON with sorted keys and
+ISO 8601 dates, so two reports of one state are the same bytes. Sections:
+`application`, `system`, `runtime`, `readiness`, `storage`, `recovery`,
+`session`, `lastOutcome`. `readiness` and `storage` are optional and absent
+when the main window has not been open in this launch — not the same claim as
+unready.
+
+Assembled from state that already exists: the runtime's own published values
+and whatever the setup screen last published into `MeetingDiagnostics`. It
+reads no file, opens no canonical artifact, holds no history and is never
+persisted. `MeetingRuntime` gained four counters for it — `pauseCount`,
+`recognitionRestartCount`, `transcriptSpanCount`, `gapCount` — reset at each
+start.
+
+Deliberately excluded, beyond the contract above: transcript and recording
+byte counts, which would need security-scoped access to stat a canonical
+artifact; the session's identifier and directory; the readiness rows' `detail`
+sentences, which quote folders and applications; and the outcome's framework
+`detail`.
+
+The failure taxonomy is `captureAccess`, `captureDiscovery`, `captureStart`,
+`captureInterrupted`, `recognitionAvailability`, `recognitionStart`,
+`recognitionRestartExhausted`, `saveLocation`, `transcriptPersistence`,
+`audioPersistence`, `sessionMetadata`, `recoveryMetadata`. It is for support
+and reporting; the subsystems keep their own richer errors for deciding what
+to do.
+
+## Diagnostic export
+
+Help ▸ Export Diagnostics…, plus the same action on a failed or interrupted
+meeting's outcome panel after its own recovery actions. Both call
+`MeetingDiagnostics.export()`. A system save panel states what a report
+contains and what it does not before anything is written; cancelling writes
+nothing. `DiagnosticReportWriter` is given the report and nothing else, writes
+atomically, and reports a failure rather than presenting a partial file as a
+success. Nothing is uploaded and no entitlement was added.
 
 ## Validation status
+
+### Interval 22 validation
+
+- `xcodebuild … clean test` on macOS: 695 tests in 65 suites, all passing, no
+  new compiler warnings. 37 of those tests and four suites
+  (`DiagnosticReportTests`, `DiagnosticExportTests`, `DiagnosticPrivacyTests`,
+  and the category and sanitisation suites beside them) are new here.
+- `mkdocs build --strict`: passing.
+
+**Observed on this Mac, from a running build.** The application was launched
+and Help ▸ Export Diagnostics… driven through the macOS accessibility API to a
+real save panel. What that showed:
+
+- A report with no meeting: **1,520 bytes**, written where the panel was
+  pointed. It named the real state of this Mac — three applications
+  discovered, none selected, capture access granted, 30 installed recognition
+  locales, a remembered save location — and contained no path, no user name,
+  no title and no application name. `grep` for `/Users`, the user name,
+  `file://` and `title`: nothing.
+- The same export **with the main window closed** produced an equivalent
+  report and the application stayed running, which is the case the process-
+  lifetime owner exists for. Reopening the window afterwards worked.
+- The process held **no network sockets** before, during or after an export.
+- Two reports written through the real assembly path in a test process — one
+  with no meeting (821 bytes) and one after a paused, resumed and stopped
+  meeting (1,419 bytes) — were read by hand. The second showed 120 captured
+  seconds against 180 wall seconds with one pause, which is the two-clock
+  behaviour stated correctly.
+
+**Observed in the unified log.** `log show --predicate 'subsystem ==
+"quang.ScribeKit"'` over a full test run: every intended event appeared —
+start requested, meeting active, pause and resume completed, intentional stop,
+finalisation as completed, interrupted and failed, session directory and
+transcript opened, recording opened and finalised, recogniser restart
+attempted, succeeded and exhausted, capture stream ended unexpectedly, scan
+results, records refused, reports written and not written. Roughly 1,080 lines
+for 695 tests, and `grep` found no canary, no transcript text and no `/Users`
+in any of them. The one `fault` site was not reached: nothing in the suite
+overflows the transcription event buffer.
+
+**Not done.** No live meeting was driven by hand — capture, recognition and a
+real recording were exercised only through the harness, so the report's
+`session` section has been seen with real numbers from doubles rather than
+from a microphone-in-the-room meeting. No real disk-full or permission-revoked
+failure was reproduced. The VoiceOver-with-no-mouse human pass Interval 21 left
+open is still open; it needs a person, and this interval did not manufacture
+one.
 
 ### Interval 21 validation
 
@@ -2753,7 +2883,43 @@ intervals; the capture observations above were taken through the same path.
 - Dropping audio under backpressure has never happened on this machine, so the
   policy is proved by unit tests rather than by a live overload.
 
+- **A diagnostic report is a snapshot, not a history.** It says nothing about
+  a meeting before the last one and nothing about a previous launch beyond what an
+  unfinished-session scan found. Building a durable event journal was
+  deliberately not done.
+- **`readiness` and `storage` are absent when the window has not been open in
+  this launch.** Absent means unevaluated. Making them present would mean
+  either lying or moving the setup screen's derivations into the process,
+  which is a larger change than a report justifies.
+- **No transcript or recording byte counts.** They would need security-scoped
+  access to stat a canonical artifact, and the counters already say more.
+- **The `fault` site has never fired**, in tests or on this Mac.
+- **Report generation is proved not to touch canonical artifacts by a test
+  and by construction** — the writer is given a report and nothing else — not
+  by a filesystem audit during a live meeting.
+- **The export was driven through the accessibility API, not by a person.**
+  What a first-time user makes of the save panel's wording is unmeasured.
+
 ## Next interval
+
+**Closed by Interval 22.** ScribeKit can now be supported without being
+trusted. Its own transitions and failures are named in the unified log under
+one subsystem and eight categories, and a user can hand somebody a
+point-in-time report that says which subsystem stopped and in what condition
+without carrying a word of what was said, a folder path, or the name of an
+application they had open. The privacy boundary is a test rather than a
+convention.
+
+**Open.** The VoiceOver-with-no-mouse human pass Interval 21 named is still
+the one piece of evidence that cannot be automated, and Interval 22 did not
+manufacture it. Also still open: source disappearance during a running
+capture, `ScreenCaptureKitAudioCapturer.stop()` not calling
+`removeStreamOutput(_:type:)` since Interval 15, and the visible-presentation
+cost Interval 18 profiled. New and honest: no live meeting was driven by hand
+this interval either, so the report's `session` section has been read with
+real numbers from doubles rather than from a real recording.
+
+## Interval 21's closing note
 
 **Closed by Interval 21.** The application has its own menus, derived from the
 same value the menu bar and the window read, so three surfaces cannot disagree

@@ -21,8 +21,20 @@ follows — it is a capability the process does not have.
   substring matching, computed locally.
 - No update check.
 
+- No diagnostic upload. A diagnostic report is created only when you ask for
+  one, written only where you say, and never sent anywhere. See
+  [Diagnostics & Support](diagnostics.md).
+
+## Local logging is not telemetry
+
+ScribeKit writes to the macOS unified logging system, the local facility every
+application on a Mac uses. Those entries stay on your Mac under the system's
+own retention; nothing reads them but you, and ScribeKit itself never collects
+or attaches them.
+
 ## Getting data out
 
 The only way anything leaves your Mac is you moving it: the files are ordinary
 Markdown and audio in a folder you chose, and there is no export feature to
-route them anywhere.
+route them anywhere. A diagnostic report is the one file ScribeKit writes
+outside that folder, and only to a location you pick in a save panel.

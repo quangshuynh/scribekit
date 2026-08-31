@@ -10,11 +10,6 @@ import OSLog
 import Speech
 import Synchronization
 
-/// Subsystem used for transcription logging, matching the application's
-/// identifier so recognition events are filterable in Console alongside the
-/// rest of the app.
-private nonisolated let transcriptionSubsystem = Bundle.main.bundleIdentifier ?? "ScribeKit"
-
 /// Transcribes captured audio with Apple's on-device speech recogniser.
 ///
 /// The actor owns the whole framework-facing side of recognition: availability,
@@ -55,7 +50,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     nonisolated let events: AsyncStream<TranscriptionEvent>
 
     private nonisolated let publisher: TranscriptionEventPublisher
-    private nonisolated let logger = Logger(subsystem: transcriptionSubsystem, category: "Transcription")
+    private nonisolated let logger = ScribeKitLog.recognition
     private nonisolated let backlogCapacity: Int
 
     /// What this Mac's recogniser supports and has installed.
@@ -147,7 +142,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
 
         let availability = await availability(for: configuration)
         guard case let .available(localeIdentifier) = availability else {
-            logger.error("Recognition refused: \(String(describing: availability), privacy: .public)")
+            logger.error("Recognition refused: \(availability.diagnosticName, privacy: .public)")
             throw TranscriptionError.unavailable(availability)
         }
 
@@ -182,7 +177,9 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         } catch {
             results.cancel()
             audioInput.close()
-            logger.error("Recognition failed to start: \(error.localizedDescription, privacy: .public)")
+            logger.error(
+                "Recognition failed to start: \(DiagnosticSafety.sanitized(error.localizedDescription), privacy: .public)"
+            )
             throw TranscriptionError.systemFailure(error.localizedDescription)
         }
 
@@ -215,7 +212,9 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         do {
             try await run.analyzer.finalizeAndFinishThroughEndOfInput()
         } catch {
-            logger.info("Recognition finish reported: \(error.localizedDescription, privacy: .public)")
+            logger.info(
+                "Recognition finish reported: \(DiagnosticSafety.sanitized(error.localizedDescription), privacy: .public)"
+            )
             await run.analyzer.cancelAndFinishNow()
         }
         await drain(run.results)

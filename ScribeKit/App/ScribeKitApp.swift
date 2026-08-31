@@ -31,11 +31,11 @@ struct ScribeKitApp: App {
 
     var body: some Scene {
         Window("ScribeKit", id: Self.mainWindowID) {
-            MainPresentationScene(runtime: delegate.runtime)
+            MainPresentationScene(runtime: delegate.runtime, diagnostics: delegate.diagnostics)
         }
         .windowResizability(.contentMinSize)
         .commands {
-            MeetingCommands(runtime: delegate.runtime)
+            MeetingCommands(runtime: delegate.runtime, diagnostics: delegate.diagnostics)
         }
 
         MenuBarExtra {

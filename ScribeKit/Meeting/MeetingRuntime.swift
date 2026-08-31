@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import OSLog
 
 /// Owns the live pipeline of the one meeting the application can be running:
 /// capture, on-device recognition, durable transcript writing, optional audio
@@ -120,6 +121,27 @@ final class MeetingRuntime {
     /// what to say about its artifacts is not what to say about a meeting that
     /// ran for an hour and then lost one.
     private var didCaptureAudio = false
+
+    /// How many times the user paused the current or most recent meeting.
+    ///
+    /// Kept because a support conversation about a meeting whose recording is
+    /// shorter than its wall clock starts with this number, and nothing else
+    /// records it: a pause leaves a marker in the transcript, which
+    /// diagnostics may not read.
+    private(set) var pauseCount = 0
+
+    /// How many times the recogniser restarted itself, across every run of the
+    /// current or most recent meeting.
+    ///
+    /// Distinct from ``recoveryAttempts``, which is a budget one capture run
+    /// spends and an explicit Resume refills. This only ever goes up.
+    private(set) var recognitionRestartCount = 0
+
+    /// How many finalised spans the writer accepted for this meeting.
+    private(set) var transcriptSpanCount = 0
+
+    /// How many gap markers were written into it.
+    private(set) var gapCount = 0
 
     /// How long the current meeting has been running.
     let elapsed: MeetingElapsedClock
@@ -485,6 +507,17 @@ final class MeetingRuntime {
         recoveryAttempts = 0
         lastCompletion = nil
         didCaptureAudio = false
+        pauseCount = 0
+        recognitionRestartCount = 0
+        transcriptSpanCount = 0
+        gapCount = 0
+        ScribeKitLog.lifecycle.info(
+            """
+            Meeting start requested: \(request.sources.count, privacy: .public) source(s), \
+            retention \(request.audioRetention.diagnosticName, privacy: .public), \
+            locale \(self.localeIdentifier, privacy: .public)
+            """
+        )
         droppedEventBaseline = transcriber.eventTally.dropped
         mediaClock.reset()
         mediaOffsetBase = 0
@@ -505,6 +538,7 @@ final class MeetingRuntime {
             )
             persistenceState = .saving(layout)
         } catch {
+            log(startFailure: error, subsystem: ScribeKitLog.persistence)
             persistenceState = .failed(message: message(for: error, sources: []), layout: nil)
             transcriptionState = .idle
             captureState = .idle
@@ -526,6 +560,7 @@ final class MeetingRuntime {
             )
             audioRetentionState = url.map { .retaining($0) } ?? .idle
         } catch {
+            log(startFailure: error, subsystem: ScribeKitLog.audio)
             audioRetentionState = .failed(message: message(for: error, sources: []), url: nil)
             transcriptionState = .idle
             captureState = .idle
@@ -539,6 +574,7 @@ final class MeetingRuntime {
             try await transcriber.start(configuration: configuration)
             transcriptionState = .transcribing
         } catch {
+            log(startFailure: error, subsystem: ScribeKitLog.recognition)
             transcriptionState = .failed(message: message(for: error, sources: request.sources))
             captureState = .idle
             // Nothing was captured, so the meeting did not finish: it never
@@ -553,7 +589,9 @@ final class MeetingRuntime {
             try await capturer.start(configuration: captureConfiguration)
             captureState = .capturing
             didCaptureAudio = true
+            ScribeKitLog.lifecycle.info("Meeting became active")
         } catch {
+            log(startFailure: error, subsystem: ScribeKitLog.capture)
             await transcriber.stop()
             transcriptionState = .idle
             captureState = .failed(message: message(for: error, sources: request.sources))
@@ -580,6 +618,7 @@ final class MeetingRuntime {
     /// rather than sitting in a state the file does not record.
     func pause() async {
         guard canPause else { return }
+        ScribeKitLog.lifecycle.debug("Pause requested")
         pauseFailureMessage = nil
         captureState = .stopping
         transcriptionState = .stopping
@@ -599,12 +638,20 @@ final class MeetingRuntime {
         guard persistenceState.isActive else {
             captureState = .paused
             pausedAt = date
+            pauseCount += 1
+            ScribeKitLog.lifecycle.info(
+                "Pause completed at \(captured, format: .fixed(precision: 3), privacy: .public)s captured"
+            )
             return
         }
         do {
             try await persistence.recordPause(at: date, capturedDuration: captured)
             pausedAt = date
             captureState = .paused
+            pauseCount += 1
+            ScribeKitLog.lifecycle.info(
+                "Pause completed at \(captured, format: .fixed(precision: 3), privacy: .public)s captured"
+            )
         } catch {
             captureState = .idle
             await failPersistence(error)
@@ -623,11 +670,13 @@ final class MeetingRuntime {
     /// back rather than losing the meeting to a missing application.
     func resume() async {
         guard canResume, let captureConfiguration else { return }
+        ScribeKitLog.lifecycle.debug("Resume requested")
         pauseFailureMessage = nil
 
         do {
             try await transcriber.start(configuration: configuration)
         } catch {
+            log(handled: error, subsystem: ScribeKitLog.recognition, what: "Resume refused")
             pauseFailureMessage = message(for: error, sources: meeting?.sources ?? [])
             return
         }
@@ -638,6 +687,7 @@ final class MeetingRuntime {
             // Recognition is put back the way it was: the meeting is still
             // paused, and a recogniser left running with no audio would be a
             // second thing to go wrong on the next attempt.
+            log(handled: error, subsystem: ScribeKitLog.capture, what: "Resume refused")
             await transcriber.stop()
             await drainPendingEvents()
             pauseFailureMessage = message(for: error, sources: meeting?.sources ?? [])
@@ -669,6 +719,7 @@ final class MeetingRuntime {
         pausedAt = nil
         transcriptionState = .transcribing
         captureState = .capturing
+        ScribeKitLog.lifecycle.info("Resume completed")
     }
 
     /// Stops the meeting, in the order that loses nothing.
@@ -682,6 +733,7 @@ final class MeetingRuntime {
     /// lease released and the meeting reported as over.
     func stop() async {
         guard canStop else { return }
+        ScribeKitLog.lifecycle.info("Intentional stop requested")
         captureState = .stopping
         transcriptionState = .stopping
         await capturer.stop()
@@ -744,11 +796,19 @@ final class MeetingRuntime {
                 capturedDuration: mediaClock.seconds
             )
             persistenceState = layout.map { .saved($0) } ?? .idle
-            lastCompletion = MeetingCompletion(
-                outcome: audioFailure == nil ? outcome : .failed,
-                capturedAudio: didCaptureAudio
+            let recorded = audioFailure == nil ? outcome : .failed
+            lastCompletion = MeetingCompletion(outcome: recorded, capturedAudio: didCaptureAudio)
+            ScribeKitLog.lifecycle.info(
+                """
+                Finalisation completed as \(recorded.diagnosticName, privacy: .public): \
+                \(self.transcriptSpanCount, privacy: .public) span(s), \
+                \(self.gapCount, privacy: .public) gap(s), \
+                \(self.pauseCount, privacy: .public) pause(s), \
+                \(self.recognitionRestartCount, privacy: .public) recogniser restart(s)
+                """
             )
         } catch {
+            log(failure: error, subsystem: ScribeKitLog.persistence, what: "Session record not closed")
             persistenceState = .failed(message: message(for: error, sources: []), layout: layout)
             lastCompletion = MeetingCompletion(outcome: .failed, capturedAudio: didCaptureAudio)
         }
@@ -766,8 +826,10 @@ final class MeetingRuntime {
         do {
             try audio.finishSession()
             audioRetentionState = .retained(url)
+            ScribeKitLog.audio.info("Recording finalised")
             return nil
         } catch {
+            log(failure: error, subsystem: ScribeKitLog.audio, what: "Recording not finalised")
             let text = message(for: error, sources: [])
             audioRetentionState = .failed(message: text, url: url)
             return text
@@ -789,6 +851,7 @@ final class MeetingRuntime {
     /// - Parameter error: What the retainer reported.
     private func handleRetentionFailure(_ error: AudioRetentionError) {
         guard case let .retaining(url) = audioRetentionState else { return }
+        log(failure: error, subsystem: ScribeKitLog.audio, what: "Recording write failed")
         audioRetentionState = .failed(message: message(for: error, sources: []), url: url)
         audio.cancelSession()
         guard canStop else { return }
@@ -818,6 +881,16 @@ final class MeetingRuntime {
         transcript.apply(event)
 
         guard transcriber.eventTally.dropped <= droppedEventBaseline else {
+            // The one condition here that should be impossible: the queue
+            // between recognition and this handler is bounded and sized for a
+            // meeting, and an entry it could not hold is transcript material
+            // that no longer exists.
+            ScribeKitLog.persistence.fault(
+                """
+                Transcription event buffer overflowed after \
+                \(self.transcriptSpanCount, privacy: .public) span(s); ending the meeting
+                """
+            )
             await failPersistence(message: Self.droppedEventsMessage)
             return
         }
@@ -907,6 +980,7 @@ final class MeetingRuntime {
         guard case .saving = persistenceState, !segment.displayText.isEmpty else { return }
         do {
             try await persistence.appendFinalSegment(segment)
+            transcriptSpanCount += 1
         } catch {
             await failPersistence(error)
         }
@@ -919,6 +993,7 @@ final class MeetingRuntime {
         guard case .saving = persistenceState else { return }
         do {
             try await persistence.recordGap(gap)
+            gapCount += 1
         } catch {
             await failPersistence(error)
         }
@@ -948,6 +1023,9 @@ final class MeetingRuntime {
     /// - Parameter message: What to tell the user.
     private func failPersistence(message: String) async {
         guard persistenceState.isActive else { return }
+        ScribeKitLog.persistence.error(
+            "Transcript persistence failed after \(self.transcriptSpanCount, privacy: .public) span(s)"
+        )
         persistenceState = .failed(message: message, layout: persistenceState.layout)
         try? await persistence.finishSession(
             endedAt: now(),
@@ -998,6 +1076,12 @@ final class MeetingRuntime {
     private func recoverRecognition() async {
         guard captureState == .capturing, transcriptionState == .transcribing else { return }
         guard recoveryAttempts < Self.maximumRecoveryAttempts else {
+            ScribeKitLog.recognition.error(
+                """
+                Recogniser restart budget exhausted after \
+                \(self.recognitionRestartCount, privacy: .public) restart(s); ending the meeting
+                """
+            )
             transcriptionState = .failed(
                 message: "Speech recognition stopped repeatedly and was not restarted again."
             )
@@ -1006,6 +1090,10 @@ final class MeetingRuntime {
         }
 
         recoveryAttempts += 1
+        recognitionRestartCount += 1
+        ScribeKitLog.recognition.notice(
+            "Recogniser restart attempted (\(self.recognitionRestartCount, privacy: .public) this meeting)"
+        )
         transcriptionState = .recovering
         let startedRecovery = Date()
         await transcriber.stop()
@@ -1013,11 +1101,13 @@ final class MeetingRuntime {
         do {
             try await transcriber.start(configuration: configuration)
             transcriptionState = .transcribing
+            ScribeKitLog.recognition.notice("Recogniser restart succeeded")
             // The new run counts from its own first frame again, so its
             // offsets are short by everything captured before it started.
             pendingMediaOffsetBase = (mediaClock.seconds, transcriber.eventTally.published)
         } catch {
             restartFailed = true
+            log(failure: error, subsystem: ScribeKitLog.recognition, what: "Recogniser restart failed")
             transcriptionState = .failed(message: message(for: error, sources: []))
         }
         let lost = Date().timeIntervalSince(startedRecovery)
@@ -1066,6 +1156,7 @@ final class MeetingRuntime {
     /// - Parameter error: The reason capture ended.
     private func handleCaptureInterruption(_ error: AudioCaptureError) {
         guard captureState.isActive else { return }
+        log(failure: error, subsystem: ScribeKitLog.capture, what: "Capture stream ended unexpectedly")
         captureState = .failed(message: message(for: error, sources: []))
         guard transcriptionState.isActive || persistenceState.isActive
             || audioRetentionState.isActive else { return }
@@ -1098,5 +1189,59 @@ final class MeetingRuntime {
             return "No longer running, so capture did not start: " + names.formatted(.list(type: .and))
         }
         return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    // MARK: - Diagnostics
+
+    /// The audio format capture was asked for, once a meeting has started.
+    var requestedCaptureFormat: CapturedAudioFormat? { captureConfiguration?.requestedFormat }
+
+    /// Records a failure by what it was rather than by what it said.
+    ///
+    /// The subsystem's own sentence is already on screen and already in the
+    /// state that carries it; what a log adds is a name that survives a
+    /// rewording, and the system's domain and code, which say the same thing
+    /// as a localised sentence without also naming a file.
+    ///
+    /// - Parameters:
+    ///   - error: What the subsystem reported.
+    ///   - logger: The category this belongs to.
+    ///   - what: The transition that failed. A literal, never user text.
+    private func log(failure error: Error, subsystem logger: Logger, what: String) {
+        let identity = DiagnosticSafety.systemErrorIdentity(error)
+        logger.error(
+            """
+            \(what, privacy: .public): \
+            \(DiagnosticCategory(error)?.rawValue ?? "unclassified", privacy: .public) \
+            [\(identity.domain, privacy: .public) \(identity.code, privacy: .public)]
+            """
+        )
+    }
+
+    /// Records something unusual that was handled, leaving the meeting in a
+    /// state the user can act on.
+    ///
+    /// - Parameters:
+    ///   - error: What the subsystem reported.
+    ///   - logger: The category this belongs to.
+    ///   - what: The transition that was refused. A literal, never user text.
+    private func log(handled error: Error, subsystem logger: Logger, what: String) {
+        let identity = DiagnosticSafety.systemErrorIdentity(error)
+        logger.notice(
+            """
+            \(what, privacy: .public): \
+            \(DiagnosticCategory(error)?.rawValue ?? "unclassified", privacy: .public) \
+            [\(identity.domain, privacy: .public) \(identity.code, privacy: .public)]
+            """
+        )
+    }
+
+    /// Records a start that did not become a meeting.
+    ///
+    /// - Parameters:
+    ///   - error: What the subsystem reported.
+    ///   - logger: The category this belongs to.
+    private func log(startFailure error: Error, subsystem logger: Logger) {
+        log(failure: error, subsystem: logger, what: "Meeting start failed")
     }
 }

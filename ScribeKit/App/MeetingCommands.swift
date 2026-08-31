@@ -22,6 +22,11 @@ struct MeetingCommands: Commands {
     /// The application's meeting owner, shared with both scenes.
     let runtime: MeetingRuntime
 
+    /// The application's diagnostics owner. The menu is the discoverable home
+    /// for exporting a report, and the one place that works with no window
+    /// open.
+    let diagnostics: MeetingDiagnostics
+
     @FocusedValue(\.historySearchFocus) private var historySearch
     @FocusedValue(\.scribeKitTabSelection) private var tabSelection
 
@@ -68,7 +73,14 @@ struct MeetingCommands: Commands {
             .disabled(presentation.audioURL == nil)
         }
 
-        CommandGroup(replacing: .help) { }
+        CommandGroup(replacing: .help) {
+            // The Help menu is where a Mac application puts the thing you
+            // reach for when something has gone wrong, and it is reachable
+            // with no window open, which a menu bar application needs. The
+            // ellipsis is honest: this opens a save panel and writes nothing
+            // until the user picks a destination.
+            Button("Export Diagnostics…") { diagnostics.export() }
+        }
 
         CommandGroup(after: .textEditing) {
             Button("Search History") {
