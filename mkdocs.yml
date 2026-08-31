@@ -122,6 +122,7 @@ nav:
       - Data Handling: privacy/data-handling.md
       - Permissions: privacy/permissions.md
       - Network Policy: privacy/network-policy.md
+      - Diagnostics & Support: privacy/diagnostics.md
   - Development:
       - Building: development/building.md
       - Testing: development/testing.md
