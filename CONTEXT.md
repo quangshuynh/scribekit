@@ -1333,6 +1333,83 @@ titles, no telemetry.
 
 ## Validation status
 
+### Interval 16 validation
+
+One interval, one bug: the crash Interval 15 found and could not explain.
+Diagnosis first, from the machine's own crash reports, then a deterministic
+reproduction, then the smallest fix the mechanism justifies.
+
+**What the reports actually said.** Four `EXC_BAD_ACCESS` / `SIGBUS`,
+`KERN_PROTECTION_FAILURE` reports exist on the machine — one from ordinary
+interactive use on 30 August, three from the measurement soaks — and all four
+agree structurally: macOS 26.6.2 (25G83), the faulting thread is
+`quang.ScribeKit.audio-capture`, and the faulting address is a write (ESR
+`0x92000047`, WnR set) 15 to 32 bytes inside that thread's own stack guard
+region. The stack pointer at the fault is 48 to 80 bytes above the base of a
+544 KB stack: the thread had consumed all of it.
+
+Interval 15 read those reports as shallow stacks and concluded the fault was
+not recursion in ScribeKit. That was wrong, and the reason is worth recording.
+The `.ips` format **elides recursive frames**: each report carries a
+`recursionInfoArray` and an `originalLength`, and the rendered 41–48 frames
+are what is left after the collapse. The real figures are `originalLength`
+5,564 to 5,571 frames, with a recursion `depth` of 2,766 to 2,770 repetitions
+of a two-frame cycle — a `thunk for @escaping @callee_guaranteed @Sendable
+(@unowned AudioCaptureActivity) -> ()` calling itself, sitting between
+`AudioCaptureActivityMonitor.publish(activity:)` and the observer
+`MeetingRuntime.init` installs. Both hypotheses Interval 15 falsified were
+falsified correctly; the third was never formed because the collapsed view
+hid the evidence.
+
+**The mechanism, reproduced in isolation.** The monitor held its observer as
+`Mutex<(@Sendable (AudioCaptureActivity) -> Void)?>` and published with
+`handler.withLock { $0 }?(activity)` — copy the function out under the lock,
+call it outside, so a slow observer cannot block the delivery queue. A
+function type stored as a generic container's value lives at maximal
+abstraction, and copying it back out re-abstracts it; the thunk that copy
+gains is left behind in the stored value. So every publish wrapped the stored
+observer once more, and the next publish called through the whole chain.
+
+A three-way comparison in a standalone program settled it: copying the
+function out of the lock grew the observed call depth by two frames per
+publish without bound; calling it inside the lock did not; and copying out a
+*value* that holds the function did not. Only the shape ScribeKit used grows.
+
+The arithmetic then matches every report. The monitor coalesces at 500 ms, so
+publishes arrive at 2 Hz; 2,768 wrappers is 23 minutes, and 5,536 frames over
+544 KB is 98 bytes a frame — the size of a two-frame thunk cycle. That is the
+20–26 minute band, why it happened with and without Pause/Resume, why the
+innermost frame moved from `Task.init` to `Continuation.yield` when the
+main-actor hop was removed (the innermost frame is incidental; the stack is
+already at its guard page by then), and why ten-minute runs never saw it. It
+also explains why the fault is a *write*: the prologue of the 2,769th frame
+pushing its frame pointer below the stack base.
+
+**The fix.** The observer is now held in a value that owns its function, so
+the stored closure is the one that was installed and a publish costs the same
+stack on the last buffer of a meeting as on the first. Nothing else changed:
+the observer is still called outside the lock, still on the delivery queue,
+still coalesced at the same interval.
+
+**Confirmation.** The regression test drives 6,000 publishes — fifty minutes
+at the interval capture actually uses, comfortably past the band the crash
+fell in — through the real monitor on a thread given the same 512 KB stack
+ScreenCaptureKit's delivery queue has, and samples the call depth at the
+first, three-thousandth and six-thousandth. Against the old monitor the depth
+went 42 to 2,040 over 1,000 publishes, exactly two frames each; against the
+new one all three samples are identical and the run takes 18 ms.
+
+**Not done, and not claimed.** No 45- or 60-minute real-`SCStream` soak was
+run this interval. The Interval 15 measurement harness was never committed,
+and rebuilding it was out of scope here; what is proven is the mechanism, its
+rate, and that it is gone — proven deterministically, at more than twice the
+buffer count at which the process used to die, against the production type on
+the production stack size. A real soak past 45 minutes remains the thing that
+would close this from the outside. Nothing about retention changed, so the
+Interval 14 artifact behaviour stands as documented; the crash that
+threatened an unfinalised M4A is what was removed, not a new way of surviving
+one.
+
 ### Interval 15 validation
 
 The first real-time interval: the running subsystems under sustained
@@ -2228,26 +2305,23 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 16 has one obvious first task: the crash. It is reproducible on a
-known recipe — real capture, compressed retention, left running, dead between
-twenty and twenty-six minutes, with or without a Pause/Resume — it has hit a
-user in ordinary use, and it destroys a meeting, taking the unfinalised M4A
-with it.
-Everything else on this list is smaller than that. It needs a debugger on a
-reproducing run rather than another hypothesis; the thing worth understanding first
-is why a shallow stack faults on its guard page at all. Two hypotheses were
-already formed and falsified by measurement; a third should not be written into
-the code before a debugger has seen the reproducing run.
+Interval 16 removed the crash. What Interval 15 listed first is done: the
+delivery queue's stack no longer grows with the meeting, and the mechanism is
+covered by a test that fails loudly against the old shape. The one thing it
+did not do is confirm it from the outside — a real `SCStream` soak past
+forty-five minutes, ideally an hour, ending in a normal Stop with a readable
+transcript and a finalised M4A. That is the first task, and it needs the
+measurement harness Interval 15 built and never committed.
 
-After that, the gap this interval could not close is the interface. Every figure in
+After that, the gap Interval 15 could not close is the interface. Every figure in
 `docs/PERFORMANCE.md` was taken from a process with no window, so what a
 meeting costs is known and what *showing* a meeting costs is not. That is the
 one measurement worth taking before anything is throttled or lazily rendered:
 the same meeting with the window visible, hidden and closed, driven by hand,
 with CPU sampled from outside. Until it exists, no presentation throttling is
-justified — and the crash found this interval is a warning about guessing,
-since the expensive thing turned out not to be rendering at all but a task
-created per update on the audio delivery queue.
+justified — and the crash is a warning about guessing, since the expensive
+thing turned out not to be rendering at all, nor the task created per update
+that the first guess replaced.
 
 Two smaller things follow it. The capture-end status stays `completed` for want
 of a real `didStopWithError` to reason from; whatever produces one — a revoked

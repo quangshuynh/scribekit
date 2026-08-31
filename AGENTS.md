@@ -192,6 +192,16 @@ overflow is measured and reported. An unbounded `AsyncStream` or array between
 capture and a slower consumer is a memory leak with a delay on it. Recognised
 text may grow with the meeting; raw audio may not.
 
+Nothing on the delivery path grows with the length of a meeting — not memory,
+and not stack. The last buffer of a meeting must reach every consumer through
+the same call depth as the first, so state the pipeline keeps between buffers
+is checked for accumulation in its shape as well as its size. A function value
+is state: stored as a generic container's value — a `Mutex`'s `Value`, for
+instance — it is re-abstracted every time it is copied out, and the thunk it
+gains stays in the stored value, so a callback that reads and calls one at
+audio rate wraps it again on every pass. An observer on that path is held
+inside a value that owns its function, not as a bare function type.
+
 ## Documentation comments
 
 Use native Swift `///` comments on non-trivial public and internal types,
