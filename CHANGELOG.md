@@ -6,6 +6,27 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- A meeting whose capture ends by itself is no longer recorded as completed.
+  ScreenCaptureKit ending a stream mid-meeting reached
+  `MeetingRuntime.handleCaptureInterruption`, which closed the session through
+  an outcome that defaulted to completed, so `session.json` described a meeting
+  that lost its audio as one the user finished. It is now recorded as
+  `interrupted`, the status the format already had for a meeting that ended
+  without being stopped, and History says so. The artifacts are unaffected:
+  the transcript and any retained recording are still flushed, closed and
+  kept with everything that reached them, and the transcript gains one
+  appended blockquote saying capture ended unexpectedly, at the time it did,
+  before its usual closing block. A meeting the user stops is still
+  `completed`; a meeting whose transcript or recording stopped being saved is
+  still `failed`. Sessions recorded before this change are unaffected and no
+  schema version changed.
+- Every session ScribeKit closes now records how much audio it captured.
+  `capturedDuration` was written only when a meeting had been paused, so a
+  normal meeting's record left it absent — which reads as a session written
+  before the field existed rather than as the meeting it describes. The value
+  is the media clock's, never derived from wall-clock length, and records
+  written without it stay readable.
+
 - A meeting with the window on screen does less work. The elapsed clock, the
   capture activity summary and the live transcript were all read inside the
   setup screen's own body, so each of about eight updates a second — the

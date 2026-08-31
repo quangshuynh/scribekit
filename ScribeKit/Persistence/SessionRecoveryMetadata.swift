@@ -27,8 +27,17 @@ nonisolated enum SessionRecoveryStatus: String, Codable, Sendable, CaseIterable,
     /// rather than a lost one.
     case failed
 
-    /// The session was found unfinished after a relaunch and the user was
-    /// shown it. Recorded so the same interruption is not reported forever.
+    /// The meeting ended without anyone stopping it, and its artifacts were
+    /// closed with everything that reached them.
+    ///
+    /// Two paths write it, and they mean the same thing about the files. A
+    /// session found unfinished after a relaunch is marked this way once the
+    /// user has been shown it, so the same interruption is not reported
+    /// forever; and a meeting whose capture stream ended by itself is closed
+    /// this way while ScribeKit is still running, because finalising a
+    /// transcript successfully does not turn an unexpected end into a
+    /// completion. It is distinct from ``failed``, which is about an artifact
+    /// that could not be saved rather than about capture stopping.
     case interrupted
 }
 
@@ -98,15 +107,22 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     /// Where the session stands.
     let status: SessionRecoveryStatus
 
-    /// When ScribeKit closed the session, for ``SessionRecoveryStatus/completed``
-    /// and ``SessionRecoveryStatus/failed``. `nil` otherwise, because a
-    /// meeting ScribeKit did not close has no end time it can honestly state.
+    /// When ScribeKit closed the session, for every status it wrote while it
+    /// was running — ``SessionRecoveryStatus/completed``,
+    /// ``SessionRecoveryStatus/failed``, and the
+    /// ``SessionRecoveryStatus/interrupted`` written when capture ended by
+    /// itself. `nil` otherwise, because a meeting ScribeKit did not close has
+    /// no end time it can honestly state.
     let endedAt: Date?
 
-    /// When ScribeKit *recorded* an interruption, which is the moment the user
-    /// was shown it after a relaunch.
+    /// When ScribeKit *recorded* an interruption.
     ///
-    /// This is deliberately not the moment the meeting stopped: that moment is
+    /// For a session found unfinished after a relaunch this is the moment the
+    /// user was shown it. For a meeting whose capture ended while ScribeKit
+    /// was running it is the moment capture ended, which this process did
+    /// observe.
+    ///
+    /// It is deliberately not the moment a killed process stopped: that moment is
     /// not observable from inside a process that was killed, and inventing it
     /// would put a fact in the record that nothing measured.
     let interruptedAt: Date?
@@ -211,10 +227,28 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     /// - Parameters:
     ///   - outcome: How the session ended.
     ///   - endedAt: When it ended.
-    /// - Returns: A copy carrying the new status and end time.
-    func closed(_ outcome: SessionCompletionOutcome, at endedAt: Date) -> SessionRecoveryMetadata {
+    ///   - capturedDuration: Seconds of audio the meeting captured, which the
+    ///     runtime knows exactly at this point and which is therefore recorded
+    ///     for every session ScribeKit closes rather than only for one that
+    ///     was paused. `nil` keeps whatever the record already carries, which
+    ///     is what a caller that cannot measure it must pass.
+    /// - Returns: A copy carrying the new status, end time and captured
+    ///   length.
+    func closed(
+        _ outcome: SessionCompletionOutcome,
+        at endedAt: Date,
+        capturedDuration: Double? = nil
+    ) -> SessionRecoveryMetadata {
         // A closed meeting is not paused, whatever it was doing a moment ago.
-        copy(status: outcome.recoveryStatus, endedAt: endedAt, interruptedAt: interruptedAt, pausedAt: .some(nil))
+        // An interruption ScribeKit closed itself is dated: unlike one found
+        // after a relaunch, this process was running and watched it happen.
+        copy(
+            status: outcome.recoveryStatus,
+            endedAt: endedAt,
+            interruptedAt: outcome == .interrupted ? endedAt : interruptedAt,
+            pausedAt: .some(nil),
+            capturedDuration: capturedDuration
+        )
     }
 
     /// The same record marked as an interruption ScribeKit has now reported.
@@ -355,24 +389,45 @@ nonisolated extension SessionRecoveryMetadata {
 
 /// How a meeting ended, as the writer reports it to the session record.
 ///
-/// The two cases are not interchangeable. ``completed`` may only be recorded
-/// once every durable artifact the meeting enabled — the transcript, and the
-/// retained recording when there is one — has been finished successfully;
-/// ``failed`` says the meeting ended because one of them stopped working,
-/// which is a different thing to tell a user than a meeting that vanished.
+/// The cases are not interchangeable, and the distinction they carry is not
+/// the same distinction as "did the files close cleanly". ``completed`` says
+/// two things at once and needs both: every durable artifact the meeting
+/// enabled — the transcript, and the retained recording when there is one —
+/// was finished successfully, *and* the meeting ended because someone ended
+/// it. ``failed`` says an artifact stopped working. ``interrupted`` says the
+/// artifacts are fine and the meeting is not: capture ended by itself, so the
+/// document stops where the audio did.
+///
+/// Closing a transcript successfully is therefore never on its own enough to
+/// record a completion, which is why the caller states the outcome rather than
+/// letting one be assumed.
 nonisolated enum SessionCompletionOutcome: Equatable, Sendable {
-    /// Every durable artifact was finished normally.
+    /// Every durable artifact was finished normally, at the end of a meeting
+    /// that was stopped deliberately.
     case completed
 
     /// The meeting ended because a durable artifact could not be saved or
     /// could not be finalised.
     case failed
 
+    /// The meeting ended because capture stopped without being asked to. The
+    /// artifacts are closed and hold everything that reached them.
+    case interrupted
+
+    /// Whether the transcript's closing block may be written for this outcome.
+    ///
+    /// A footer states when the meeting ended and how long it ran, which are
+    /// facts about a document that closed cleanly. That is true of a meeting
+    /// whose capture died as much as of one that was stopped; it is not true
+    /// of a meeting whose file refused a write.
+    var writesFooter: Bool { self != .failed }
+
     /// The status this outcome is recorded as.
     var recoveryStatus: SessionRecoveryStatus {
         switch self {
         case .completed: .completed
         case .failed: .failed
+        case .interrupted: .interrupted
         }
     }
 }

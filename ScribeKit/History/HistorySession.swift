@@ -25,7 +25,9 @@ nonisolated enum HistorySessionStatus: String, Equatable, Sendable, CaseIterable
     /// The meeting ended because a durable artifact stopped being saved.
     case failed
 
-    /// The meeting was found unfinished after a relaunch and reported.
+    /// The meeting ended without being stopped: either ScribeKit stopped
+    /// while it was running and the interruption was reported afterwards, or
+    /// capture ended by itself and ScribeKit closed the meeting there.
     case interrupted
 
     /// The directory holds a ScribeKit transcript and no session record, so
@@ -66,8 +68,8 @@ nonisolated enum HistorySessionStatus: String, Equatable, Sendable, CaseIterable
         case .failed:
             "The meeting ended because a durable artifact stopped being saved. What reached the files is here."
         case .interrupted:
-            "ScribeKit stopped before this meeting finished. The transcript ends at the last speech that "
-            + "reached the file."
+            "This meeting was not stopped — it ended when ScribeKit or its capture did. The transcript "
+            + "ends at the last speech that reached the file."
         case .unrecorded:
             "This meeting has no ScribeKit session record, so only what its transcript states is known."
         }

@@ -148,6 +148,51 @@ struct SessionRecoveryMetadataTests {
         #expect(SessionRecoveryStatus.allCases.count == 4)
         #expect(SessionCompletionOutcome.completed.recoveryStatus == .completed)
         #expect(SessionCompletionOutcome.failed.recoveryStatus == .failed)
+        #expect(SessionCompletionOutcome.interrupted.recoveryStatus == .interrupted)
+    }
+
+    @Test("A meeting closed because capture ended is dated, and is not offered as an unfinished one")
+    func closingAnInterruptionRecordsWhatWasObserved() {
+        let endedAt = startedAt.addingTimeInterval(3_600)
+
+        let interrupted = metadata()
+            .pausing(at: startedAt.addingTimeInterval(60), capturedDuration: 60)
+            .closed(.interrupted, at: endedAt, capturedDuration: 1_800)
+
+        #expect(interrupted.status == .interrupted)
+        #expect(interrupted.endedAt == endedAt)
+        // ScribeKit was running and watched capture end, so unlike a session
+        // found after a relaunch this one knows when it was interrupted.
+        #expect(interrupted.interruptedAt == endedAt)
+        #expect(interrupted.capturedDuration == 1_800)
+        // A closed meeting is not paused, and is not an abandoned pause.
+        #expect(interrupted.pausedAt == nil)
+        #expect(!interrupted.wasPausedWhenInterrupted)
+        // Recovery only ever considers a record still saying in progress.
+        #expect(interrupted.status != .inProgress)
+    }
+
+    @Test("Closing records the captured length, and a caller that cannot measure one changes nothing")
+    func closingCarriesTheCapturedLength() {
+        let endedAt = startedAt.addingTimeInterval(600)
+
+        let measured = metadata().closed(.completed, at: endedAt, capturedDuration: 599.5)
+        let legacy = metadata().closed(.completed, at: endedAt)
+
+        #expect(measured.capturedDuration == 599.5)
+        #expect(legacy.capturedDuration == nil)
+    }
+
+    @Test("A record written before captured duration existed carries no such key and still decodes")
+    func legacyRecordsDecodeWithoutACapturedLength() throws {
+        let legacy = metadata().closed(.completed, at: startedAt.addingTimeInterval(600))
+        let data = try legacy.encoded()
+
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(!text.contains("capturedDuration"))
+        let decoded = try SessionRecoveryMetadata.decoded(from: data)
+        #expect(decoded.capturedDuration == nil)
+        #expect(decoded.status == .completed)
     }
 
     @Test("The transcript is found relative to the directory the record was read from")

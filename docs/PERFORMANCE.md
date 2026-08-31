@@ -369,10 +369,15 @@ The durable artifacts themselves were fine — the transcript parsed and carried
 its footer, and the 259-second recording opened and matched the captured
 duration — but the record describes a failure as a normal end.
 
-Nothing was changed here on the strength of one observation: this interval's
+Nothing was changed there on the strength of one observation: that interval's
 job was measurement, and altering a persisted status enum reaches recovery,
-History and the recovery screen. It is recorded as the evidence that question
-was waiting for.
+History and the recovery screen. Interval 18 changed it: the same event now
+closes the session as `interrupted`, keeping every artifact and its
+finalisation exactly as they were. The change was validated deterministically
+through the runtime rather than by trying to force ScreenCaptureKit into an
+error again — the real event above is what the semantics were chosen from, and
+a second one was not manufactured to confirm arithmetic that a test states
+better.
 
 ## ScreenCaptureKit and a source that quits
 
@@ -399,6 +404,104 @@ from what the framework provides is to watch for silence, and silence is not
 death — a meeting where nobody is talking looks identical. Inventing that
 inference would mean ending meetings that were merely quiet, which is worse
 than the gap it would close.
+
+## Interval 18: where the interface's time actually goes
+
+Instruments' Time Profiler, attached to a Release soak of `presentationCost`
+on the same M1, 170 seconds per attachment, once with the window visible and
+once with the hosting view taken down. The soak's own sampler reported 19.8%
+of a core visible and 5.0% with the view down over the same run, and the
+profiler's own totals agree (33.2 s of CPU over 170 s visible; 9.8 s with the
+view down), so the samples describe the phases the earlier table measured.
+
+Visible, by where the time is, as a share of all sampled CPU in the process:
+
+| Where | Share |
+|---|---|
+| Under SwiftUI's view-graph update in total | 68.9% |
+| — of which layout (`sizeThatFits` down the stack) | 30.4% |
+| — of which the live transcript's scroll view (`ScrollViewLayoutComputer`) | 28.3% |
+| — of which body evaluation (`ViewBodyAccessor.updateBody`) | 10.5% |
+| — of which `ForEach` list application (`DynamicViewList.applyNodes`) | 7.1% |
+| — of which the form's own rows (`FormCell.body`, `GroupedSection`) | ~5% |
+| AppKit window layout (`layoutSubtreeIfNeeded` off the display cycle) | 17.9% |
+| Text layout proper (`StyledTextLayoutEngine`, `StringDrawing`) | ~1.5% |
+| ScribeKit's own capture path (`StreamOutput`, converter, transcriber input) | ~3.6% |
+
+Three attributions follow, and the first corrects a guess this document made
+before there was a profile.
+
+- **It is not text layout.** Laying out the transcript's glyphs is about a
+  point and a half. The cost is *stack and scroll-view sizing*: measuring the
+  live transcript's scrolling content, and the form re-measuring around it.
+- **Hiding the window changes nothing because nothing stops.** With the view
+  taken down, SwiftUI accounts for 2.6% of a much smaller total; with the
+  window merely off screen the graph is still attached, still updating and
+  still being laid out by AppKit's display cycle. That is the mechanism behind
+  the two-to-three points `orderOut` was measured to save.
+- **ScribeKit's own code is a small fraction of a visible meeting.** The
+  capture path — sample delivery, conversion, the recogniser's input — is
+  under four points of the process, and it is what remains when the view is
+  gone.
+
+### Two optimisations were measured and neither was kept
+
+Both were tried against the 19.8% visible baseline, in the same twelve-minute
+three-phase run, with the view-down floor as a control.
+
+1. **Move the partial hypothesis out of the scrolling list**, so a partial no
+   longer reapplies the `ForEach` over every finalised span. Visible rose to
+   **29.2%** — nine points *worse*. The fixed-height scroll view is a layout
+   barrier: a row that grows inside it re-measures that content and stops,
+   while the same row in the form re-measures the form.
+2. **Keep it inside the list but give it its own view**, so the section's body
+   no longer reads the partial at recognition rate. Visible was **20.9%**
+   against a 19.8% baseline and a floor that moved by 0.7 points between runs
+   — no improvement, inside the noise.
+
+Both were reverted. The remaining cost is SwiftUI re-measuring a scroll view
+whose content changes several times a second, which is what a live transcript
+is; nothing narrow and safe was found that removes it, and the policy here is
+not to ship an optimisation that no measurement supports. What the profile does
+say is where a *design* change would have to act — at the presentation
+lifecycle, not inside these views — which is left as evidence rather than
+attempted here.
+
+## Interval 18: the RSS drift, measured against the heap
+
+Interval 17 recorded RSS climbing 91.5 → 106.3 MB over sixty minutes and called
+it monotonic. A twenty-six-minute headless Release soak with `malloc` heap
+snapshots at four minutes and twenty-four minutes says the number was the wrong
+instrument:
+
+| At | RSS | Footprint | Malloc heap | Nodes |
+|---|---|---|---|---|
+| 4 min | 109.5 MB | 110 MB | 55.2 MB | 344,445 |
+| 24 min | 101.2 MB | 100 MB | 59.1 MB | 360,705 |
+
+**RSS fell while the heap grew.** Over the same twenty minutes the process's
+resident size dropped about eight megabytes and its malloc heap grew 3.9 MB, so
+resident size is tracking reclaim rather than retention, and "monotonic" was a
+property of one run rather than of the program.
+
+Retained growth, by class, over those twenty minutes:
+
+- One `[(Double, UInt64?)]` array, 512 KB → 2 MB, holding about one element per
+  captured buffer. No ScribeKit type has that shape — the largest ScribeKit
+  array in the snapshot is `[TranscriptSegment]` — and this is Swift-typed
+  framework storage. It is the single biggest grower and it is *inferred*, not
+  proven, to be the recogniser's own timeline.
+- `[ScribeKit.TranscriptSegment]`, +18 KB: the live transcript's finalised
+  spans, one array, growing with the meeting. That is required user-visible
+  state, and at roughly 50 KB an hour it is not worth bounding.
+- About 2,300 AppKit `HIDEvent`/`NSEvent` objects and their appendices, ~350 KB:
+  the test host's own event stream, not a meeting's.
+- The remainder is untyped `non-object` malloc (+900 KB) and Objective-C class
+  metadata caches.
+
+Nothing here is ScribeKit-owned duration-proportional state that is
+unnecessary, so nothing was released or bounded. Fifteen megabytes was not
+optimised because the number looked large.
 
 ## What this does not show
 

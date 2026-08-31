@@ -306,6 +306,97 @@ struct MeetingReliabilityTests {
         #expect(harness.persistence.outcomes == [.completed])
         #expect(harness.persistence.entries.filter { if case .started = $0 { true } else { false } }.count == 1)
     }
+
+    // MARK: - Unexpected capture termination
+
+    @Test("A stream that ends by itself finalises the artifacts and is recorded as an interruption")
+    func captureEndingByItselfIsNotACompletion() async {
+        let harness = ReliabilityHarness()
+        await harness.start(retention: .raw)
+        harness.deliver(seconds: 1, count: 30)
+        harness.emitFinal("Said before the stream ended.")
+        #expect(await harness.waitForSegments(1))
+
+        harness.capturer.interrupt(.interrupted("The stream stopped"))
+
+        #expect(await harness.wait { !harness.persistence.isOpen })
+        // Finalisation still happened, all the way through: the transcript was
+        // closed, the recording was closed, and the span said before capture
+        // died is in the file.
+        #expect(harness.persistence.segments.count == 1)
+        #expect(harness.audio.finishCount == 1)
+        #expect(!harness.audio.isOpen)
+        // And none of that turns an ending nobody asked for into a completion.
+        #expect(harness.persistence.outcomes == [.interrupted])
+        #expect(harness.persistence.finishCapturedDurations == [30])
+        // Nothing is left holding the process, and capture is not restarted.
+        #expect(!harness.activity.isAsserted)
+        #expect(harness.activity.beginCount == harness.activity.endCount)
+        #expect(harness.capturer.startCount == 1)
+        #expect(harness.transcriber.stopCount == 1)
+        #expect(!harness.runtime.status.isActive)
+        #expect(harness.runtime.status.failureMessage != nil)
+    }
+
+    @Test("A meeting the user stops is still recorded as a completion")
+    func aDeliberateStopIsACompletion() async {
+        let harness = ReliabilityHarness()
+        await harness.start(retention: .raw)
+        harness.deliver(seconds: 1, count: 30)
+
+        await harness.stop()
+
+        #expect(harness.persistence.outcomes == [.completed])
+        #expect(harness.persistence.finishCapturedDurations == [30])
+        #expect(harness.runtime.status == .completed)
+    }
+
+    @Test("A recogniser that cannot be brought back is still a failure, not an interruption")
+    func recognitionFailureKeepsItsOwnStatus() async {
+        let harness = ReliabilityHarness()
+        await harness.start()
+        harness.deliver(seconds: 1, count: 10)
+        // A recogniser whose restart fails is one that cannot be brought back,
+        // which is the Interval 14 semantics this must not disturb.
+        harness.transcriber.startError = TranscriptionError.alreadyTranscribing
+
+        _ = await harness.failRecognition()
+
+        #expect(await harness.wait { !harness.persistence.isOpen })
+        if case .failed = harness.runtime.transcriptionState {} else {
+            Issue.record("Expected recognition to be reported as failed")
+        }
+        #expect(harness.persistence.outcomes == [.failed])
+    }
+
+    @Test("A meeting can be started again after capture ended by itself")
+    func anotherMeetingStartsAfterAnInterruption() async {
+        let harness = ReliabilityHarness()
+        await harness.start()
+        harness.deliver(seconds: 1, count: 5)
+        harness.capturer.interrupt(.interrupted("The stream stopped"))
+        #expect(await harness.wait { !harness.persistence.isOpen })
+
+        await harness.start()
+        harness.deliver(seconds: 1, count: 5)
+        harness.emitFinal("The next meeting.")
+
+        #expect(await harness.waitForSegments(1))
+        #expect(harness.runtime.status == .transcribing)
+        #expect(harness.persistence.entries.filter {
+            if case .started = $0 { true } else { false }
+        }.count == 2)
+
+        await harness.stop()
+        #expect(harness.persistence.outcomes == [.interrupted, .completed])
+    }
+
+    @Test("History reads a capture interruption as an interruption rather than a completion")
+    func historyReadsTheInterruptionItWasGiven() {
+        #expect(HistorySessionStatus(SessionCompletionOutcome.interrupted.recoveryStatus) == .interrupted)
+        #expect(HistorySessionStatus.interrupted.displayName == "Interrupted")
+        #expect(HistorySessionStatus(SessionCompletionOutcome.completed.recoveryStatus) == .completed)
+    }
 }
 
 /// Which step of a start is made to fail.

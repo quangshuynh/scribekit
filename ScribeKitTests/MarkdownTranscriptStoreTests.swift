@@ -782,6 +782,75 @@ struct MarkdownTranscriptStoreTests {
         #expect(access.isBalanced)
     }
 
+    @Test("A meeting whose capture died is recorded as interrupted, with its closing block and a marker")
+    func anInterruptedMeetingIsRecordedAsInterrupted() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, fileStore, access) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+        try await store.appendFinalSegment(segment("Before the stream ended."))
+        let before = fileStore.file.text
+
+        try await store.finishSession(
+            endedAt: startedAt.addingTimeInterval(64),
+            outcome: .interrupted,
+            capturedDuration: 64
+        )
+
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+        #expect(record.status == .interrupted)
+        #expect(record.endedAt == startedAt.addingTimeInterval(64))
+        #expect(record.interruptedAt == startedAt.addingTimeInterval(64))
+        #expect(record.capturedDuration == 64)
+        // The artifacts closed cleanly, so the document states when it ended,
+        // and it says plainly that nobody stopped the meeting.
+        let text = fileStore.file.text
+        #expect(text.hasPrefix(before))
+        #expect(text.contains("**Capture ended unexpectedly:**"))
+        #expect(text.contains("Before the stream ended."))
+        #expect(text.contains("**Ended:**"))
+        #expect(text.range(of: "**Capture ended unexpectedly:**")!.lowerBound
+            < text.range(of: "**Ended:**")!.lowerBound)
+        #expect(fileStore.file.closeCount == 1)
+        #expect(access.isBalanced)
+    }
+
+    @Test("A never-paused meeting records the length it captured, not only a paused one")
+    func capturedDurationIsRecordedForEveryClosedSession() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+
+        try await store.finishSession(
+            endedAt: startedAt.addingTimeInterval(64),
+            outcome: .completed,
+            capturedDuration: 61.5
+        )
+
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+        #expect(record.status == .completed)
+        #expect(record.capturedDuration == 61.5)
+        #expect(record.pausedAt == nil)
+    }
+
+    @Test("A paused meeting records the media time it captured rather than its wall-clock length")
+    func capturedDurationExcludesTimePaused() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+        try await store.recordPause(at: startedAt.addingTimeInterval(30), capturedDuration: 30)
+        try await store.recordResume(at: startedAt.addingTimeInterval(90), capturedDuration: 30)
+
+        try await store.finishSession(
+            endedAt: startedAt.addingTimeInterval(150),
+            outcome: .completed,
+            capturedDuration: 90
+        )
+
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+        #expect(record.capturedDuration == 90)
+        #expect(record.pausedAt == nil)
+    }
+
     // MARK: - Review metadata
 
     @Test("A finished session records the spans worth reviewing, by their position in the document")

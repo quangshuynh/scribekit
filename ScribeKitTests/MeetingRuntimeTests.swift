@@ -715,7 +715,7 @@ struct MeetingRuntimeTests {
         capturer.interrupt(.interrupted("The stream was stopped by the user"))
 
         #expect(await wait { !persistence.isOpen })
-        #expect(persistence.entries.last == .finished(.completed))
+        #expect(persistence.entries.last == .finished(.interrupted))
     }
 
     @Test("A second meeting writes a new session rather than reopening the last one")
@@ -774,15 +774,17 @@ struct MeetingRuntimeTests {
         #expect(persistence.outcomes == [.completed])
     }
 
-    @Test("Capture failing by itself still closes the session as completed, because the transcript did finish")
-    func aCaptureFailureStillClosesCleanly() async {
+    @Test("Capture failing by itself closes the session as an interruption, not as a completion")
+    func aCaptureFailureClosesAsAnInterruption() async {
         let (model, capturer, _, persistence) = await makeMeeting()
         await model.start(request([meet]))
 
         capturer.interrupt(.interrupted("The stream was stopped by the user"))
 
+        // The transcript did finish, and that is not the same claim as the
+        // meeting having finished: nobody stopped this one.
         #expect(await wait { !persistence.isOpen })
-        #expect(persistence.outcomes == [.completed])
+        #expect(persistence.outcomes == [.interrupted])
     }
 
     // MARK: - Audio retention
@@ -970,6 +972,6 @@ struct MeetingRuntimeTests {
 
         #expect(await wait { !persistence.isOpen })
         #expect(audio.entries.last == .finished)
-        #expect(persistence.outcomes == [.completed])
+        #expect(persistence.outcomes == [.interrupted])
     }
 }
