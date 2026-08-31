@@ -45,7 +45,9 @@ final class MeetingRuntime {
     /// the run is reported as failed.
     ///
     /// Bounded deliberately: a recogniser that fails repeatedly is a condition
-    /// to report, not one to paper over with retries.
+    /// to report, not one to paper over with retries. The bound is per capture
+    /// run: an explicit Resume starts a new one and gives it the full budget,
+    /// because a person deciding to carry on is not an automatic retry.
     static let maximumRecoveryAttempts = 2
 
     /// What the interface says when recognition outran the event buffer.
@@ -352,7 +354,13 @@ final class MeetingRuntime {
     /// stop methods, because a meeting also ends through capture interruption,
     /// a retention failure and a persistence failure. Anything keyed to the
     /// happy path would leak the assertion down the other three.
-
+    ///
+    /// A paused meeting still counts as running, deliberately. Nothing is
+    /// being captured or recognised then, so the assertion is not buying
+    /// throughput — it is buying the process's life: `beginActivity` also opts
+    /// out of sudden termination, and a pause is exactly the moment ScribeKit
+    /// is holding an open, unfinalised recording that the system killing the
+    /// process would leave unreadable.
     private func synchronizeActivity() {
         if isRunning {
             processActivity.begin()
@@ -600,6 +608,16 @@ final class MeetingRuntime {
                 return
             }
         }
+        // The budget belongs to a capture run, not to the meeting. It exists
+        // to stop a recogniser recovering from itself forever without anyone
+        // noticing; an explicit Resume is the user starting a fresh run, and
+        // it has just proved the recogniser starts, so holding an earlier
+        // run's exhausted budget against it would leave a meeting that
+        // stumbled twice in its first hour unable to recover for the rest of
+        // the day. It stays bounded either way: a run still self-restarts at
+        // most ``maximumRecoveryAttempts`` times, and only a person can reset
+        // that, so no automatic path is unbounded.
+        recoveryAttempts = 0
         pausedAt = nil
         transcriptionState = .transcribing
         captureState = .capturing

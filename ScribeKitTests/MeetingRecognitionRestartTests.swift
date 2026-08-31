@@ -118,4 +118,38 @@ struct MeetingRecognitionRestartTests {
         #expect(harness.persistence.outcomes == [.failed])
         #expect(!harness.activity.isAsserted)
     }
+
+    @Test("An explicit resume gives the recogniser the whole restart budget again")
+    func resumeRestoresTheRestartBudget() async {
+        let harness = ReliabilityHarness()
+        await harness.start(retention: .raw)
+        harness.deliver(seconds: 1, count: 10)
+
+        // Spend the run's budget entirely, without reaching the limit.
+        for _ in 0..<MeetingRuntime.maximumRecoveryAttempts {
+            #expect(await harness.failRecognition())
+            harness.deliver(seconds: 1, count: 5)
+        }
+
+        await harness.pause()
+        await harness.resume()
+        harness.deliver(seconds: 1, count: 5)
+
+        // The resumed run is a new run, so it self-restarts as often as a
+        // first one would.
+        for _ in 0..<MeetingRuntime.maximumRecoveryAttempts {
+            #expect(await harness.failRecognition())
+            harness.deliver(seconds: 1, count: 5)
+        }
+        #expect(harness.runtime.isRunning)
+
+        // And it is still bounded: one more ends the meeting rather than
+        // recovering forever.
+        #expect(await harness.failRecognition() == false)
+        #expect(await harness.wait {
+            if case .failed = harness.runtime.transcriptionState { return true }
+            return false
+        })
+        #expect(await harness.wait { !harness.runtime.isRunning })
+    }
 }
