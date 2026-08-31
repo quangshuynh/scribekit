@@ -253,18 +253,7 @@ struct MeetingSetupView: View {
                 .disabled(runtime.isRunning)
                 .accessibilityLabel("Meeting title")
 
-            if let meeting = runtime.meeting, runtime.status.isActive {
-                LabeledContent("Running") {
-                    Text("\(meeting.title) · \(MeetingElapsedClock.description(of: runtime.elapsed.elapsed))")
-                        .monospacedDigit()
-                }
-                .accessibilityLabel("Running meeting")
-                .accessibilityValue(meeting.title)
-
-                Text("Settings on this screen apply to the next meeting. This one keeps what it started with.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            RunningMeetingLabel(runtime: runtime)
         }
     }
 
@@ -374,12 +363,7 @@ struct MeetingSetupView: View {
 
             localePicker
 
-            if let activity = captureActivityDescription {
-                Text(activity)
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Captured audio: \(activity)")
-            }
+            CaptureActivityLabel(runtime: runtime)
 
             Text("Speech is recognised on this Mac, using an installed language model. "
                  + "No audio leaves your machine.")
@@ -516,105 +500,11 @@ struct MeetingSetupView: View {
         }
     }
 
-    /// What capture has delivered so far, or `nil` before anything arrives.
+    /// The live transcript, in a view of its own.
     ///
-    /// The figures are aggregates published a few times a second; no audio is
-    /// drawn, played back or retained.
-    private var captureActivityDescription: String? {
-        let activity = runtime.activity
-        guard activity.sampleCount > 0 || activity.unreadableSampleCount > 0 else { return nil }
-        var parts = ["\(activity.sampleCount) buffers"]
-        if let seconds = activity.capturedDuration {
-            parts.append(String(format: "%.1f s", seconds))
-        }
-        if let format = activity.format {
-            parts.append(format.summary)
-        }
-        if let peak = activity.peakAmplitude {
-            parts.append(String(format: "peak %.0f%%", min(peak, 1) * 100))
-        }
-        if activity.unreadableSampleCount > 0 {
-            parts.append("\(activity.unreadableSampleCount) unreadable")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    /// The live transcript: finalised spans, then the hypothesis for what is
-    /// being said now.
-    ///
-    /// Finalised segments are rendered lazily, because a long meeting produces
-    /// many of them, and the partial is one row that is replaced rather than
-    /// appended.
+    /// See ``LiveTranscriptSection`` for why it is not written inline here.
     private var transcriptSection: some View {
-        Section("Live Transcript") {
-            if runtime.transcript.isEmpty {
-                Text(runtime.transcriptionState == .transcribing
-                     ? "Listening…"
-                     : "Nothing transcribed yet.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(runtime.transcript.finalizedSegments) { segment in
-                            transcriptRow(for: segment)
-                        }
-                        if let partial = runtime.transcript.partialSegment {
-                            Text(partial.displayText)
-                                .foregroundStyle(.secondary)
-                                .italic()
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .accessibilityLabel("In progress: \(partial.displayText)")
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .defaultScrollAnchor(.bottom)
-                .frame(height: 160)
-            }
-
-            if runtime.transcript.untranscribedSeconds > 0 {
-                Label(
-                    String(
-                        format: "%.1f s of audio was not transcribed, so the transcript has gaps.",
-                        runtime.transcript.untranscribedSeconds
-                    ),
-                    systemImage: "exclamationmark.triangle"
-                )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-
-            Text("Text in grey is a live guess, is replaced as you speak and is never saved. "
-                 + "Only finalised speech is written to the transcript.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    /// One finalised span, with the time it began measured from the start of
-    /// the run.
-    ///
-    /// - Parameter segment: The span to present.
-    /// - Returns: The row view.
-    private func transcriptRow(for segment: TranscriptSegment) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(Self.offset(segment.startTime))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            Text(segment.displayText)
-                .textSelection(.enabled)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-    }
-
-    /// Formats a time measured from the start of the run.
-    ///
-    /// - Parameter seconds: Seconds since the first captured frame.
-    /// - Returns: A `mm:ss` string.
-    private static func offset(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded(.down))
-        return String(format: "%02d:%02d", total / 60, total % 60)
+        LiveTranscriptSection(runtime: runtime)
     }
 
     /// What the meeting keeps of its audio, and — once it is keeping some —
@@ -794,6 +684,165 @@ struct MeetingSetupView: View {
         if sources.selectedSources.isEmpty { return "Select at least one application to capture." }
         if !runtime.availability.canTranscribe { return "On-device speech recognition is unavailable." }
         return "Capture the selected applications and write a timestamped Markdown transcript."
+    }
+}
+
+/// The running meeting's name and how long it has been running.
+///
+/// A view of its own because ``MeetingElapsedClock`` advances once a second.
+/// Read inside ``MeetingSetupView``'s own body, that tick would invalidate the
+/// whole setup form — every section, the transcript list included — once a
+/// second for the length of the meeting. Read here, it invalidates one label.
+private struct RunningMeetingLabel: View {
+
+    /// The meeting being watched.
+    let runtime: MeetingRuntime
+
+    var body: some View {
+        if let meeting = runtime.meeting, runtime.status.isActive {
+            LabeledContent("Running") {
+                Text("\(meeting.title) · \(MeetingElapsedClock.description(of: runtime.elapsed.elapsed))")
+                    .monospacedDigit()
+            }
+            .accessibilityLabel("Running meeting")
+            .accessibilityValue(meeting.title)
+
+            Text("Settings on this screen apply to the next meeting. This one keeps what it started with.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// What capture has delivered so far.
+///
+/// A view of its own for the same reason as ``RunningMeetingLabel``: the
+/// activity summary is published twice a second for the length of a meeting,
+/// and it is one line of text.
+private struct CaptureActivityLabel: View {
+
+    /// The meeting being watched.
+    let runtime: MeetingRuntime
+
+    var body: some View {
+        if let description {
+            Text(description)
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Captured audio: \(description)")
+        }
+    }
+
+    /// What capture has delivered so far, or `nil` before anything arrives.
+    ///
+    /// The figures are aggregates published a few times a second; no audio is
+    /// drawn, played back or retained.
+    private var description: String? {
+        let activity = runtime.activity
+        guard activity.sampleCount > 0 || activity.unreadableSampleCount > 0 else { return nil }
+        var parts = ["\(activity.sampleCount) buffers"]
+        if let seconds = activity.capturedDuration {
+            parts.append(String(format: "%.1f s", seconds))
+        }
+        if let format = activity.format {
+            parts.append(format.summary)
+        }
+        if let peak = activity.peakAmplitude {
+            parts.append(String(format: "peak %.0f%%", min(peak, 1) * 100))
+        }
+        if activity.unreadableSampleCount > 0 {
+            parts.append("\(activity.unreadableSampleCount) unreadable")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// The live transcript: finalised spans, then the hypothesis for what is being
+/// said now.
+///
+/// Finalised segments are rendered lazily, because a long meeting produces many
+/// of them, and the partial is one row that is replaced rather than appended.
+///
+/// It is a view of its own because the recogniser replaces the partial several
+/// times a second. Every one of those replacements invalidates whatever body
+/// read it, so reading it here keeps the churn inside this section instead of
+/// rebuilding the entire setup form — its pickers, its source list and its
+/// status sections — at recognition rate.
+private struct LiveTranscriptSection: View {
+
+    /// The meeting being watched.
+    let runtime: MeetingRuntime
+
+    var body: some View {
+        Section("Live Transcript") {
+            if runtime.transcript.isEmpty {
+                Text(runtime.transcriptionState == .transcribing
+                     ? "Listening…"
+                     : "Nothing transcribed yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(runtime.transcript.finalizedSegments) { segment in
+                            row(for: segment)
+                        }
+                        if let partial = runtime.transcript.partialSegment {
+                            Text(partial.displayText)
+                                .foregroundStyle(.secondary)
+                                .italic()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityLabel("In progress: \(partial.displayText)")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .defaultScrollAnchor(.bottom)
+                .frame(height: 160)
+            }
+
+            if runtime.transcript.untranscribedSeconds > 0 {
+                Label(
+                    String(
+                        format: "%.1f s of audio was not transcribed, so the transcript has gaps.",
+                        runtime.transcript.untranscribedSeconds
+                    ),
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+
+            Text("Text in grey is a live guess, is replaced as you speak and is never saved. "
+                 + "Only finalised speech is written to the transcript.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// One finalised span, with the time it began measured from the start of
+    /// the run.
+    ///
+    /// - Parameter segment: The span to present.
+    /// - Returns: The row view.
+    private func row(for segment: TranscriptSegment) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(Self.offset(segment.startTime))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Text(segment.displayText)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Formats a time measured from the start of the run.
+    ///
+    /// - Parameter seconds: Seconds since the first captured frame.
+    /// - Returns: A `mm:ss` string.
+    private static func offset(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded(.down))
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 }
 
