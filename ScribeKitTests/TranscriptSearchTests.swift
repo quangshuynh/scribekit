@@ -239,7 +239,7 @@ struct TranscriptSearchTests {
         let excerpt = try #require(TranscriptSearch.results(for: "looking for", in: documents).first?.excerpt)
 
         #expect(excerpt.spanIndex == 1)
-        #expect(excerpt.clock == "10:01:20")
+        #expect(excerpt.clock == "10:01:20 AM")
         #expect(excerpt.heading == "10:01 AM")
         #expect(excerpt.timestampDescription == "10:01:20 AM")
     }

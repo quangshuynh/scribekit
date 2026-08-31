@@ -18,7 +18,8 @@ nonisolated struct TranscriptSpan: Identifiable, Equatable, Sendable {
     /// The span's position in the document, counting from zero.
     let index: Int
 
-    /// The clock time written above the span, such as `10:01:33`.
+    /// The clock time written above the span, such as `10:01:33 AM`, or
+    /// `10:01:33` in a transcript written before periods were always stated.
     let clock: String
 
     /// The minute heading in effect, such as `10:01 AM`, or `nil` when the
@@ -45,12 +46,41 @@ nonisolated struct TranscriptSpan: Identifiable, Equatable, Sendable {
         self.text = text
     }
 
-    /// The span's time as the document states it: the heading's period applied
-    /// to the seconds line, or the seconds line alone when there is no heading.
+    /// The span's time as the document states it.
     var timestampDescription: String {
-        guard let period = heading?.split(separator: " ").last, period == "AM" || period == "PM" else {
-            return clock
-        }
+        TranscriptClock.description(clock: clock, heading: heading)
+    }
+}
+
+/// How a written clock time is read back.
+///
+/// Transcripts written from Interval 19 onwards state `AM` or `PM` on every
+/// wall-clock time, so a span's own line is already unambiguous. Older ones
+/// left the period to the minute heading above the span, and those files are
+/// not rewritten, so the heading is still consulted when the line itself is
+/// silent.
+nonisolated enum TranscriptClock {
+
+    /// The period a written time carries, if it carries one.
+    ///
+    /// - Parameter clock: A clock time as a transcript states it.
+    /// - Returns: `AM`, `PM`, or `nil` when the time states neither.
+    static func period(of clock: some StringProtocol) -> String? {
+        guard let last = clock.split(separator: " ").last else { return nil }
+        return last == "AM" || last == "PM" ? String(last) : nil
+    }
+
+    /// A span's time as the document states it: its own period when it has
+    /// one, the minute heading's when it does not, and the bare time when
+    /// neither states one.
+    ///
+    /// - Parameters:
+    ///   - clock: The clock time written above the span.
+    ///   - heading: The minute heading in effect, when there is one.
+    /// - Returns: The time to show for the span.
+    static func description(clock: String, heading: String?) -> String {
+        if period(of: clock) != nil { return clock }
+        guard let heading, let period = period(of: heading) else { return clock }
         return "\(clock) \(period)"
     }
 }
@@ -289,18 +319,28 @@ nonisolated struct TranscriptDocument: Equatable, Sendable {
         return heading.isBlank ? nil : heading
     }
 
-    /// The clock time a span's `**h:mm:ss**` line carries.
+    /// The clock time a span's `**h:mm:ss AM**` line carries.
     ///
     /// The digits are checked rather than assumed, so a bold line that is not
     /// a timestamp — the footer's `**Ended:**`, for instance — does not open a
     /// span.
+    ///
+    /// The period is optional because transcripts written before Interval 19
+    /// left it to the minute heading, and a transcript already on disk is
+    /// never rewritten. Both shapes open a span, and the time is returned
+    /// exactly as the document states it.
     ///
     /// - Parameter line: The line to read.
     /// - Returns: The clock time, or `nil` when the line is not a span marker.
     private static func spanClock(_ line: String) -> String? {
         guard line.hasPrefix("**"), line.hasSuffix("**"), line.count > 4 else { return nil }
         let clock = String(line.dropFirst(2).dropLast(2))
-        let parts = clock.split(separator: ":", omittingEmptySubsequences: false)
+        var time = Substring(clock)
+        if let separator = clock.lastIndex(of: " ") {
+            guard TranscriptClock.period(of: clock[clock.index(after: separator)...]) != nil else { return nil }
+            time = clock[..<separator]
+        }
+        let parts = time.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 3,
               parts[0].count == 1 || parts[0].count == 2,
               parts[1].count == 2,

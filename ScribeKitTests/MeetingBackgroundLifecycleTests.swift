@@ -302,6 +302,146 @@ struct MeetingBackgroundLifecycleTests {
         #expect(meeting.activity.endCount == 1)
     }
 
+    // MARK: - Detached presentation
+
+    /// Takes the presentation down and builds it again, which is what closing
+    /// and reopening the main window now does: the view hierarchy is released,
+    /// and a new one prepares itself over the runtime that kept running.
+    ///
+    /// - Parameter runtime: The meeting owner the presentation is built over.
+    /// - Returns: The rebuilt presentation.
+    private func reopen(_ runtime: MeetingRuntime) async -> PresentationScope {
+        await runtime.prepare()
+        return PresentationScope(runtime: runtime)
+    }
+
+    @Test("A meeting keeps writing while its presentation is gone, and a new one shows all of it")
+    func transcriptContinuesWhileDetached() async {
+        let meeting = await makeMeeting()
+        await meeting.runtime.start(request([meet], retention: .compressed))
+        meeting.transcriber.emit(.final(segment("before the window closed", start: 0)))
+        #expect(await wait { meeting.runtime.transcript.finalizedSegments.count == 1 })
+
+        weak var released: PresentationScope?
+        do {
+            let scope = PresentationScope(runtime: meeting.runtime)
+            released = scope
+            #expect(scope.runtime.isRunning)
+        }
+        #expect(released == nil, "the window's hierarchy really did go away")
+
+        // Minutes of meeting with nothing on screen.
+        meeting.capturer.deliver(buffer())
+        meeting.transcriber.emit(.final(segment("while it was closed", start: 10)))
+        meeting.transcriber.emit(.partial(segment("and this is still being", start: 20)))
+        #expect(await wait { meeting.persistence.segments.count == 2 })
+        #expect(await wait { meeting.runtime.transcript.partialSegment != nil })
+
+        let reopened = await reopen(meeting.runtime)
+
+        #expect(reopened.runtime.status == .transcribing)
+        #expect(reopened.runtime.meeting?.title == "Weekly Sync")
+        #expect(reopened.runtime.transcript.finalizedSegments.map(\.text)
+            == ["before the window closed", "while it was closed"])
+        #expect(reopened.runtime.transcript.partialSegment?.text == "and this is still being")
+        #expect(reopened.runtime.activity.sampleCount == 1)
+        #expect(meeting.persistence.segments.count == 2, "no span written twice")
+        #expect(meeting.capturer.startCount == 1)
+        #expect(meeting.audio.entries.filter { if case .started = $0 { true } else { false } }.count == 1, "no second recording")
+    }
+
+    @Test("Pausing and resuming with no presentation is shown correctly by the next one")
+    func pauseAndResumeWhileDetached() async {
+        let meeting = await makeMeeting()
+        await meeting.runtime.start(request([meet], retention: .compressed))
+        meeting.capturer.deliver(buffer())
+        #expect(await wait { meeting.runtime.activity.sampleCount == 1 })
+
+        // Closed, then paused from the menu bar.
+        await meeting.runtime.pause()
+        let capturedWhilePaused = meeting.runtime.capturedDuration
+
+        var reopened = await reopen(meeting.runtime)
+        #expect(reopened.runtime.status == .paused)
+        #expect(reopened.runtime.canResume)
+        #expect(meeting.persistence.entries.contains { if case .paused = $0 { true } else { false } })
+
+        // Closed again, then resumed from the menu bar.
+        await meeting.runtime.resume()
+        meeting.transcriber.emit(.final(segment("after the resume", start: 0)))
+        #expect(await wait { meeting.persistence.segments.count == 1 })
+
+        reopened = await reopen(meeting.runtime)
+        #expect(reopened.runtime.status == .transcribing)
+        #expect(reopened.runtime.transcript.finalizedSegments.count == 1)
+        #expect(reopened.runtime.capturedDuration >= capturedWhilePaused,
+                "captured media time carried across the pause rather than restarting")
+        #expect(meeting.capturer.startCount == 2, "one restart, not one per reopen")
+        #expect(meeting.audio.entries.filter { if case .started = $0 { true } else { false } }.count == 1, "the recording was never reopened")
+    }
+
+    @Test("Stopping with no presentation finalises once and frees the next meeting")
+    func stopWhileDetached() async {
+        let meeting = await makeMeeting()
+        await meeting.runtime.start(request([meet], retention: .compressed))
+        meeting.transcriber.emit(.final(segment("last words")))
+        #expect(await wait { meeting.persistence.segments.count == 1 })
+
+        // No presentation exists at all: this is the menu bar's Stop item.
+        await meeting.runtime.stop()
+
+        #expect(meeting.persistence.outcomes == [.completed])
+        #expect(!meeting.persistence.isOpen)
+        #expect(meeting.audio.entries.last == .finished)
+
+        let reopened = await reopen(meeting.runtime)
+        #expect(reopened.runtime.status == .completed)
+        #expect(!reopened.runtime.isRunning)
+        #expect(!menuBar(reopened.runtime).canStop, "no stale active meeting on screen")
+        #expect(reopened.runtime.canStart(request([browser], title: "Next")))
+    }
+
+    @Test("Capture ending by itself with no presentation is still recorded as an interruption")
+    func interruptionWhileDetached() async {
+        let meeting = await makeMeeting()
+        await meeting.runtime.start(request([meet], retention: .compressed))
+        meeting.transcriber.emit(.final(segment("last words")))
+        #expect(await wait { meeting.persistence.segments.count == 1 })
+
+        meeting.capturer.interrupt(.interrupted("The stream stopped."))
+        #expect(await wait { !meeting.runtime.isRunning })
+
+        #expect(meeting.persistence.outcomes == [.interrupted], "closed once, as an interruption")
+        #expect(!meeting.persistence.isOpen)
+        #expect(meeting.audio.entries.last == .finished)
+
+        let reopened = await reopen(meeting.runtime)
+        #expect(reopened.runtime.status.failureMessage != nil)
+        #expect(reopened.runtime.canStart(request([browser], title: "Next")))
+    }
+
+    @Test("Closing and reopening repeatedly multiplies nothing")
+    func repeatedDetachAndReopen() async {
+        let meeting = await makeMeeting()
+        await meeting.runtime.start(request([meet], retention: .compressed))
+        meeting.transcriber.emit(.final(segment("one span")))
+        #expect(await wait { meeting.persistence.segments.count == 1 })
+
+        for _ in 0..<5 {
+            let scope = await reopen(meeting.runtime)
+            #expect(scope.runtime.isRunning)
+        }
+
+        #expect(meeting.runtime.transcript.finalizedSegments.count == 1)
+        #expect(meeting.persistence.segments.count == 1)
+        #expect(meeting.capturer.startCount == 1)
+        #expect(meeting.capturer.stopCount == 0)
+        #expect(meeting.transcriber.startCount == 1)
+        #expect(meeting.audio.entries.filter { if case .started = $0 { true } else { false } }.count == 1)
+        #expect(meeting.activity.beginCount == 1, "one activity assertion, not one per window")
+        #expect(!meeting.clock.isTicking, "the test clock never ticks; a real one would have exactly one")
+    }
+
     // MARK: - Failure with no window
 
     @Test("A failure with no window open is still there when one is opened")

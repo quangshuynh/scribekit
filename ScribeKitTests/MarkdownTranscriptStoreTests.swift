@@ -255,12 +255,12 @@ struct MarkdownTranscriptStoreTests {
         )
 
         let text = fileStore.file.text
-        #expect(text.contains("> **Paused:** 11:00:40."))
-        #expect(text.contains("> **Resumed:** 11:05:40, after 5 min 0 s paused."))
+        #expect(text.contains("> **Paused:** 11:00:40 AM."))
+        #expect(text.contains("> **Resumed:** 11:05:40 AM, after 5 min 0 s paused."))
         // Media offset 41 s is one second after the resume, which is
         // 11:05:41 on the wall clock and not 11:00:41.
-        #expect(text.contains("**11:05:41**"))
-        #expect(text.contains("**11:00:30**"))
+        #expect(text.contains("**11:05:41 AM**"))
+        #expect(text.contains("**11:00:30 AM**"))
         #expect(text.contains("Phrase A."))
         #expect(text.contains("Phrase B."))
         #expect(text.contains("**Duration:** 6 min 40 s"))
@@ -436,17 +436,17 @@ struct MarkdownTranscriptStoreTests {
         #expect(body == """
             ### 11:00 AM
 
-            **11:00:00**
+            **11:00:00 AM**
 
             First sentence.
 
-            **11:00:05**
+            **11:00:05 AM**
 
             Second sentence.
 
             ### 11:01 AM
 
-            **11:01:10**
+            **11:01:10 AM**
 
             Third sentence.
 
@@ -476,7 +476,7 @@ struct MarkdownTranscriptStoreTests {
         }
         try await store.appendFinalSegment(segment("Today we are learning Swift."))
 
-        #expect(fileStore.file.text.components(separatedBy: "**11:00:00**").count == 2)
+        #expect(fileStore.file.text.components(separatedBy: "**11:00:00 AM**").count == 2)
         #expect(!fileStore.file.text.contains("Today we are\n"))
     }
 
@@ -488,7 +488,7 @@ struct MarkdownTranscriptStoreTests {
         try await store.recordGap(TranscriptGap(startTime: 12, duration: 0.8, reason: .audioDropped))
 
         #expect(fileStore.file.text.hasSuffix(
-            "> **Transcription gap:** approximately 0.8 seconds of audio around 11:00:12 "
+            "> **Transcription gap:** approximately 0.8 seconds of audio around 11:00:12 AM "
             + "was not transcribed; recognition fell behind capture.\n\n"
         ))
     }

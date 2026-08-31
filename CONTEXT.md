@@ -5,8 +5,8 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 17 — reproducible real-time soak validation and UI/background
-performance. Complete.
+Interval 19 — presentation lifecycle, and explicit AM/PM in the transcript's
+wall-clock times. Complete.
 
 ## Current implementation
 
@@ -115,6 +115,52 @@ What moved and what did not:
 
 `MeetingSetupView.onDisappear` no longer exists. Nothing in the view layer can
 stop a meeting except the Stop control.
+
+## Presentation lifetime
+
+Four lifetimes, and they are not the same thing:
+
+- **Process.** `ScribeKitAppDelegate`, and the one `MeetingRuntime` it holds.
+- **Meeting.** From Start to whichever ending arrives; always inside a process.
+- **Window.** The single `Window` scene's `NSWindow`, closable and reopenable.
+- **View hierarchy.** The interface inside that window, and the only one of
+  the four this interval changed.
+
+A closed SwiftUI window scene is not an idle one. The scene outlives the
+window, so before this interval the whole of `ScribeKitRootView` stayed
+installed behind a closed window: still observing the runtime, still having its
+bodies evaluated, still being laid out on the display cycle. Interval 17
+measured the consequence — hiding the window saved two to three points, while
+taking the hosting view down returned the process to its headless floor — and
+Interval 18 profiled why: about 30% of the process's CPU was SwiftUI layout,
+most of it the live transcript's scroll view.
+
+The window scene now holds `MainPresentationScene`, a shell that costs nothing
+and contains two things: a zero-size `NSViewRepresentable` that reports which
+window it is in, and a branch that builds `ScribeKitRootView` only while that
+window is on screen. Closing the window releases the interface; opening it
+builds a new one. `MainWindowPresence` is the whole of the mechanism. It
+key-value-observes the window's `visible` and `miniaturized` properties —
+rather than the notifications that usually accompany them, because a window can
+be ordered on screen without becoming key, and an interface that missed that
+would leave an empty window in front of the user — and re-reads the window on
+the next turn of the main loop, so the answer is always the window's own.
+
+The reporter lives in the shell rather than in the interface deliberately: the
+thing that notices the window coming back cannot be part of what goes away when
+the window leaves.
+
+Nothing about the meeting lives in either. `MainPresentationScene` never reads
+the runtime, so rebuilding the interface cannot invalidate the shell and
+detaching cannot pause, stop or duplicate anything. A reopened window prepares
+itself the way any first open does and reads current runtime state: the running
+meeting's title and elapsed time, its active or paused status, capture
+activity, every finalised span, the current partial hypothesis, and whatever
+failure or interruption is standing. There is no UI-state cache, because there
+is nothing to cache — the meeting is the state.
+
+What the window's own `@State` still owns is the configuration for the *next*
+meeting, restored from the preference store as it always was.
 
 ## One lifecycle answer
 
@@ -479,11 +525,11 @@ listed no handle on the destination between meetings.
 
 ### 10:01 AM
 
-**10:01:33**
+**10:01:33 AM**
 
 Today, we are learning about closures in Swift.
 
-> **Transcription gap:** approximately 0.8 seconds of audio around 10:01:41 was not transcribed; recognition fell behind capture.
+> **Transcription gap:** approximately 0.8 seconds of audio around 10:01:41 AM was not transcribed; recognition fell behind capture.
 
 ---
 
@@ -511,8 +557,19 @@ changes and never twice for the same minute; gaps do not open one.
 
 Formatting is deterministic and locale-independent: an ISO date and a fixed
 twelve-hour English clock, computed from `Calendar(identifier: .gregorian)` in
-an explicit time zone that defaults to the Mac's current one. Times to the
-second omit `AM`/`PM`, which the minute heading above them carries.
+an explicit time zone that defaults to the Mac's current one. Every wall-clock
+time states `AM` or `PM` — the header's `Started`, the footer's `Ended`, minute
+headings, span times, and the pause, resume, gap and capture-interruption
+remarks alike. A span's time is read on its own, quoted out of the document and
+matched by search, so leaning on the heading above it to supply the period left
+a line that was ambiguous by itself. Nothing else about the format moved, and
+no offset, seek or captured-media time is wall-clock.
+
+Transcripts written before this stated the period only on the minute heading.
+They are not rewritten and not migrated. `TranscriptDocument` accepts both
+shapes, keeps a span's time exactly as the file states it, and
+`TranscriptClock.description(clock:heading:)` falls back to the heading's
+period for a span that carries none.
 
 ## Audio and transcript timeline
 
@@ -1372,6 +1429,63 @@ None was added. No `OSLog` category, no transcript text, no PCM, no meeting
 titles, no telemetry.
 
 ## Validation status
+
+### Interval 19 validation
+
+`xcodebuild clean test` on macOS: 606 tests in 56 suites, all passing, no new
+warnings.
+
+**The lifecycle, deterministically.** `MeetingBackgroundLifecycleTests` gained
+five cases over the runtime with no presentation in existence: a meeting keeps
+capturing and writing while detached and a rebuilt presentation shows every
+finalised span, the current partial and the capture activity with nothing
+written twice; pause and resume from the menu bar with no window are shown
+correctly by the next one, with captured media time carried across rather than
+restarted and no second recording; Stop with no window finalises once as
+`completed` and frees the next meeting; capture ending by itself with no window
+still closes as `interrupted` with its artifacts finalised; and building the
+presentation five times over one meeting leaves one capturer start, one
+recogniser start, one recording, one activity assertion and one copy of every
+span. `MainWindowPresenceTests` covers the window mechanism itself against real
+`NSWindow`s: closing detaches, reopening attaches, five open/close cycles
+register one pair of observations rather than one per cycle, reporting the same
+window repeatedly registers nothing new, and a miniaturised window agrees with
+the window rather than with the request.
+
+**The lifecycle, measured.** Two three-minute Release `presentationCost` soaks
+on the M1, each a single uninterrupted meeting split into three one-minute
+phases, capturing Brave Browser with compressed retention:
+
+| Phase | CPU, run 1 | CPU, run 2 |
+|---|---|---|
+| Window visible | 23.9 / 21.7 / 22.4% | 23.4 / 21.3 / 26.3% |
+| Window closed (detached) | 6.7 / 6.3 / 6.7% | 7.9 / 7.2 / 6.8% |
+| Window reopened | 23.8 / 28.7 / 33.5% | 29.4 / 24.8 / 23.5% |
+
+The harness now hosts `MainPresentationScene` — the application's own scene
+content — so the middle phase is the shipping lifecycle doing the detaching and
+`window.close()` is the only act. It also counts the views under the window:
+148 with the window open, 3 with it closed. Detached CPU lands on the ~7.1%
+headless floor Interval 17 established, against the 21.1–20.7% that `orderOut`
+managed. Buffers, recognised events, `transcript.md` and `audio.m4a` all
+continued at the same rate through the detached phase, the meeting was never
+restarted, and the run finished with 30 spans, a footer, `completed`, a 180.8 s
+recording against 180.7 s of captured media and one session directory.
+
+Reopening restores the interface and its cost. The single sample taken at the
+instant of reopening read near 100% of one core — the rebuild — and the phase
+around it settled back to visible cost.
+
+**Timestamps.** `TranscriptMarkdownFormatterTests` covers 00:05:07, 11:59:59,
+12:00:00, 13:28:04 and 23:59:59 for span times and for minute headings, the
+header and footer pair, all four structural remarks, and one golden line
+proving the recognised text either side of the timestamp is untouched.
+`TranscriptDocumentTests` parses a hand-written pre-Interval-19 transcript and
+gets `10:01:00` and `13:28:04` back verbatim with `10:01:00 AM` and
+`13:28:04 PM` to display; a current transcript's spans state their own period
+and do not borrow the heading's; and `**Ended at 1:28:04 PM**` still opens no
+span. The soak's own `transcript.md` reads `**Started:** 2:16 PM`, `### 2:16 PM`
+and `**2:16:16 PM**`.
 
 ### Interval 18 validation
 
@@ -2250,12 +2364,15 @@ intervals; the capture observations above were taken through the same path.
   resumes it spans, and an explicit Resume does not give it more. That is a
   deliberate ceiling on a recogniser that keeps failing rather than a measured
   number, and raising it to make a test pass would be the wrong reason to.
-- **Capture ending by itself still closes the session as completed.** The
-  meeting is reported as failed while it is running and the reason is on
-  screen, but the transcript and the recording did close cleanly, so the record
-  says `completed` and History lists it that way. Whether a meeting whose
-  source disappeared should read as completed or as something else is a product
-  question, and no evidence this interval produced answers it.
+- **Reopening the window costs a rebuild.** The interface is built from
+  nothing, so reopening spends a burst of CPU laying out a transcript that may
+  be hours long, and a long meeting's list costs more to rebuild than a short
+  one's. Measured as a single sample near 100% of one core, gone by the next
+  twenty-second window. Nobody has yet reopened a window during an eight-hour
+  meeting to see how large that burst gets.
+- **Miniaturising detaches too.** A miniaturised window is not visible, so it
+  is treated exactly like a closed one. That is deliberate — nothing is on
+  screen to lay out — but it means deminiaturising pays the same rebuild.
 - **Accelerated runs are not real-time evidence.** The two-hour meeting above
   costs a second, because nothing sleeps and no audio is synthesised. It proves
   ordering, arithmetic and release; it proves nothing about CPU, memory under a
@@ -2467,34 +2584,30 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 18 closed the first two questions Interval 17 left and left one open
-deliberately.
+Interval 19 closed the question Interval 18 left open.
 
-**Closed.** A meeting whose capture ends by itself is recorded as `interrupted`
-rather than `completed`, with its artifacts finalised and kept and one appended
-remark in the transcript; and every session ScribeKit closes now records the
-media time it captured.
+**Closed.** The presentation lifecycle. A closed main window now releases its
+view hierarchy instead of keeping it installed and laid out, which takes a
+detached meeting from 21% of a core to the ~7% headless floor while capture,
+recognition, both durable writers, the clocks, the activity assertion and the
+menu bar carry on untouched. `MeetingRuntime` did not move: it was already
+process-scoped, and the fix was to stop the window scene holding the interface
+rather than to change who holds the meeting. Also closed: a transcript's
+wall-clock times no longer depend on the heading above them to be readable.
 
-**Open, with a profile behind it.** The interface still costs about fifteen
-points of one core beyond the headless floor, and Instruments now says where:
-SwiftUI re-measuring the live transcript's scroll view and the form around it,
-about 30% of the process's CPU in layout, against 1.5% in text layout and under
-4% in ScribeKit's own capture path. Two narrow fixes were measured and neither
-helped — one made it nine points worse by moving a changing row out of the
-fixed-height scroll view that was containing its layout. What the evidence
-points at is not another view split but the presentation lifecycle: with the
-window merely off screen the graph stays attached and AppKit keeps laying it
-out, and only taking the hosting view down returns the process to the floor.
-`AGENTS.md` already permits skipping presentation work while the interface is
-hidden. Doing that safely — capture, recognition, persistence and the menu bar
-all untouched, the window reconstructing current state when it reopens, no
-second runtime and no stale partial — is a design interval, not a patch, and it
-is the recommended one.
+**Open, and unchanged by this interval.** Visible presentation still costs
+about sixteen points of a core beyond the floor, and Interval 18's profile
+still says where — SwiftUI re-measuring the live transcript's scroll view.
+Interval 18 tried two narrow view splits and both measured worse; this interval
+deliberately did not try a third. The next honest attempt is a different shape
+of transcript view rather than another split of the current one, and it is
+worth doing only if a visible long meeting turns out to matter more than a
+background one, which is not what the product is for.
 
-**Not open any more.** The RSS drift. Resident size fell while the heap grew,
-the growth that is there is framework-typed, and ScribeKit's own retained state
-is the transcript, which is required. There is nothing to fix and no cache to
-clear speculatively.
+**New, and small.** Reopening a window during a long meeting rebuilds the whole
+transcript list at once. Measured as one sample near 100% of a core after three
+minutes of meeting; nobody has measured it after eight hours. If that becomes a
+visible stutter, the fix is in how the list is built, not in the lifecycle.
 
 Still unaddressed and unchanged: `ScreenCaptureKitAudioCapturer.stop()` never
 calls `removeStreamOutput(_:type:)`, which Interval 15 noted and nothing has

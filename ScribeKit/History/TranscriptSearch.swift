@@ -69,10 +69,7 @@ nonisolated struct TranscriptExcerpt: Equatable, Sendable {
 
     /// The span's time as the transcript states it.
     var timestampDescription: String {
-        guard let period = heading?.split(separator: " ").last, period == "AM" || period == "PM" else {
-            return clock
-        }
-        return "\(clock) \(period)"
+        TranscriptClock.description(clock: clock, heading: heading)
     }
 
     /// Creates an excerpt.

@@ -13,10 +13,12 @@ import Foundation
 ///
 /// Presentation is deterministic. The transcript is a document the user keeps,
 /// so its date and clock times follow fixed rules — an ISO date and a
-/// twelve-hour English clock — rather than the locale the Mac happens to be
-/// set to, for the same reason ``SessionDirectoryName`` fixes its date format:
-/// a file's contents should not change with a system setting. The time zone is
-/// explicit and defaults to the one the meeting was held in.
+/// twelve-hour English clock that always states `AM` or `PM` — rather than the
+/// locale the Mac happens to be set to, for the same reason
+/// ``SessionDirectoryName`` fixes its date format: a file's contents should
+/// not change with a system setting, and a durable timestamp should not need
+/// its neighbours to be readable. The time zone is explicit and defaults to
+/// the one the meeting was held in.
 ///
 /// Recognised text is written exactly as the recogniser finalised it, apart
 /// from the whitespace that joins one span to the previous one. Nothing here
@@ -270,30 +272,33 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
         return epoch.wallStart.addingTimeInterval(offset - epoch.mediaStart)
     }
 
-    /// Formats a moment as a twelve-hour clock time.
+    /// Formats a moment as a twelve-hour clock time with its period.
     ///
     /// The format is fixed rather than localised, so the file reads the same
     /// on any Mac. Written by hand rather than with a `DateFormatter` because
-    /// there is nothing to localise and nothing to configure wrongly.
+    /// there is nothing to localise and nothing to configure wrongly — and
+    /// because a locale-driven formatter is free to drop the period, which is
+    /// the one part of a wall-clock time a reader cannot reconstruct.
     ///
-    /// A time to the second omits the period. It always appears under a minute
-    /// heading that carries one, and repeating `AM` on every line of a
-    /// transcript adds noise rather than meaning.
+    /// Every wall-clock time carries `AM` or `PM`, whether or not it carries
+    /// seconds. A span's time is read on its own — quoted, searched, seen
+    /// halfway down a long document — so leaning on the minute heading above
+    /// it to supply the period made a line that is ambiguous by itself.
     ///
     /// - Parameters:
     ///   - date: The moment to format.
-    ///   - includingSeconds: Whether to include seconds, and so to omit the
-    ///     period.
-    /// - Returns: A string such as `11:04 AM` or `11:04:02`.
+    ///   - includingSeconds: Whether to include seconds.
+    /// - Returns: A string such as `11:04 AM` or `11:04:02 AM`.
     private func clock(_ date: Date, includingSeconds: Bool) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let parts = calendar.dateComponents([.hour, .minute, .second], from: date)
         let hour24 = parts.hour ?? 0
         let hour = hour24 % 12 == 0 ? 12 : hour24 % 12
+        let period = hour24 < 12 ? "AM" : "PM"
         return includingSeconds
-            ? String(format: "%d:%02d:%02d", hour, parts.minute ?? 0, parts.second ?? 0)
-            : String(format: "%d:%02d %@", hour, parts.minute ?? 0, hour24 < 12 ? "AM" : "PM")
+            ? String(format: "%d:%02d:%02d %@", hour, parts.minute ?? 0, parts.second ?? 0, period)
+            : String(format: "%d:%02d %@", hour, parts.minute ?? 0, period)
     }
 
     /// The minute a moment falls in, counted from the reference date.

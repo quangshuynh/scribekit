@@ -503,6 +503,62 @@ Nothing here is ScribeKit-owned duration-proportional state that is
 unnecessary, so nothing was released or bounded. Fifteen megabytes was not
 optimised because the number looked large.
 
+## Interval 19: closing the window stops paying for it
+
+Interval 17 measured that hiding the main window saved almost nothing and that
+taking its hosting view down returned the process to the headless floor.
+Interval 18 profiled why: about 30% of the process's CPU was SwiftUI layout,
+28.3% of it the live transcript's `ScrollViewLayoutComputer`. A closed SwiftUI
+`Window` scene keeps its view graph installed, so a closed window was paying
+almost exactly what an open one paid.
+
+The main window scene now holds `MainPresentationScene`, which builds
+`ScribeKitRootView` only while its window is on screen. Closing the window
+releases the interface; opening it builds a new one over the runtime that has
+been running throughout.
+
+**Measurement.** Two Release `presentationCost` soaks, three minutes each, one
+uninterrupted meeting split into three one-minute phases, capturing Brave
+Browser with compressed retention, sampled every twenty seconds. The harness
+now hosts `MainPresentationScene` itself, so the middle phase is the shipping
+lifecycle rather than the harness reaching into AppKit: `window.close()` is the
+only act, and everything that follows from it is production code.
+
+| Phase | Interval 17/18 | Interval 19, run 1 | Interval 19, run 2 |
+|---|---|---|---|
+| Window visible | 23.0 / 22.9% | 23.9 / 21.7 / 22.4% | 23.4 / 21.3 / 26.3% |
+| Window hidden (`orderOut`) | 21.1 / 20.7% | — | — |
+| Window closed (detached) | — | 6.7 / 6.3 / 6.7% | 7.9 / 7.2 / 6.8% |
+| Window reopened | — | 23.8 / 28.7 / 33.5% | 29.4 / 24.8 / 23.5% |
+| View taken down (control) | 7.2 / 7.3% | — | — |
+
+Four things follow.
+
+- **A closed window now costs what no window costs.** 6.3–7.9% against the
+  7.2–7.6% floor Interval 17 measured with the hosting view removed by hand.
+  The lifecycle reaches the control, which is the whole point of the interval.
+- **The hierarchy really is released.** The harness counts the views under the
+  window: 148 with it open, 3 with it closed — the shell and its reporter.
+  That is printed alongside the CPU figure so a phase that failed to detach
+  cannot be read as a phase that detached cheaply.
+- **The meeting did not notice.** Buffers, recognised events, `transcript.md`
+  and `audio.m4a` continued at the same rate across the detached phase, the
+  capturer was never restarted, and the run finished with 30 spans, a footer,
+  `completed`, a 180.8 s recording against 180.7 s of captured media and one
+  session directory.
+- **Reopening costs a rebuild and then costs what it used to.** The sample
+  taken at the instant of reopening read 85–100% of one core; the phase around
+  it settled to visible cost. The interface is built from nothing, so that
+  burst grows with the transcript being rebuilt, and it has not been measured
+  after a long meeting.
+
+**Visible cost is unchanged, deliberately.** No transcript view change was
+attempted this interval. Interval 18 tried two and both measured worse; the
+lever the evidence pointed at was the lifecycle, and that is the only one
+pulled. The reopened phase reads a little higher than the visible phase in
+run 1 because the transcript is longer by then, which is the same cost, not a
+new one.
+
 ## What this does not show
 
 - **Most of what the interface costs is unattributed.** The measurement exists
@@ -515,10 +571,16 @@ optimised because the number looked large.
   spends its time inside Apple's framework was not attributed, and neither is
   the interface's remaining cost or the hour-long footprint drift.
 - **The interface measured is not the application's own window.** The harness
-  hosts `ScribeKitRootView` over the runtime it is measuring; the application's
-  own window observes the application's own runtime, which is idle in that
-  process. The comparison between phases is sound because the difference is
-  isolated, but it is not a recording of a user's session.
+  hosts the application's own scene content — `MainPresentationScene` since
+  Interval 19 — over the runtime it is measuring, in a window it creates
+  itself; the application's own window observes the application's own runtime,
+  which is idle in that process. The comparison between phases is sound because
+  the difference is isolated, but it is not a recording of a user's session.
+- **The Interval 19 phases are one minute each.** Long enough for three
+  twenty-second samples that agree with each other and short enough to repeat,
+  but shorter than the five-minute phases Interval 17 used. The detached
+  figures are the ones that matter and they are flat; the reopened ones carry
+  the rebuild's tail.
 - **Sample content is substituted, not captured.** Speech reached the pipeline
   through the real stream's buffers but was synthesised rather than played by a
   captured application, for the reason given in [Method](#method). Timing and

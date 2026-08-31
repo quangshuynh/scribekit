@@ -307,8 +307,8 @@ struct MeetingPauseResumeTests {
         let paused = formatter.paused(at: pausedAt)
         let resumed = formatter.resumed(at: resumedAt, pausedAt: pausedAt)
 
-        #expect(paused.hasPrefix("> **Paused:** 12:02:10."))
-        #expect(resumed.hasPrefix("> **Resumed:** 12:07:10, after 5 min 0 s paused."))
+        #expect(paused.hasPrefix("> **Paused:** 12:02:10 AM."))
+        #expect(resumed.hasPrefix("> **Resumed:** 12:07:10 AM, after 5 min 0 s paused."))
         for marker in [paused, resumed] {
             #expect(!marker.lowercased().contains("not transcribed"))
             #expect(!marker.lowercased().contains("gap"))

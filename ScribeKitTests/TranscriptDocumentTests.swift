@@ -106,13 +106,76 @@ struct TranscriptDocumentTests {
         let document = TranscriptDocument.parse(markdown)
 
         #expect(document.spans.count == 3)
-        #expect(document.spans[0].clock == "10:01:00")
+        #expect(document.spans[0].clock == "10:01:00 AM")
         #expect(document.spans[0].heading == "10:01 AM")
         #expect(document.spans[0].timestampDescription == "10:01:00 AM")
-        #expect(document.spans[1].clock == "10:01:20")
+        #expect(document.spans[1].clock == "10:01:20 AM")
         #expect(document.spans[1].heading == "10:01 AM")
-        #expect(document.spans[2].clock == "10:01:40")
+        #expect(document.spans[2].clock == "10:01:40 AM")
         #expect(document.spans.map(\.index) == [0, 1, 2])
+    }
+
+    @Test("A transcript written before periods were stated still reads back")
+    func legacySpansKeepTheirTimestamps() throws {
+        // Exactly what ScribeKit wrote before Interval 19: the seconds line
+        // carried no period, and the minute heading above it did.
+        let markdown = """
+            # Closures Walkthrough
+
+            **Date:** 2026-08-29
+            **Started:** 10:01 AM
+            **Sources:** QuickTime Player
+            **Language:** en-US
+            **Captured by:** ScribeKit
+
+            ## Transcript
+
+            ### 10:01 AM
+
+            **10:01:00**
+
+            First sentence.
+
+            ### 1:28 PM
+
+            **13:28:04**
+
+            Second sentence.
+
+            ---
+
+            **Ended:** 1:29 PM
+            **Duration:** 3 h 28 min
+
+            """
+
+        let document = TranscriptDocument.parse(markdown)
+
+        #expect(document.isScribeKitTranscript)
+        #expect(document.spans.map(\.clock) == ["10:01:00", "13:28:04"])
+        #expect(document.spans.map(\.timestampDescription) == ["10:01:00 AM", "13:28:04 PM"])
+        #expect(document.spans.map(\.text) == ["First sentence.", "Second sentence."])
+    }
+
+    @Test("A span that states its own period does not borrow the heading's")
+    func spansPreferTheirOwnPeriod() throws {
+        let markdown = TranscriptFixture.transcript(texts: ["First sentence."])
+
+        let document = TranscriptDocument.parse(markdown)
+
+        #expect(document.spans.count == 1)
+        #expect(document.spans[0].clock == "10:01:00 AM")
+        #expect(document.spans[0].timestampDescription == "10:01:00 AM")
+    }
+
+    @Test("A bold line that is not a timestamp still opens no span")
+    func boldProseIsNotATimestamp() throws {
+        let markdown = TranscriptFixture.transcript(texts: ["First sentence."])
+            + "**Ended at 1:28:04 PM**\n\nNot a span.\n\n"
+
+        let document = TranscriptDocument.parse(markdown)
+
+        #expect(document.spans.map(\.text) == ["First sentence."])
     }
 
     @Test("Structural remarks are not recognised speech")
