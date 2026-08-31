@@ -16,6 +16,11 @@ import SwiftUI
 /// There is one meeting, so there is one window for it, and asking for it from
 /// the menu bar reopens or fronts that window instead of adding another copy of
 /// the application beside the first.
+///
+/// The window's content is ``MainPresentationScene`` rather than
+/// ``ScribeKitRootView`` directly, because a closed window scene keeps its view
+/// graph alive and being laid out. The scene holds the interface only while the
+/// window is on screen; the meeting is unaffected either way.
 @main
 struct ScribeKitApp: App {
 
@@ -26,7 +31,7 @@ struct ScribeKitApp: App {
 
     var body: some Scene {
         Window("ScribeKit", id: Self.mainWindowID) {
-            ScribeKitRootView(runtime: delegate.runtime)
+            MainPresentationScene(runtime: delegate.runtime)
         }
         .windowResizability(.contentMinSize)
 

@@ -71,13 +71,17 @@ struct SoakValidationTests {
         #expect(report.passed)
     }
 
-    /// The same meeting with the window visible, hidden and closed.
+    /// The same meeting with the window visible, closed and open again.
     ///
-    /// The window here is the real ``ScribeKitRootView`` over the runtime under
-    /// measurement, so what changes between phases is exactly ScribeKit's own
-    /// presentation work: capture, recognition, retention and transcript
-    /// writing are identical throughout, and the meeting is never restarted.
-    @Test("Window visible, hidden and closed", .enabled(if: SoakValidationTests.isEnabled), .timeLimit(.minutes(60)))
+    /// The window here hosts the real ``MainPresentationScene`` over the
+    /// runtime under measurement, so the middle phase is the application's own
+    /// lifecycle doing the detaching rather than the harness reaching into
+    /// AppKit: closing the window is the only act, and everything that follows
+    /// from it is production code. Capture, recognition, retention and
+    /// transcript writing are identical throughout, and the meeting is never
+    /// restarted, so what changes between phases is presentation and nothing
+    /// else.
+    @Test("Window visible, closed and reopened", .enabled(if: SoakValidationTests.isEnabled), .timeLimit(.minutes(60)))
     @MainActor
     func presentationCost() async throws {
         let configuration = try #require(Self.configuration)
@@ -91,35 +95,35 @@ struct SoakValidationTests {
 
         try await session.start(title: "Presentation cost")
 
-        var window: NSWindow? = Self.makeWindow(for: session.runtime)
-        weak let hosting = window?.contentView
-        window?.makeKeyAndOrderFront(nil)
-        #expect(window?.isVisible == true)
+        let window = Self.makeWindow(for: session.runtime)
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.isVisible)
         await session.observe(on: phase, label: "visible")
+        let attached = Self.viewCount(window)
 
-        window?.orderOut(nil)
-        #expect(window?.isVisible == false)
-        await session.observe(on: phase, label: "hidden")
-
-        // Closing has to actually take the hosting view down, or the phase
-        // measures a window that is merely off screen for a second time. The
-        // weak reference is the proof, and it is printed rather than asserted:
-        // if AppKit keeps the view alive the number below still needs reading
-        // as "not closed" rather than silently as "closing costs nothing".
-        window?.contentView = nil
-        window?.close()
-        window = nil
-        print("  hosting view after close: \(hosting == nil ? "released" : "STILL ALIVE")")
-        await session.observe(on: phase, label: "closed")
+        // The only act. Whether the interface really went away is a fact about
+        // the window's own view tree, and it is printed rather than asserted:
+        // if the hierarchy survived, the CPU figure below has to be read as
+        // "not detached" rather than silently as "closing costs nothing".
+        window.close()
+        await session.observe(on: phase, label: "detached")
+        let detached = Self.viewCount(window)
+        print("  views under the window: \(attached) open, \(detached) closed")
 
         // Closing the window is a presentation act and nothing else.
         #expect(session.runtime.isRunning)
+        #expect(detached < attached, "the interface was released, not moved off screen")
+
         let beforeReopen = session.runtime.transcript.finalizedSegments.count
-        let reopened = Self.makeWindow(for: session.runtime)
-        reopened.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFront(nil)
+        await session.observe(on: phase, label: "reopened")
         session.observe(label: "reopened")
         #expect(session.runtime.transcript.finalizedSegments.count >= beforeReopen)
-        reopened.close()
+        // Not compared with the visible count: the transcript list is lazy, so
+        // how many rows exist depends on how much has been recognised. What
+        // has to be true is that an interface is there again at all.
+        #expect(Self.viewCount(window) > detached, "the interface was built again")
+        window.close()
 
         let captured = session.runtime.capturedDuration
         await session.stop()
@@ -175,7 +179,9 @@ struct SoakValidationTests {
     ///
     /// The application's own window observes the application's own runtime,
     /// which is idle here; this one observes the meeting being measured, which
-    /// is the thing whose presentation cost is in question.
+    /// is the thing whose presentation cost is in question. Its content is
+    /// ``MainPresentationScene``, exactly what the application's window scene
+    /// holds, so closing this window exercises the shipping lifecycle.
     @MainActor
     private static func makeWindow(for runtime: MeetingRuntime) -> NSWindow {
         let window = NSWindow(
@@ -186,8 +192,21 @@ struct SoakValidationTests {
         )
         window.title = "Soak validation"
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: ScribeKitRootView(runtime: runtime))
+        window.contentView = NSHostingView(rootView: MainPresentationScene(runtime: runtime))
         return window
+    }
+
+    /// How many views the window's content holds, the shape of the thing whose
+    /// layout is being paid for.
+    ///
+    /// - Parameter window: The window to count.
+    /// - Returns: The number of views under its content view, itself included.
+    @MainActor
+    private static func viewCount(_ window: NSWindow) -> Int {
+        func count(_ view: NSView) -> Int {
+            view.subviews.reduce(1) { $0 + count($1) }
+        }
+        return window.contentView.map(count) ?? 0
     }
 
     @MainActor
