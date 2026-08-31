@@ -24,8 +24,12 @@ protocol CaptureSourceProviding: Sendable {
 
 /// A reason application discovery could not produce a list of sources.
 enum CaptureSourceDiscoveryError: Error, Equatable, Sendable {
-    /// The user has not granted the permission the discovery API requires.
-    case permissionDenied
+    /// macOS does not currently grant the access discovery requires.
+    ///
+    /// ScribeKit says the access is not available rather than that the user
+    /// denied it: a permission that has never been asked for and one that was
+    /// refused look the same from here.
+    case accessUnavailable
 
     /// Discovery failed for another reason, described by the system.
     case systemFailure(String)
@@ -35,9 +39,10 @@ extension CaptureSourceDiscoveryError: LocalizedError {
     /// A message suitable for display in the setup screen.
     var errorDescription: String? {
         switch self {
-        case .permissionDenied:
-            "ScribeKit needs Screen Recording permission to list running applications. "
-            + "Grant it in System Settings › Privacy & Security › Screen Recording, then refresh."
+        case .accessUnavailable:
+            "ScribeKit does not have Screen & System Audio Recording access, so it cannot list or record "
+            + "this Mac's applications. Grant it in System Settings › Privacy & Security › "
+            + "Screen & System Audio Recording, then choose Refresh here."
         case let .systemFailure(description):
             "Applications could not be listed: \(description)"
         }

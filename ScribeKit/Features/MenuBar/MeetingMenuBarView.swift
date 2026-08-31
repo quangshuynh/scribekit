@@ -101,7 +101,8 @@ struct MeetingMenuBarView: View {
             audio: runtime.audioRetentionState.url,
             canStop: runtime.canStop,
             canPause: runtime.canPause,
-            canResume: runtime.canResume
+            canResume: runtime.canResume,
+            outcome: runtime.outcome
         )
     }
 

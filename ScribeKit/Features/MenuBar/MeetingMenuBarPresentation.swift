@@ -66,6 +66,10 @@ nonisolated struct MeetingMenuBarPresentation: Equatable, Sendable {
     ///   - canStop: Whether the runtime would act on a stop request.
     ///   - canPause: Whether the runtime would act on a pause request.
     ///   - canResume: Whether the runtime would act on a resume request.
+    ///   - outcome: How the last meeting ended, when one has. A meeting whose
+    ///     capture died is a failure to ``MeetingRuntimeStatus``, which is
+    ///     derived from subsystems that cannot tell an interruption from a
+    ///     failure; the outcome can, and the menu bar says which it was.
     init(
         status: MeetingRuntimeStatus,
         meeting: MeetingSnapshot?,
@@ -73,7 +77,8 @@ nonisolated struct MeetingMenuBarPresentation: Equatable, Sendable {
         audio: URL?,
         canStop: Bool,
         canPause: Bool = false,
-        canResume: Bool = false
+        canResume: Bool = false,
+        outcome: MeetingOutcomePresentation? = nil
     ) {
         self.title = meeting?.title
         self.failureMessage = status.failureMessage
@@ -105,7 +110,7 @@ nonisolated struct MeetingMenuBarPresentation: Equatable, Sendable {
             statusLine = "Meeting finished"
         case .failed:
             symbolName = "exclamationmark.triangle.fill"
-            statusLine = "Meeting failed"
+            statusLine = outcome?.category == .interrupted ? "Meeting interrupted" : "Meeting failed"
         }
 
         if let title = meeting?.title {

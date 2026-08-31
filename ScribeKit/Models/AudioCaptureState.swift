@@ -45,6 +45,11 @@ nonisolated enum AudioCaptureState: Equatable, Sendable {
         }
     }
 
+    /// What went wrong, when something did.
+    var failureMessage: String? {
+        if case let .failed(message) = self { message } else { nil }
+    }
+
     /// Whether a start request is meaningful in this state.
     ///
     /// A failed state can be started again: the failure is a report about the

@@ -103,6 +103,29 @@ final class MeetingSetupDestinationModel {
         }
     }
 
+    /// What the save-location part of start readiness knows, in the terms
+    /// ``MeetingStartReadiness`` is derived from.
+    ///
+    /// A folder that could not be remembered is usable for this launch, so it
+    /// is reported as usable with something to say rather than as a problem
+    /// that stops a meeting.
+    var readiness: SaveLocationReadiness {
+        switch state {
+        case .none:
+            .notChosen
+        case let .available(destination):
+            .ready(path: destination.url.path(percentEncoded: false))
+        case let .unavailable(message):
+            .unusable(message: message)
+        case let .persistenceFailed(url, message):
+            if let url {
+                .readyNotRemembered(path: url.path(percentEncoded: false), message: message)
+            } else {
+                .unusable(message: message)
+            }
+        }
+    }
+
     /// Whether the current folder came from a previous launch.
     var isRestored: Bool {
         if case let .available(destination) = state { destination.origin == .restored } else { false }

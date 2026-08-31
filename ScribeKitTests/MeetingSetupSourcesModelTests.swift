@@ -60,17 +60,32 @@ struct MeetingSetupSourcesModelTests {
         #expect(model.availableSources.isEmpty)
     }
 
+    @Test("Missing capture access is kept apart from other discovery failures")
+    func accessUnavailableDiscovery() async {
+        let model = model([.failure(CaptureSourceDiscoveryError.accessUnavailable)])
+        await model.refresh()
+
+        guard case let .accessUnavailable(message) = model.discoveryState else {
+            Issue.record("Expected an access state, got \(model.discoveryState)")
+            return
+        }
+        #expect(message.contains("Screen & System Audio Recording"))
+        #expect(model.availableSources.isEmpty)
+        #expect(model.readiness == .accessUnavailable(message: message))
+    }
+
     @Test("Provider failure produces an error state without crashing")
     func failedDiscovery() async {
-        let model = model([.failure(CaptureSourceDiscoveryError.permissionDenied)])
+        let model = model([.failure(CaptureSourceDiscoveryError.systemFailure("no content"))])
         await model.refresh()
 
         guard case let .failed(message) = model.discoveryState else {
             Issue.record("Expected a failed state, got \(model.discoveryState)")
             return
         }
-        #expect(message.contains("Screen Recording"))
+        #expect(message.contains("no content"))
         #expect(model.availableSources.isEmpty)
+        #expect(model.readiness == .discoveryFailed(message: message))
     }
 
     @Test("Several applications can be selected at once")
