@@ -6,6 +6,24 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- A meeting no longer creates a main-actor task on ScreenCaptureKit's audio
+  delivery queue. The capture activity summary was published by a handler that
+  runs on that queue, and the handler created an unstructured `Task` to hop to
+  the main actor — twice a second, for the length of a meeting, to refresh a
+  value only the interface reads. Routing a high-frequency audio callback into
+  the main actor is the one thing the capture pipeline may not do. The summary
+  now crosses through a single long-lived consumer of a stream that keeps only
+  the newest snapshot, so the delivery queue creates nothing and no snapshot
+  can accumulate. This is a correctness fix against the pipeline's own rules;
+  it is **not** a fix for the crash described in `docs/PERFORMANCE.md`, which
+  is still open.
+- An explicit Resume now gives the recogniser its restart budget back. The
+  bound on automatic self-restarts belongs to a capture run rather than to the
+  whole meeting: a person choosing to carry on is not an automatic retry, and
+  the resumed run has just proved the recogniser starts. A meeting that
+  stumbled twice in its first hour is no longer unable to recover for the rest
+  of the day. Each run is still bounded to the same number of self-restarts,
+  and only a person can reset it.
 - A recogniser that restarts itself no longer restarts the transcript's
   timeline with it. A new recognition run counts its own offsets from its own
   first frame, and those offsets were being written to the transcript as they
