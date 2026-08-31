@@ -50,6 +50,14 @@ are consequences of decisions, and several of them are deliberate.
   applications start and quit.
 - **Audio in an unexpected format is refused rather than resampled**, because a
   file's format is fixed when it is created.
+- **There is no button that opens the System Settings pane.** macOS exposes no
+  supported API for opening a specific privacy pane, so ScribeKit names the
+  path in words rather than hard-coding an undocumented URL.
+- **Nothing watches for the permission to be granted.** ScribeKit checks when
+  you press **Refresh** and not otherwise; there is no polling and no
+  notification to subscribe to.
+- **A permission never asked for and one refused look the same.** ScribeKit
+  reports that access is unavailable rather than claiming which it was.
 
 ## Recognition
 
@@ -112,6 +120,14 @@ are consequences of decisions, and several of them are deliberate.
   folder, at launch or when a folder is chosen. No recursive walk, no timer.
 - **If the folder cannot be restored**, ScribeKit says it could not check for
   an unfinished meeting rather than looking anywhere else.
+- **Readiness is a snapshot, not a subscription.** It is recomputed when the
+  screen appears, when you act on a control, and when the runtime changes — a
+  disk reappearing or a model finishing its install is noticed at the next
+  **Try Again**, **Refresh** or **Check Again**, not on its own.
+- **The readiness and ending copy is proved by tests, not by a real refusal.**
+  No permission was actually denied, no disk actually pulled, and no model
+  actually uninstalled on this Mac to produce these states; they are reached
+  through injected failures.
 
 ## Process and CI
 

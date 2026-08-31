@@ -33,6 +33,14 @@ never both. See [Session Artifacts](../internals/session-artifacts.md).
 - If the folder cannot be restored at launch, ScribeKit reports that it could
   not check for an unfinished meeting rather than scanning elsewhere.
 
+The controls match those states: **Choose Folder…** or **Change Folder…** picks
+one, **Forget Folder** stops remembering it, and **Try Again** resolves a
+remembered folder afresh — for a disk that has since been reconnected. A folder
+that was chosen but could not be remembered is still used for this launch, and
+ScribeKit says it will need choosing again next time rather than treating it as
+a failure. There is no fallback to Documents, Desktop or a temporary directory,
+and no meeting starts without a folder you picked.
+
 ## Access lifetime
 
 Access to the folder is held for exactly as long as a meeting is being

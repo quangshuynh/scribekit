@@ -5,8 +5,7 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 19 — presentation lifecycle, and explicit AM/PM in the transcript's
-wall-clock times. Complete.
+Interval 20 — permissions, failure UX and first-run readiness. Complete.
 
 ## Current implementation
 
@@ -454,6 +453,68 @@ The default is the system locale when the recogniser supports it, otherwise the
 first installed locale. Nothing detects or switches language on its own.
 
 This Mac: 30 supported locales, 9 installed (all `en-*`).
+
+## Start readiness
+
+`MeetingStartReadiness` is the single answer to whether Start Meeting can
+succeed. It is a pure value derived from four inputs — `SaveLocationReadiness`
+from `MeetingSetupDestinationModel`, `CaptureSourceReadiness` from
+`MeetingSetupSourcesModel`, `SpeechRecognitionAvailability` from the runtime,
+and whether a meeting is active — and it produces one row per prerequisite plus
+at most one blocking reason.
+
+The prerequisite order is the blocking order: save location, capture access,
+speech recognition, capture source. It follows the dependencies rather than the
+order `MeetingRuntime.start` happens to check things — without a folder there is
+nothing to write, and without capture access there is no list to select a source
+from. The setup screen shows every row; the Start control gets one reason, shown
+beside the button as well as in its help, so a disabled button is never silent.
+
+A row's status is `satisfied`, `checking`, `advisory` or `blocked`. `checking`
+prevents a start without describing a problem, which matches the runtime: it
+refuses to start while availability is `unknown`. `advisory` never blocks — a
+folder that could not be remembered is usable for this launch.
+
+Readiness is derived on every evaluation, never stored, so a corrected
+prerequisite stops being reported without anything clearing it. It is a snapshot
+rather than a subscription: nothing polls, and a permission granted or a model
+installed is noticed at the next Refresh or Check Again.
+
+## Capture access
+
+Discovery still follows the normal macOS permission flow: the first
+`SCShareableContent` request is what makes macOS ask, and nothing pre-checks in
+order to avoid asking. When a request fails, `ScreenCaptureKitSourceProvider`
+asks `CGPreflightScreenCaptureAccess` — public, authoritative and
+non-prompting — so a missing permission is reported as one rather than as a
+framework error. `SCStreamError.userDeclined` is still taken at face value.
+
+`CaptureSourceDiscoveryError.accessUnavailable` replaces `permissionDenied`,
+and the copy says access is unavailable rather than that the user denied it: a
+permission never asked for and one refused are indistinguishable from here.
+There is no System Settings deep link. macOS exposes no supported API for
+opening a specific privacy pane, so the path is named in words.
+
+## Ending presentation
+
+`MeetingCompletion` records what the session was closed as and whether capture
+ever ran. The second half is what separates a start that never began from a
+meeting that died an hour in: both are recorded as `failed`, and they need
+different things said about their artifacts.
+
+`MeetingOutcomePresentation` derives from that plus the four subsystem states,
+and answers three questions for every ending — what happened, what it means for
+this meeting's transcript and recording, and what to do next. Its categories are
+`completed`, `interrupted`, `transcriptFailure`, `audioFailure`,
+`recognitionFailure` and `startFailure`; the subsystem's own message is
+secondary detail. The window shows it as an inline panel with Show in Finder and
+Dismiss, and the menu bar reads the same value, so an interrupted meeting reads
+as interrupted in both rather than as a failure in one and a completion in the
+other.
+
+`MeetingRuntimeStatus` is unchanged. It describes what a meeting is doing now
+and is derived from subsystems that cannot tell an interruption from a failure;
+the outcome can, and refines the menu bar's status line.
 
 ## Persistence architecture
 
@@ -1430,6 +1491,31 @@ titles, no telemetry.
 
 ## Validation status
 
+### Interval 20 validation
+
+- `xcodebuild … clean test` on macOS: 644 tests in 59 suites, all passing, no
+  new compiler warnings. 37 of those tests and 3 of those suites are new here,
+  and one existing discovery test was rewritten for the renamed access case.
+- `mkdocs build --strict`: passing.
+- New deterministic coverage: `MeetingStartReadinessTests` (19 tests) over the
+  derived readiness model — each blocking state, the blocking priority,
+  correcting each blocker in turn, failures not outlasting their cause, and
+  every row naming its status in words. `MeetingOutcomePresentationTests` (11)
+  over the ending categories, including the menu bar distinguishing an
+  interruption from a failure. `MeetingStartFailureTests` (7) over start
+  failures: session creation, audio creation, recognition start, capture start,
+  an unavailable remembered source, an unavailable speech model, and an
+  interruption — each asserting the runtime holds nothing afterwards (no
+  activity assertion, no open writer, no capturer), that the persisted outcome
+  is truthful, and that a second start succeeds once the dependency is
+  corrected.
+- Not validated live: no permission was actually denied, no disk pulled and no
+  speech model uninstalled on this Mac. Every readiness and failure state is
+  reached through injected failures and substituted values.
+- The setup screen was not driven by hand for this interval. Readiness and
+  ending copy are covered by tests over the derived models rather than by a
+  click-through.
+
 ### Interval 19 validation
 
 `xcodebuild clean test` on macOS: 606 tests in 56 suites, all passing, no new
@@ -2395,6 +2481,26 @@ intervals; the capture observations above were taken through the same path.
   is not reachable in practice, and the failure mode would be a lost derived
   edit, never a damaged source artifact.
 
+- **Readiness is a snapshot, not a subscription.** Nothing polls for a
+  permission, a disk or a model to change; the user presses Refresh, Try Again
+  or Check Again. That is deliberate — the alternative is a timer for a state
+  that changes once a month — but it means a granted permission is not noticed
+  on its own.
+- **There is no System Settings deep link.** macOS exposes no supported API for
+  opening a specific privacy pane, and the `x-apple.systempreferences:` scheme
+  is undocumented, so the path is named in words instead. This is the one place
+  this interval chose an honest instruction over a convenient button.
+- **A permission never asked for and one refused are indistinguishable.**
+  `CGPreflightScreenCaptureAccess` answers whether access exists, not why, and
+  the copy says only that.
+- **`didCaptureAudio` is a flag, not a measurement.** It records that capture
+  reached `.capturing`, which is what separates a start failure from a meeting
+  that ran. A meeting that captured no audio despite starting is still
+  described as a meeting that ran, because it was.
+- **Source disappearance during a running capture is unchanged.** ScreenCaptureKit
+  may emit no actionable signal, ScribeKit uses no silence heuristic and
+  replaces nothing automatically. This interval deliberately did not touch it.
+
 - Interval 2, 3 and 4 limitations still hold.
 - **A pause is a cut in the recording, not a silence in it.** The file holds
   captured audio only, so the resume is audible as a join and the recording
@@ -2584,52 +2690,34 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 19 closed the question Interval 18 left open.
+Interval 20 answered the question a first launch asks. A new user now sees the
+four things a meeting needs before they press anything, each with its state in
+words and the control that resolves it, and an ending is described rather than
+implied: an interrupted meeting is no longer presented as a finished one in
+either the window or the menu bar.
 
-**Closed.** The presentation lifecycle. A closed main window now releases its
-view hierarchy instead of keeping it installed and laid out, which takes a
-detached meeting from 21% of a core to the ~7% headless floor while capture,
-recognition, both durable writers, the clocks, the activity assertion and the
-menu bar carry on untouched. `MeetingRuntime` did not move: it was already
-process-scoped, and the fix was to stop the window scene holding the interface
-rather than to change who holds the meeting. Also closed: a transcript's
-wall-clock times no longer depend on the heading above them to be readable.
+**Closed.** Start readiness is one derived value rather than three views each
+checking a subset, so a disabled Start button always has a stated reason and a
+corrected prerequisite clears itself. Missing capture access is distinguished
+from a discovery failure by an authoritative, non-prompting system call rather
+than by repeating a framework error. Every ending answers what happened, what
+it means for the files, and what to do next.
 
-**Open, and unchanged by this interval.** Visible presentation still costs
-about sixteen points of a core beyond the floor, and Interval 18's profile
-still says where — SwiftUI re-measuring the live transcript's scroll view.
-Interval 18 tried two narrow view splits and both measured worse; this interval
-deliberately did not try a third. The next honest attempt is a different shape
-of transcript view rather than another split of the current one, and it is
-worth doing only if a visible long meeting turns out to matter more than a
-background one, which is not what the product is for.
+**Open, and deliberately untouched.** Source disappearance during a running
+capture. ScreenCaptureKit may emit no actionable signal, and solving it is a
+capture architecture change, not a UX one. Also still open:
+`ScreenCaptureKitAudioCapturer.stop()` never calls
+`removeStreamOutput(_:type:)`, unimplicated and uncleared since Interval 15;
+and the visible-presentation cost Interval 18 profiled, which wants a different
+shape of transcript view rather than another split of the current one.
 
-**New, and small.** Reopening a window during a long meeting rebuilds the whole
-transcript list at once. Measured as one sample near 100% of a core after three
-minutes of meeting; nobody has measured it after eight hours. If that becomes a
-visible stutter, the fix is in how the list is built, not in the lifecycle.
+**New, and honest.** Nothing here was proved against a real refusal. No
+permission was denied on this Mac, no disk pulled, no model uninstalled. The
+states are reached through injected failures, and the first user to hit one for
+real is the evidence this interval does not have. That is the natural thing for
+a later interval to collect, and it costs nothing to collect it: the states are
+already named, so the question is only whether the machine produces the ones
+ScribeKit expects.
 
-Still unaddressed and unchanged: `ScreenCaptureKitAudioCapturer.stop()` never
-calls `removeStreamOutput(_:type:)`, which Interval 15 noted and nothing has
-since either implicated or cleared.
-
-The earlier note stands. Nothing in Interval 13 needs revisiting
-first: the write boundary it opened is one protocol wide, it can address one
-file, and the regression that proves it fingerprints every source artifact
-around a save.
-
-Two things it inherits. The derived sidecar now exists and is versioned, so a
-later user-owned artifact — anything the user decides rather than the recogniser
-observes — belongs in it additively rather than in a third file, and the
-refusals it already has (damaged, newer, foreign, stale) are the behaviour a new
-field inherits for free. And the conflict policy is deliberately the smallest
-one that is honest: if a second window over the same folder ever becomes real,
-the token comparison is where that conversation starts, not a lock somewhere
-else.
-
-Three things stay worth measuring when there is real usage to measure: whether
-the confidence thresholds hold outside synthesised en-US speech, view work
-during a long hidden meeting, and whether a real user's folder ever approaches
-the size where History's in-memory search stops being the right shape. Whether
-notes should be searchable belongs on that list now too, and it is a question
-about ranking rather than about storage.
+The obvious candidates after this are a real first-run on a clean Mac, and the
+accessibility pass this interval deliberately kept to the controls it added.
