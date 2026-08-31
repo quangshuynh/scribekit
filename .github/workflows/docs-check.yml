@@ -1,0 +1,36 @@
+name: Documentation check
+
+# Validates the documentation site on pull requests without publishing
+# anything. A broken internal link, a missing anchor or a page left out of the
+# navigation fails here, before it can reach main and break the published site.
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs-check.yml"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build site in strict mode
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      # ScribeKit is a Swift project, so the documentation toolchain is a
+      # pinned requirements file rather than a Python package definition.
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs build --strict

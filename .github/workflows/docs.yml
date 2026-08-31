@@ -1,0 +1,61 @@
+name: Documentation
+
+# Builds the MkDocs site and publishes it to GitHub Pages. Kept separate from
+# ci.yml on purpose: the application checks gate whether the code is correct,
+# and this one gates whether the site publishes. Neither should be able to
+# block the other.
+#
+# The repository's Pages source must be set to "GitHub Actions" in
+# Settings -> Pages for the deploy step to succeed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one in flight: a half-published
+# site is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      - run: pip install -r docs/requirements.txt
+      - name: Build with MkDocs
+        # Strict mode, so a broken internal link or anchor fails the build
+        # rather than publishing a page that cannot be navigated.
+        run: mkdocs build --strict
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
