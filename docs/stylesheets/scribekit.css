@@ -1,0 +1,81 @@
+/*
+ * ScribeKit documentation palette.
+ *
+ * Material's named palettes have no navy and no periwinkle, so `primary` and
+ * `accent` are set to `custom` in mkdocs.yml and the colours are defined here.
+ * Two accents are used rather than one: the periwinkle is bright enough for a
+ * dark background but not for white, so light mode uses a darker mix of the
+ * same hue to keep link text above 4.5:1 on the page background.
+ */
+
+:root {
+  --sk-navy-deep: #101827;
+  --sk-navy-dark: #0b1020;
+  --sk-periwinkle: #7c83ff;
+  --sk-blue: #4ea1ff;
+  --sk-periwinkle-ink: #454ecc; /* periwinkle darkened for light backgrounds */
+  --sk-blue-ink: #1f6fd0;
+}
+
+/* Light ------------------------------------------------------------------ */
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--sk-navy-deep);
+  --md-primary-fg-color--light: #223049;
+  --md-primary-fg-color--dark: var(--sk-navy-dark);
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: #dfe4ef;
+
+  --md-accent-fg-color: var(--sk-periwinkle-ink);
+  --md-accent-fg-color--transparent: rgba(69, 78, 204, 0.1);
+  --md-accent-bg-color: #ffffff;
+
+  --md-typeset-a-color: var(--sk-periwinkle-ink);
+  --md-footer-bg-color: var(--sk-navy-dark);
+  --md-footer-bg-color--dark: #060a14;
+}
+
+/* Dark ------------------------------------------------------------------- */
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 227; /* pulls Material's generated greys toward the navy identity */
+
+  --md-primary-fg-color: var(--sk-navy-dark);
+  --md-primary-fg-color--light: #1b2437;
+  --md-primary-fg-color--dark: #05070f;
+  --md-primary-bg-color: #eef1f8;
+  --md-primary-bg-color--light: #b8c0d4;
+
+  --md-accent-fg-color: var(--sk-periwinkle);
+  --md-accent-fg-color--transparent: rgba(124, 131, 255, 0.14);
+
+  --md-typeset-a-color: var(--sk-periwinkle);
+  --md-default-bg-color: #10141f;
+  --md-footer-bg-color: var(--sk-navy-dark);
+  --md-footer-bg-color--dark: #05070f;
+}
+
+/* The header logo is the app icon at 1:1; a little more room keeps it from
+   crowding the site name. */
+.md-header__button.md-logo :is(img, svg) {
+  height: 1.5rem;
+}
+
+/* Cool blue is the secondary identity colour: used for the active navigation
+   marker so the periwinkle stays the link colour and nothing else. */
+[data-md-color-scheme="slate"] .md-nav__link--active,
+[data-md-color-scheme="slate"] .md-nav__link:focus {
+  color: var(--sk-blue);
+}
+
+[data-md-color-scheme="default"] .md-nav__link--active,
+[data-md-color-scheme="default"] .md-nav__link:focus {
+  color: var(--sk-blue-ink);
+}
+
+/* Tables of file formats and limitations read better without the default
+   centre alignment on narrow columns. */
+.md-typeset table:not([class]) th {
+  background-color: var(--md-primary-fg-color);
+  color: #ffffff;
+}
