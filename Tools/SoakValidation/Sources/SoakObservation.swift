@@ -52,6 +52,12 @@ nonisolated struct SoakObservation: Codable, Equatable, Sendable {
     /// Buffers that arrived and could not be read.
     let unreadableBufferCount: Int
 
+    /// Recognition events the transcriber has published: every partial, every
+    /// finalised span and every interruption. Each one reaches the interface,
+    /// so the rate this grows at is the rate the presentation layer is asked
+    /// to invalidate.
+    let recognitionEventCount: Int
+
     /// A fixed-width line for the run's stdout log.
     var line: String {
         let cpu = windowCPUFraction.map { String(format: "%6.2f%%", $0 * 100) } ?? "     --"
@@ -72,7 +78,7 @@ nonisolated struct SoakObservation: Codable, Equatable, Sendable {
             status.padding(toLength: 14, withPad: " ", startingAt: 0),
             bufferCount,
             unreadableBufferCount
-        )
+        ) + String(format: "  events %d", recognitionEventCount)
     }
 }
 

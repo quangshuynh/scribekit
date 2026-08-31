@@ -59,7 +59,11 @@ struct SoakValidationTests {
         await session.stop()
         try session.writeReport(named: "soak-observations.json")
 
-        #expect(session.runtime.status == .completed)
+        // The point of the run is continuous capture across the whole window,
+        // so a pipeline that stopped on its own is a failed soak even though
+        // the artifacts below may still close cleanly.
+        #expect(session.endedEarly == nil, "capture ended early: \(session.endedEarly ?? "")")
+        #expect(captured >= configuration.duration * 0.98)
         #expect(!session.runtime.isRunning)
 
         let report = try #require(session.verify(capturedSeconds: captured))
@@ -88,14 +92,24 @@ struct SoakValidationTests {
         try await session.start(title: "Presentation cost")
 
         var window: NSWindow? = Self.makeWindow(for: session.runtime)
+        weak let hosting = window?.contentView
         window?.makeKeyAndOrderFront(nil)
+        #expect(window?.isVisible == true)
         await session.observe(on: phase, label: "visible")
 
         window?.orderOut(nil)
+        #expect(window?.isVisible == false)
         await session.observe(on: phase, label: "hidden")
 
+        // Closing has to actually take the hosting view down, or the phase
+        // measures a window that is merely off screen for a second time. The
+        // weak reference is the proof, and it is printed rather than asserted:
+        // if AppKit keeps the view alive the number below still needs reading
+        // as "not closed" rather than silently as "closing costs nothing".
+        window?.contentView = nil
         window?.close()
         window = nil
+        print("  hosting view after close: \(hosting == nil ? "released" : "STILL ALIVE")")
         await session.observe(on: phase, label: "closed")
 
         // Closing the window is a presentation act and nothing else.

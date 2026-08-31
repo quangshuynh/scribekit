@@ -62,6 +62,10 @@ final class SoakSession {
     /// The meeting owner under measurement.
     let runtime: MeetingRuntime
 
+    /// The recogniser the runtime is using, held so its event tally can be
+    /// read: the tally is how often the interface is asked to update.
+    let transcriber: any SpeechTranscribing
+
     /// The disposable destination this run writes into.
     let destination: URL
 
@@ -96,7 +100,9 @@ final class SoakSession {
         guard let chosen else { throw Failure.noCapturableApplication }
 
         let speech = await SyntheticSpeech.render(sampleRate: 48_000)
+        let transcriber = AppleSpeechTranscriber()
         let runtime = MeetingRuntime(
+            transcriber: transcriber,
             persistence: MarkdownTranscriptStore(access: GrantingAccess()),
             makeCapturer: { downstream in
                 ScreenCaptureKitAudioCapturer(
@@ -112,6 +118,7 @@ final class SoakSession {
         return SoakSession(
             configuration: configuration,
             runtime: runtime,
+            transcriber: transcriber,
             destination: destination,
             source: chosen
         )
@@ -120,11 +127,13 @@ final class SoakSession {
     private init(
         configuration: SoakConfiguration,
         runtime: MeetingRuntime,
+        transcriber: any SpeechTranscribing,
         destination: URL,
         source: CaptureSource
     ) {
         self.configuration = configuration
         self.runtime = runtime
+        self.transcriber = transcriber
         self.destination = destination
         self.source = source
     }
@@ -174,7 +183,8 @@ final class SoakSession {
                 .flatMap(Self.size(of:)),
             status: String(describing: runtime.status),
             bufferCount: runtime.activity.sampleCount,
-            unreadableBufferCount: runtime.activity.unreadableSampleCount
+            unreadableBufferCount: runtime.activity.unreadableSampleCount,
+            recognitionEventCount: transcriber.eventTally.published
         )
         previous = sample
         previousAt = now
@@ -183,7 +193,20 @@ final class SoakSession {
         return observation
     }
 
+    /// The longest the run waits between checking that the meeting is still
+    /// alive, so a pipeline that stopped is noticed in seconds rather than at
+    /// the next observation.
+    private static let livenessInterval: TimeInterval = 15
+
+    /// Why the run stopped early, when it did.
+    private(set) var endedEarly: String?
+
     /// Runs for a while, observing on a schedule.
+    ///
+    /// Returns early when the meeting is no longer running. A soak that has
+    /// lost its capture stream is measuring an idle process, and an hour of
+    /// that is an hour of nothing: the reason is recorded in ``endedEarly``
+    /// and the caller decides what to say about it.
     ///
     /// - Parameters:
     ///   - schedule: When to observe, relative to the call.
@@ -191,7 +214,17 @@ final class SoakSession {
     func observe(on schedule: SoakSampleSchedule, label: String) async {
         var reached: TimeInterval = 0
         while let wait = schedule.secondsAfter(reached) {
-            try? await Task.sleep(for: .seconds(wait))
+            var waited: TimeInterval = 0
+            while waited < wait {
+                let slice = min(Self.livenessInterval, wait - waited)
+                try? await Task.sleep(for: .seconds(slice))
+                waited += slice
+                guard runtime.isRunning else {
+                    endedEarly = String(describing: runtime.status)
+                    observe(label: "ended early")
+                    return
+                }
+            }
             reached += wait
             observe(label: "\(label) \(Int(reached / 60))m")
         }
