@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import OSLog
 
 /// An unfinished meeting ScribeKit found in the user's save folder.
 ///
@@ -217,6 +218,19 @@ actor SessionRecoveryService {
                 }
             }
 
+            ScribeKitLog.recovery.info(
+                """
+                Unfinished session scan: \(candidates.count, privacy: .public) unfinished, \
+                \(problems.count, privacy: .public) unreadable
+                """
+            )
+            for problem in problems {
+                // The reason, never the folder: a session directory's name is
+                // built from the meeting's title.
+                ScribeKitLog.recovery.error(
+                    "Session record refused: \(problem.error.diagnosticName, privacy: .public)"
+                )
+            }
             return SessionRecoveryReport(
                 candidates: candidates.sorted(by: Self.newestFirst),
                 problems: problems.sorted { $0.directory.path < $1.directory.path }
@@ -262,6 +276,7 @@ actor SessionRecoveryService {
                 TranscriptMarkdownFormatter.interruptionNotice(recordedAt: date, timeZone: timeZone),
                 at: transcriptURL
             )
+            ScribeKitLog.recovery.info("Interruption recorded for an unfinished session")
             return updated
         }
     }

@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import OSLog
 import Synchronization
 
 /// Streams one meeting's captured audio to one file at a time.
@@ -102,6 +103,7 @@ nonisolated final class RetainedAudioRecorder: AudioRetaining {
             throw AudioRetentionError(.sessionAlreadyInProgress)
         }
         guard mode.retainsAudio, let url = layout.audioURL(for: mode) else {
+            ScribeKitLog.audio.info("Retention disabled for this meeting")
             state.withLock { $0 = State() }
             return nil
         }
@@ -110,6 +112,13 @@ nonisolated final class RetainedAudioRecorder: AudioRetaining {
         // thing that could contend for the lock is a capture queue that has
         // not been started yet.
         let writer = try creator.makeWriter(at: url, mode: mode, format: format)
+        ScribeKitLog.audio.info(
+            """
+            Recording opened: \(mode.diagnosticName, privacy: .public), \
+            \(format.sampleRate, privacy: .public) Hz, \
+            \(format.channelCount, privacy: .public) channel(s)
+            """
+        )
         state.withLock { state in
             state = State(
                 recording: Recording(url: url, format: format, writer: writer),

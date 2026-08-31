@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import OSLog
 
 /// Writes the canonical Markdown transcript for one meeting at a time.
 ///
@@ -148,14 +149,18 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
             )
             do {
                 try fileStore.createDirectory(at: layout.directory)
+                ScribeKitLog.persistence.info("Session directory created")
             } catch {
+                ScribeKitLog.persistence.error("Session directory not created")
                 throw TranscriptPersistenceError(.directoryCreationFailed, underlying: error)
             }
 
             let file: any TranscriptFileAppending
             do {
                 file = try fileStore.createFile(at: layout.transcriptURL)
+                ScribeKitLog.persistence.info("Transcript opened")
             } catch {
+                ScribeKitLog.persistence.error("Transcript not opened")
                 throw TranscriptPersistenceError(.transcriptCreationFailed, underlying: error)
             }
 

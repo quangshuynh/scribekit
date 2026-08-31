@@ -9,10 +9,6 @@ import OSLog
 import ScreenCaptureKit
 import Synchronization
 
-/// Subsystem used for capture logging, matching the application's identifier so
-/// capture events are filterable in Console alongside the rest of the app.
-private nonisolated let captureSubsystem = Bundle.main.bundleIdentifier ?? "ScribeKit"
-
 /// Captures audio from selected applications with ScreenCaptureKit.
 ///
 /// The actor owns the whole framework-facing side of capture: resolving the
@@ -49,14 +45,14 @@ actor ScreenCaptureKitAudioCapturer: AudioCapturing {
     private let consumer: AudioSampleConsuming
     private let excludedBundleIdentifiers: Set<String>
     private nonisolated let interruptionContinuation: AsyncStream<AudioCaptureError>.Continuation
-    private nonisolated let logger = Logger(subsystem: captureSubsystem, category: "AudioCapture")
+    private nonisolated let logger = ScribeKitLog.capture
 
     /// The queue ScreenCaptureKit delivers audio on.
     ///
     /// Serial, so buffers stay in order, and `userInitiated` because dropped
     /// meeting audio cannot be recovered later.
     private nonisolated let sampleQueue = DispatchQueue(
-        label: "\(captureSubsystem).audio-capture",
+        label: "\(ScribeKitLog.subsystem).audio-capture",
         qos: .userInitiated,
         autoreleaseFrequency: .workItem
     )
@@ -119,12 +115,23 @@ actor ScreenCaptureKitAudioCapturer: AudioCapturing {
         } catch {
             output.invalidate()
             let captureError = Self.captureError(from: error)
-            logger.error("Capture failed to start: \(String(describing: captureError), privacy: .public)")
+            logger.error(
+                """
+                Capture failed to start: \
+                \(DiagnosticCategory(captureError)?.rawValue ?? "unclassified", privacy: .public)
+                """
+            )
             throw captureError
         }
 
         session = Session(stream: stream, output: output)
-        logger.info("Capture started for \(applications.count, privacy: .public) process(es)")
+        logger.info(
+            """
+            Capture started for \(applications.count, privacy: .public) process(es) at \
+            \(configuration.sampleRate, privacy: .public) Hz, \
+            \(configuration.channelCount, privacy: .public) channel(s)
+            """
+        )
     }
 
     func stop() async {
@@ -137,7 +144,9 @@ actor ScreenCaptureKitAudioCapturer: AudioCapturing {
         } catch {
             // The stream may already have stopped on its own; teardown is done
             // either way, and the reason was reported as an interruption.
-            logger.info("Capture stop reported: \(error.localizedDescription, privacy: .public)")
+            logger.info(
+                "Capture stop reported: \(DiagnosticSafety.sanitized(error.localizedDescription), privacy: .public)"
+            )
         }
     }
 
@@ -148,7 +157,12 @@ actor ScreenCaptureKitAudioCapturer: AudioCapturing {
         guard let session else { return }
         self.session = nil
         session.output.invalidate()
-        logger.error("Capture interrupted: \(String(describing: error), privacy: .public)")
+        logger.error(
+            """
+            Capture stream ended unexpectedly: \
+            \(DiagnosticCategory(error)?.rawValue ?? "unclassified", privacy: .public)
+            """
+        )
         interruptionContinuation.yield(error)
     }
 
@@ -161,13 +175,27 @@ actor ScreenCaptureKitAudioCapturer: AudioCapturing {
     /// - Returns: The current shareable content.
     /// - Throws: ``AudioCaptureError`` describing why the system refused.
     private func shareableContent() async throws -> SCShareableContent {
+        logger.debug("Source discovery started")
         do {
-            return try await SCShareableContent.excludingDesktopWindows(
+            let content = try await SCShareableContent.excludingDesktopWindows(
                 true,
                 onScreenWindowsOnly: false
             )
+            // The count, never the names: which applications a person has
+            // open is the shape of their day.
+            logger.debug(
+                "Source discovery succeeded: \(content.applications.count, privacy: .public) application(s)"
+            )
+            return content
         } catch {
-            throw Self.captureError(from: error)
+            let captureError = Self.captureError(from: error)
+            logger.error(
+                """
+                Source discovery failed: \
+                \(DiagnosticCategory(captureError)?.rawValue ?? "unclassified", privacy: .public)
+                """
+            )
+            throw captureError
         }
     }
 
