@@ -257,5 +257,27 @@ The `ScribeKit` scheme is shared and must stay committed; CI depends on it.
 - **No fake features.** An unimplemented control is disabled or absent — never
   simulated, stubbed with fabricated output, or described as working.
 - **Validate before finishing.** Build and run tests; report real results.
-- **Do not duplicate documentation.** Each fact lives in one file: identity and
-  usage in `README.md`, engineering rules here, current state in `CONTEXT.md`.
+- **Do not duplicate documentation.** Each fact lives in one place: a concise
+  repository overview in `README.md`, engineering rules here, current state in
+  `CONTEXT.md`, and explanatory and reference material under `docs/`.
+
+## Documentation layout
+
+`README.md` answers what ScribeKit is, what already works, how to build it and
+where the detailed documentation is. It is not the project's manual.
+
+`docs/` is a Material for MkDocs site published to GitHub Pages. It holds the
+usage guides, the architectural explanations, the reliability and privacy
+model, and the reference material — including `docs/PERFORMANCE.md`, the
+canonical record of measurements taken on hardware. Historical measurements are
+appended to, never rewritten for prose consistency.
+
+The site is validated with `mkdocs build --strict`; the local commands and the
+workflows are in `docs/development/documentation.md`. Documentation CI is
+separate from application CI and neither may block the other.
+
+When working in this repository, read `AGENTS.md` and `CONTEXT.md` first, and
+open a docs page only when the task touches that subject — searching `docs/`
+rather than reading it. Docs are explanatory material; the code, the tests and
+`CONTEXT.md` are what determine implementation truth. A change updates the
+pages it actually touches, not every page.

@@ -21,6 +21,8 @@ Run both before opening a pull request. CI runs the same commands.
   including parameters, return values and thrown errors.
 - Unit tests use Swift Testing. Cover behaviour, not the existence of symbols.
 - Avoid new dependencies; explain the need if one is unavoidable.
+- Documentation lives under `docs/` and is published from `main`. If you touch
+  it, run `mkdocs build --strict` — see `docs/development/documentation.md`.
 
 ## Commits and pull requests
 
