@@ -45,7 +45,9 @@ final class MeetingRuntime {
     /// the run is reported as failed.
     ///
     /// Bounded deliberately: a recogniser that fails repeatedly is a condition
-    /// to report, not one to paper over with retries.
+    /// to report, not one to paper over with retries. The bound is per capture
+    /// run: an explicit Resume starts a new one and gives it the full budget,
+    /// because a person deciding to carry on is not an automatic retry.
     static let maximumRecoveryAttempts = 2
 
     /// What the interface says when recognition outran the event buffer.
@@ -175,6 +177,9 @@ final class MeetingRuntime {
     private var drainTarget: Int?
     private var drainContinuations: [CheckedContinuation<Void, Never>] = []
 
+    /// Observes the capture activity summary for as long as the model exists.
+    private var activityTask: Task<Void, Never>?
+
     /// Observes the capturer's interruptions for as long as the model exists.
     private var interruptionTask: Task<Void, Never>?
 
@@ -232,8 +237,26 @@ final class MeetingRuntime {
         self.capturer = makeCapturer(
             BroadcastingAudioSampleConsumer([mediaClock, monitor, transcriber, audio])
         )
-        monitor.onUpdate = { [weak self] activity in
-            Task { @MainActor [weak self] in self?.activity = activity }
+        // The summary crosses to the main actor through one long-lived
+        // consumer rather than a task created per update. `onUpdate` runs on
+        // ScreenCaptureKit's delivery queue, and creating an unstructured task
+        // there — twice a second, for the length of a meeting — enqueues onto
+        // the main actor from inside the audio callback, which is the one
+        // thing the capture pipeline may not do. Yielding into a stream that
+        // keeps only the newest value costs the delivery queue nothing and
+        // cannot accumulate: a summary the interface missed is stale by
+        // definition, so dropping it is the correct policy rather than a
+        // compromise.
+        var activityContinuation: AsyncStream<AudioCaptureActivity>.Continuation!
+        let activityUpdates = AsyncStream(bufferingPolicy: .bufferingNewest(1)) {
+            activityContinuation = $0
+        }
+        let updates = activityContinuation!
+        monitor.onUpdate = { activity in updates.yield(activity) }
+        activityTask = Task { @MainActor [weak self] in
+            for await activity in activityUpdates {
+                self?.activity = activity
+            }
         }
         let interruptions = capturer.interruptions
         interruptionTask = Task { [weak self] in
@@ -331,6 +354,13 @@ final class MeetingRuntime {
     /// stop methods, because a meeting also ends through capture interruption,
     /// a retention failure and a persistence failure. Anything keyed to the
     /// happy path would leak the assertion down the other three.
+    ///
+    /// A paused meeting still counts as running, deliberately. Nothing is
+    /// being captured or recognised then, so the assertion is not buying
+    /// throughput — it is buying the process's life: `beginActivity` also opts
+    /// out of sudden termination, and a pause is exactly the moment ScribeKit
+    /// is holding an open, unfinalised recording that the system killing the
+    /// process would leave unreadable.
     private func synchronizeActivity() {
         if isRunning {
             processActivity.begin()
@@ -578,6 +608,16 @@ final class MeetingRuntime {
                 return
             }
         }
+        // The budget belongs to a capture run, not to the meeting. It exists
+        // to stop a recogniser recovering from itself forever without anyone
+        // noticing; an explicit Resume is the user starting a fresh run, and
+        // it has just proved the recogniser starts, so holding an earlier
+        // run's exhausted budget against it would leave a meeting that
+        // stumbled twice in its first hour unable to recover for the rest of
+        // the day. It stays bounded either way: a run still self-restarts at
+        // most ``maximumRecoveryAttempts`` times, and only a person can reset
+        // that, so no automatic path is unbounded.
+        recoveryAttempts = 0
         pausedAt = nil
         transcriptionState = .transcribing
         captureState = .capturing

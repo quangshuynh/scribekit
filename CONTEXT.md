@@ -5,7 +5,8 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 14 — long-duration reliability and fault injection. Complete.
+Interval 15 — real-time performance, energy behaviour and framework
+validation. Complete.
 
 ## Current implementation
 
@@ -83,7 +84,7 @@ Interval 14 — long-duration reliability and fault injection. Complete.
 - `ScribeKit/App/`: `ScribeKitApp` has a single `Window` scene and a
   `MenuBarExtra`; `ScribeKitAppDelegate` is new and owns the runtime.
 - `ScribeKit/Models/`: new for this interval, `MeetingSnapshot`.
-- `ScribeKitTests/`: Swift Testing suites (552 tests, 53 suites).
+- `ScribeKitTests/`: Swift Testing suites (553 tests, 53 suites).
 
 Audio retention writes a file; nothing plays one. Pause and resume do not
 exist.
@@ -1332,6 +1333,102 @@ titles, no telemetry.
 
 ## Validation status
 
+### Interval 15 validation
+
+The first real-time interval: the running subsystems under sustained
+execution, measured rather than reasoned about. Full evidence, method and
+limits are in `docs/PERFORMANCE.md`; what follows is what it changed.
+
+**How it was measured.** A real `SCStream` through the real capturer, the real
+on-device recogniser, the real Markdown store and the real audio recorder,
+driven through `MeetingRuntime` in a Release build, sampled from inside the
+process every three to five minutes. Two substitutions, both at a boundary:
+the destination is the process's own temporary directory behind a granting
+access double, and each real buffer's silent samples are replaced with
+synthesised speech of the same frame count and format, because the machine has
+no capturable application that produces speech on demand. Cadence, format and
+timing are the real stream's.
+
+**A production crash, found and still open.** Both hour-long soaks died — at
+26 and 23 minutes — with `SIGBUS` against a stack guard region on
+`quang.ScribeKit.audio-capture`, the delivery queue, inside the activity
+handler `MeetingRuntime.init` installs. A third report with the identical chain
+already existed on the machine from ordinary interactive use the day before,
+with no measurement code in the stack: this is the shipped application
+crashing on its own.
+
+The handler ran on ScreenCaptureKit's delivery queue and created a
+`Task { @MainActor … }` there, twice a second for the length of a meeting —
+precisely what `AGENTS.md` forbids — so that was changed: the summary now
+crosses through one long-lived consumer of an `AsyncStream` buffering only the
+newest value, and the delivery queue creates nothing. **It did not fix the
+crash.** The next soak died the same way, with the innermost frame simply
+becoming `Continuation.yield` instead of `Task.init`. The fault is the delivery
+thread's stack, not the operation running on it, and the captured stacks are
+shallow — so it is not recursion in ScribeKit despite the label the system
+gives it. A second hypothesis, that Pause/Resume caused it, was falsified the
+same way: a control run with no Pause/Resume crashed at about 21 minutes. All
+four occurrences fall in a band of roughly 20 to 26 minutes of continuous
+capture, which is why the ten-minute retention comparisons never saw it. The change was kept as a correctness fix against the pipeline's own
+rule, and is not claimed as a remedy. No further production change was made on
+a guess; the one guess made was falsified by the next measurement. Full
+evidence is in `docs/PERFORMANCE.md`.
+
+**Measured behaviour.** No hour-long run completed, so the sustained figures
+cover the 21–26 minutes each long run reached. CPU is flat over that stretch —
+6.9/6.9/6.9% then 7.0/7.0/7.1% of one core at five, ten and fifteen minutes
+with compressed retention, on an eight-core M1.
+Resident footprint oscillates between roughly 78 and 93 MB and does not track
+meeting length. Thermal state was nominal at every sample. Threads settle from
+13–14 to 11–12 after Stop. Retention costs, ten minutes each under equivalent
+load: no audio 4.8%, raw CAF 5.6% growing ~11 MB/min, compressed M4A 6.7%
+growing ~0.47 MB/min — AAC is the most expensive option and produces a file
+about 23× smaller. Nothing drifted within any run.
+
+**Pause.** Active 6.9% against paused 0.4%, threads 14 to 9, and both durable
+artifacts frozen to the byte across a three-minute pause. There is no polling
+loop keeping work alive. The elapsed clock keeps advancing, which is right:
+elapsed time is wall-clock and does not stop when capture does.
+
+**Decisions this interval settled.**
+
+1. *The restart budget resets at an explicit Resume.* The bound exists to stop
+   a recogniser recovering from itself forever unnoticed; a Resume is a person
+   deciding to carry on, and it has just proved the recogniser starts. The
+   budget is therefore per capture run rather than per meeting. It stays
+   bounded — a run still self-restarts at most `maximumRecoveryAttempts` times,
+   and only a person can reset that, so no automatic path is unbounded.
+2. *The App Nap assertion is held through a pause, deliberately.* Nothing is
+   captured or recognised then, so it is not buying throughput. It is buying
+   the process's life: `beginActivity` also opts out of sudden termination, and
+   a pause is exactly when ScribeKit holds an open, unfinalised recording that
+   Interval 14 showed is unreadable if the process dies first.
+3. *Capture-end status is unchanged, for a measured reason.* See below.
+
+**ScreenCaptureKit does not report a captured application quitting.** Asked
+with the real framework — capture TextEdit alone, quit it, watch. It vanished
+from `SCShareableContent.applications` between samples, and the stream
+delivered no error, no `didStopWithError`, no observable content change, and
+kept producing buffers at an unchanged ~51 per second for the remaining 45
+seconds. There is no signal. ScribeKit does not act on this on purpose: the
+only available inference is silence, and silence is not death — a meeting where
+nobody is speaking looks identical, so the heuristic would end quiet meetings.
+
+This also settles the capture-end question Interval 14 left open, by removing
+its premise. The event most likely to end capture unexpectedly never reaches
+`handleCaptureInterruption`, so there is no observed unexpected capture end to
+reason from. Changing a persisted status enum on unobserved semantics would be
+the speculative change the evidence does not support; `completed` stands until
+a real `didStopWithError` has been seen.
+
+**Not validated, and not claimed.** No interface was measured: the measured
+process runs no window, so every figure above is a meeting's cost with
+presentation at zero, and the visible/hidden/closed comparison was not
+obtained. No Instruments profiling was run — the crash came from the system's
+own reports and the rest from process-level sampling, so time spent inside
+Apple's recogniser is not attributed. Energy was not observed through a power
+trace. One machine, one locale, ten-minute retention comparisons.
+
 ### Interval 14 validation
 
 A falsification pass: long logical runs and deliberate faults at every seam a
@@ -2131,16 +2228,33 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 15, as the roadmap has it. The reliability work above changes what it
-should start from: the accelerated evidence is strong about ordering and state
-and says nothing about real-time cost, so the first thing Interval 15 needs is
-the real-time soak this interval could not run — the running application, a
-real source, an hour, the window closed for a meaningful part of it — measured
-for RSS, CPU and thermals rather than for correctness. Two questions are open
-underneath it: whether ScreenCaptureKit reports a captured application quitting
-in a way ScribeKit can act on, which no test here can answer, and whether the
-recogniser's restart budget should reset at an explicit Resume, which is a
-product decision rather than a defect.
+Interval 16 has one obvious first task: the crash. It is reproducible on a
+known recipe — real capture, compressed retention, left running, dead between
+twenty and twenty-six minutes, with or without a Pause/Resume — it has hit a
+user in ordinary use, and it destroys a meeting, taking the unfinalised M4A
+with it.
+Everything else on this list is smaller than that. It needs a debugger on a
+reproducing run rather than another hypothesis; the thing worth understanding first
+is why a shallow stack faults on its guard page at all. Two hypotheses were
+already formed and falsified by measurement; a third should not be written into
+the code before a debugger has seen the reproducing run.
+
+After that, the gap this interval could not close is the interface. Every figure in
+`docs/PERFORMANCE.md` was taken from a process with no window, so what a
+meeting costs is known and what *showing* a meeting costs is not. That is the
+one measurement worth taking before anything is throttled or lazily rendered:
+the same meeting with the window visible, hidden and closed, driven by hand,
+with CPU sampled from outside. Until it exists, no presentation throttling is
+justified — and the crash found this interval is a warning about guessing,
+since the expensive thing turned out not to be rendering at all but a task
+created per update on the audio delivery queue.
+
+Two smaller things follow it. The capture-end status stays `completed` for want
+of a real `didStopWithError` to reason from; whatever produces one — a revoked
+screen-recording permission is the likeliest candidate — is what would settle
+it. And Instruments was never run, so where recognition spends its time inside
+Apple's framework is still unattributed; that matters only if the 4.8% floor
+ever needs to come down.
 
 The earlier note stands. Nothing in Interval 13 needs revisiting
 first: the write boundary it opened is one protocol wide, it can address one
