@@ -175,6 +175,9 @@ final class MeetingRuntime {
     private var drainTarget: Int?
     private var drainContinuations: [CheckedContinuation<Void, Never>] = []
 
+    /// Observes the capture activity summary for as long as the model exists.
+    private var activityTask: Task<Void, Never>?
+
     /// Observes the capturer's interruptions for as long as the model exists.
     private var interruptionTask: Task<Void, Never>?
 
@@ -232,8 +235,26 @@ final class MeetingRuntime {
         self.capturer = makeCapturer(
             BroadcastingAudioSampleConsumer([mediaClock, monitor, transcriber, audio])
         )
-        monitor.onUpdate = { [weak self] activity in
-            Task { @MainActor [weak self] in self?.activity = activity }
+        // The summary crosses to the main actor through one long-lived
+        // consumer rather than a task created per update. `onUpdate` runs on
+        // ScreenCaptureKit's delivery queue, and creating an unstructured task
+        // there — twice a second, for the length of a meeting — enqueues onto
+        // the main actor from inside the audio callback, which is the one
+        // thing the capture pipeline may not do. Yielding into a stream that
+        // keeps only the newest value costs the delivery queue nothing and
+        // cannot accumulate: a summary the interface missed is stale by
+        // definition, so dropping it is the correct policy rather than a
+        // compromise.
+        var activityContinuation: AsyncStream<AudioCaptureActivity>.Continuation!
+        let activityUpdates = AsyncStream(bufferingPolicy: .bufferingNewest(1)) {
+            activityContinuation = $0
+        }
+        let updates = activityContinuation!
+        monitor.onUpdate = { activity in updates.yield(activity) }
+        activityTask = Task { @MainActor [weak self] in
+            for await activity in activityUpdates {
+                self?.activity = activity
+            }
         }
         let interruptions = capturer.interruptions
         interruptionTask = Task { [weak self] in
@@ -331,6 +352,7 @@ final class MeetingRuntime {
     /// stop methods, because a meeting also ends through capture interruption,
     /// a retention failure and a persistence failure. Anything keyed to the
     /// happy path would leak the assertion down the other three.
+
     private func synchronizeActivity() {
         if isRunning {
             processActivity.begin()
