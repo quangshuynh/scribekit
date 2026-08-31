@@ -291,8 +291,16 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         defer { session.lease.release() }
 
         var failure: Error?
-        if outcome == .completed {
+        if outcome.writesFooter {
             do {
+                // A meeting whose capture died says so at the point it died,
+                // before the closing block states when the document ended. The
+                // remark is appended like every other structural marker: it
+                // rewrites nothing, and it goes in before the footer so the
+                // file still ends with its closing block.
+                if outcome == .interrupted {
+                    try session.file.append(session.formatter.captureInterrupted(at: endedAt))
+                }
                 try session.file.append(session.formatter.footer(
                     endedAt: endedAt,
                     capturedDuration: session.capturedDuration
@@ -314,7 +322,19 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         writeReview(for: session)
 
         do {
-            try recoveryStore.writeMetadata(session.metadata.closed(outcome, at: endedAt), to: session.layout)
+            // The captured length is recorded for every session ScribeKit
+            // closes, not only for one that paused: at this point the runtime
+            // has measured it, so leaving the field absent would describe a
+            // record written before the field existed rather than the meeting
+            // that just ended.
+            try recoveryStore.writeMetadata(
+                session.metadata.closed(
+                    outcome,
+                    at: endedAt,
+                    capturedDuration: session.capturedDuration
+                ),
+                to: session.layout
+            )
         } catch {
             throw TranscriptPersistenceError(.recoveryMetadataFailed, underlying: error)
         }

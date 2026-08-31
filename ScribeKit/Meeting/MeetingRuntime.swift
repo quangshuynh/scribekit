@@ -641,7 +641,7 @@ final class MeetingRuntime {
         await transcriber.stop()
         transcriptionState = .idle
         await drainPendingEvents()
-        await closeSession()
+        await closeSession(outcome: .completed)
     }
 
     /// Waits until every event the recogniser published has been handled.
@@ -674,9 +674,18 @@ final class MeetingRuntime {
     /// released when it failed, and overwriting the failure with a success
     /// would be the one thing this model must never do.
     ///
-    /// - Parameter outcome: How the meeting is being closed, when the caller
-    ///   already knows it did not finish normally.
-    private func closeSession(outcome: SessionCompletionOutcome = .completed) async {
+    /// The outcome has no default. Every path that ends a meeting knows why it
+    /// is ending, and a default of ``SessionCompletionOutcome/completed`` made
+    /// the wrong answer the easy one: a path that closes the artifacts
+    /// successfully would record a completion whatever ended the meeting. The
+    /// caller states it, so a new way for a meeting to end has to say what
+    /// kind of ending it is.
+    ///
+    /// - Parameter outcome: How the meeting is being closed. A retained
+    ///   recording that could not be finalised overrides it with
+    ///   ``SessionCompletionOutcome/failed``: an artifact that did not close is
+    ///   the more serious fact about the meeting.
+    private func closeSession(outcome: SessionCompletionOutcome) async {
         let audioFailure = finishRetainedAudio()
         guard persistenceState.isActive else { return }
         let layout = persistenceState.layout
@@ -740,7 +749,7 @@ final class MeetingRuntime {
             await transcriber.stop()
             transcriptionState = .idle
             await drainPendingEvents()
-            await closeSession()
+            await closeSession(outcome: .failed)
         }
     }
 
@@ -992,18 +1001,27 @@ final class MeetingRuntime {
     /// Records the capture system ending a stream by itself, stops recognition
     /// and closes the transcript, which now has nothing more to receive.
     ///
+    /// The artifacts are finalised as far as they can be — everything that
+    /// reached the transcript and the recording is flushed, closed and kept —
+    /// and the session is nonetheless recorded as
+    /// ``SessionCompletionOutcome/interrupted``. Closing a file cleanly is a
+    /// fact about the file; it is not permission to describe a meeting that
+    /// ended by itself as one the user finished. The meeting stopped when its
+    /// audio did, and the record says so.
+    ///
     /// - Parameter error: The reason capture ended.
     private func handleCaptureInterruption(_ error: AudioCaptureError) {
         guard captureState.isActive else { return }
         captureState = .failed(message: message(for: error, sources: []))
-        guard transcriptionState.isActive || persistenceState.isActive else { return }
+        guard transcriptionState.isActive || persistenceState.isActive
+            || audioRetentionState.isActive else { return }
         transcriptionState = .stopping
         Task { @MainActor [weak self] in
             guard let self else { return }
             await transcriber.stop()
             transcriptionState = .idle
             await drainPendingEvents()
-            await closeSession()
+            await closeSession(outcome: .interrupted)
         }
     }
 

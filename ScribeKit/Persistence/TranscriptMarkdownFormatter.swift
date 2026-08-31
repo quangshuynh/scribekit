@@ -202,6 +202,29 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
         return text + ".\n\n"
     }
 
+    /// The marker written where capture ended without anyone stopping the
+    /// meeting.
+    ///
+    /// This is the opposite case to ``interruptionNotice(recordedAt:)``, and
+    /// it can say more, because ScribeKit was running and watched it happen:
+    /// the moment capture ended is observed rather than unknown. What it does
+    /// not say is why, in the framework's own words — the reason is shown to
+    /// the user on the meeting screen while it matters, and a transcript is
+    /// the record of a meeting rather than a diagnostic log.
+    ///
+    /// It claims nothing about speech after that moment, because there was no
+    /// audio after that moment to recognise. It is a blockquote, the
+    /// convention ``gap(_:)`` and ``paused(at:)`` already use, so ScribeKit's
+    /// own structural remarks stay visibly distinct from recognised speech.
+    ///
+    /// - Parameter date: When capture ended.
+    /// - Returns: Markdown ending in a blank line.
+    func captureInterrupted(at date: Date) -> String {
+        "> **Capture ended unexpectedly:** \(clock(date, includingSeconds: true)). "
+            + "The meeting was not stopped; capture of its audio ended by itself, "
+            + "so nothing was captured or transcribed after this point.\n\n"
+    }
+
     /// The note recovery appends to a transcript whose meeting never finished.
     ///
     /// Every clause is something ScribeKit knows. It does not state when the
