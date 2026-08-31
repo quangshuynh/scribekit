@@ -192,7 +192,7 @@ struct SoakValidationTests {
         )
         window.title = "Soak validation"
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: MainPresentationScene(runtime: runtime))
+        window.contentView = NSHostingView(rootView: MainPresentationScene(runtime: runtime, diagnostics: MeetingDiagnostics(runtime: runtime)))
         return window
     }
 
