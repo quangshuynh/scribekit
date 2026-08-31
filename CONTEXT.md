@@ -5,8 +5,8 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 15 — real-time performance, energy behaviour and framework
-validation. Complete.
+Interval 17 — reproducible real-time soak validation and UI/background
+performance. Complete.
 
 ## Current implementation
 
@@ -1333,6 +1333,90 @@ titles, no telemetry.
 
 ## Validation status
 
+### Interval 17 validation
+
+Two things, in order: confirm Interval 16's fix from outside a test, then find
+out what showing the interface costs. Full evidence and method are in
+`docs/PERFORMANCE.md`; what follows is what it changed.
+
+**The harness is committed now.** Interval 15 built one and threw it away, so
+Interval 16 could not close its own fix. `Tools/SoakValidation/` is the durable
+version: the real `SCStream` through the real capturer, the real on-device
+recogniser, the real Markdown store and the real audio recorder, driven through
+`MeetingRuntime`, sampled from inside the process every five minutes. Its
+sources belong to the test target only, so nothing ships, and a run is
+requested through a file the script writes into the sandbox container and
+deletes afterwards — an ordinary test run and an ordinary launch reach none of
+it. Measurements go beside the session directory, never into it. The two
+substitutions are unchanged from Interval 15 and stated in every run's banner:
+**real capture cadence, format and timing; synthetic sample values**, plus
+granted rather than bookmarked folder access. No run here says a captured
+application said anything.
+
+**The crash fix is confirmed from the outside.** One continuous sixty-minute
+meeting, Release build, compressed retention, ended with a normal Stop. It did
+not crash: 180,205 buffers over 3,604 seconds of captured media, more than
+twice the 20–26 minute band, and no new crash report on the machine. The
+transcript parsed into 594 spans with its footer, the session record read
+`completed`, `audio.m4a` opened at 3,604.3 s against 3,604.3 s captured, the
+review sidecar was valid, and exactly one session directory existed. CPU was
+flat at 7.04–7.79% throughout. This is confirmation, not proof: Interval 16's
+deterministic regression remains the causal evidence, and nothing here says the
+crash can never recur.
+
+**One resource trend is open.** Footprint drifted from 91.5 MB at five minutes
+to 106.3 MB at sixty — monotonic, about 0.27 MB a minute, where Interval 15's
+shorter runs saw a sawtooth. What ScribeKit accumulates does not explain it:
+594 spans, 73 KB of transcript and a 17.9 KB sidecar are under a megabyte
+together. The rest is *inferred* to be framework caching and was not attributed,
+because Instruments was again not run. It does not threaten an hour; it is worth
+watching over eight.
+
+**Showing the interface roughly triples a meeting's cost, and hiding the window
+barely helps.** Measured across five runs with the setup window visible, hidden
+with `orderOut`, and with its hosting view taken down: about 25% of one core
+visible, about 23% hidden, and 7.2% with the view down — exactly the headless
+floor. So an off-screen SwiftUI window keeps evaluating its bodies, and only
+taking the hierarchy down stops the work. The rate is known too: the recogniser
+publishes about 4.8 events a second, the capture summary two, the elapsed clock
+one, so the interface is asked to update about 7.8 times a second and 18 points
+of a core is roughly 23 ms per update.
+
+**What that justified changing, and what it did not.** Every one of those reads
+happened inside `MeetingSetupView`'s own body, so each update invalidated all
+seven sections of the form. The three high-frequency readers — the elapsed
+label, the capture activity line and the live transcript — now have views of
+their own. It is worth about 2.4 points, repeatably, and that is all it is
+worth: visible went from a 24.1–26.6% spread to 22.9–23.0%. The other fifteen
+points are unattributed, no Time Profiler was run, and no further presentation
+change was made on a guess. The Interval 15 lesson applies to this interval too.
+
+**Hidden and closed remain presentation-only.** Through all three phases capture,
+recognition and both durable writers carried on unchanged, no second runtime was
+created, and a window opened afterwards showed the meeting still running with no
+finalised span lost.
+
+**Pause behaves as Interval 15 measured, and two more things are now known.**
+Active 7.56% against paused 0.36%, both durable artifacts frozen to the byte.
+Captured media time froze at 180.2 s across the pause while wall-clock elapsed
+went on to 361.1 s, which is the two-clock rule holding in a real run rather
+than in a test; and the recogniser's published-event count did not move at all
+while paused, so the 0.36% is a recogniser that has stopped rather than one
+idling. Resume restored capture and recognition. Nothing about Pause/Resume was
+redesigned, and the App Nap assertion is still deliberately held through a
+pause for the Interval 15 reason.
+
+**A real `didStopWithError`, at last — and it exposes a question.** The first
+sixty-minute attempt captured an application whose windows went away four and a
+half minutes in, and ScreenCaptureKit reported it: *"Failed to find any displays
+or windows to capture"*. This is the event Interval 15 hunted for and could not
+produce. `MeetingRuntime.handleCaptureInterruption` closes the session through
+`closeSession()`, whose outcome defaults to `.completed`, so `session.json`
+recorded a meeting that lost its capture stream as `completed`. The durable
+artifacts were fine. Nothing was changed on one observation — altering a
+persisted status reaches recovery, History and the recovery screen — but the
+premise Interval 15 removed has come back with evidence behind it.
+
 ### Interval 16 validation
 
 One interval, one bug: the crash Interval 15 found and could not explain.
@@ -2305,30 +2389,36 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Interval 16 removed the crash. What Interval 15 listed first is done: the
-delivery queue's stack no longer grows with the meeting, and the mechanism is
-covered by a test that fails loudly against the old shape. The one thing it
-did not do is confirm it from the outside — a real `SCStream` soak past
-forty-five minutes, ideally an hour, ending in a normal Stop with a readable
-transcript and a finalised M4A. That is the first task, and it needs the
-measurement harness Interval 15 built and never committed.
+Two things Interval 17 measured and deliberately did not act on, in order.
 
-After that, the gap Interval 15 could not close is the interface. Every figure in
-`docs/PERFORMANCE.md` was taken from a process with no window, so what a
-meeting costs is known and what *showing* a meeting costs is not. That is the
-one measurement worth taking before anything is throttled or lazily rendered:
-the same meeting with the window visible, hidden and closed, driven by hand,
-with CPU sampled from outside. Until it exists, no presentation throttling is
-justified — and the crash is a warning about guessing, since the expensive
-thing turned out not to be rendering at all, nor the task created per update
-that the first guess replaced.
+The first is the one with evidence behind it. ScreenCaptureKit produced a real
+`didStopWithError` — *"Failed to find any displays or windows to capture"* —
+and `handleCaptureInterruption` recorded that meeting as `completed`, because
+`closeSession()` defaults to it. Interval 14 raised the question and Interval 15
+could not settle it for want of exactly this event; it exists now, reproducibly,
+from an application whose windows go away mid-meeting. Deciding what a meeting
+that lost its capture stream should be recorded as reaches the recovery screen,
+History's statuses and the recovery service, which is why one observation was
+not enough to change it and why it is the first task rather than a footnote.
 
-Two smaller things follow it. The capture-end status stays `completed` for want
-of a real `didStopWithError` to reason from; whatever produces one — a revoked
-screen-recording permission is the likeliest candidate — is what would settle
-it. And Instruments was never run, so where recognition spends its time inside
-Apple's framework is still unattributed; that matters only if the 4.8% floor
-ever needs to come down.
+The second is the fifteen points. Showing the interface costs about 18 points of
+one core; confining the high-frequency readers to their own views accounted for
+2.4 of them, and the rest is unattributed. That is a Time Profiler question, and
+it is the first time this project has had one worth asking: the update rate is
+known (about 7.8 a second), the per-update cost is known (about 23 ms), and what
+is not known is where inside a re-evaluated `Form` that goes. Nothing further
+should be throttled until it is — the same rule that held for the crash. Worth
+including in that pass: whether an off-screen window should keep evaluating at
+all, since `orderOut` saves only two to three points and `AGENTS.md` already
+says presentation may be throttled or skipped while the interface is hidden.
+
+Two smaller things. The hour-long footprint drift — 91.5 MB to 106.3 MB, about
+0.27 MB a minute, monotonic — is under a megabyte accounted for by ScribeKit's
+own state and unattributed beyond that; it does not threaten an hour and would
+matter over eight, and it is the same Instruments pass. And
+`ScreenCaptureKitAudioCapturer.stop()` still never calls
+`removeStreamOutput(_:type:)`, which Interval 15 noted and nothing has since
+either implicated or cleared.
 
 The earlier note stands. Nothing in Interval 13 needs revisiting
 first: the write boundary it opened is one protocol wide, it can address one

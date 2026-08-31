@@ -45,6 +45,11 @@
 			path = ScribeKitUITests;
 			sourceTree = "<group>";
 		};
+		CEF69D6A3042793700FDDE77 /* SoakValidation */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tools/SoakValidation/Sources;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,6 +83,7 @@
 				CEF69D373042793600FDDE77 /* ScribeKit */,
 				CEF69D453042793700FDDE77 /* ScribeKitTests */,
 				CEF69D4F3042793700FDDE77 /* ScribeKitUITests */,
+				CEF69D6A3042793700FDDE77 /* SoakValidation */,
 				CEF69D363042793600FDDE77 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -132,6 +138,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				CEF69D453042793700FDDE77 /* ScribeKitTests */,
+				CEF69D6A3042793700FDDE77 /* SoakValidation */,
 			);
 			name = ScribeKitTests;
 			packageProductDependencies = (
