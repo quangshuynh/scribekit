@@ -128,6 +128,15 @@ is released. Nothing may keep capturing audio that nothing is transcribing, and
 no meeting may stay active in a process for want of a teardown, because the
 next meeting cannot start while one is.
 
+Successful finalisation is not a completion. Closing a transcript and a
+recording cleanly is a claim about files; recording a meeting as completed is
+additionally a claim that the meeting ended because someone ended it. A
+subsystem dying under a meeting — capture stopping without being asked to —
+still finalises every artifact as far as it can and still keeps everything
+that reached them, and is still recorded as something other than a completion.
+No path that ends a meeting may reach the writer without stating which ending
+it is.
+
 Persisted session completion never precedes successful finalisation of every
 durable artifact the meeting enabled — the transcript, and a retained audio
 file when there is one. A stored record saying a meeting completed is a claim

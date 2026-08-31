@@ -678,11 +678,21 @@ There is no migration framework.
   offers.
 - `completed` — the transcript was flushed and closed and the meeting ended
   normally.
-- `failed` — the meeting was ended because the transcript stopped being saved.
-  ScribeKit was running and told the user at the time, so this is a closed
-  session, not a lost one, and it is not offered for recovery.
-- `interrupted` — the session was found unfinished after a relaunch and the
-  user was shown it. Recorded so the same interruption is not reported forever.
+- `failed` — the meeting was ended because a durable artifact stopped being
+  saved. ScribeKit was running and told the user at the time, so this is a
+  closed session, not a lost one, and it is not offered for recovery.
+- `interrupted` — the meeting ended without being stopped, and its artifacts
+  were closed holding everything that reached them. Two paths write it: a
+  session found unfinished after a relaunch, marked once the user has been
+  shown it so the same interruption is not reported forever; and a meeting
+  whose capture stream ended by itself, closed this way while ScribeKit was
+  still running. Not offered for recovery either way.
+
+`completed` therefore means two things at once and needs both: every durable
+artifact finished successfully, *and* the meeting ended because someone ended
+it. Closing a transcript cleanly is a claim about a file and is never on its
+own a claim about a meeting, which is why `SessionCompletionOutcome` has no
+default and every path that ends a meeting states which ending it is.
 
 ## Session lifecycle ordering
 
@@ -724,11 +734,30 @@ Failure semantics, in full:
 | Audio write, mid-meeting | flushed and closed | closed where it stopped | `failed` |
 | Audio finalisation at stop | flushed and closed | left exactly as it is | `failed` |
 | Transcript write, mid-meeting | closed, no footer | closed, kept | `failed` |
+| Capture stream ends by itself | marker, footer, flushed and closed | closed, kept | `interrupted` |
 | Nothing | flushed and closed | closed | `completed` |
 
 Nothing in any row deletes an artifact. A recording that failed is closed and
 left on disk with everything that reached it, because meeting audio cannot be
 captured a second time.
+
+A meeting whose capture ended by itself keeps its footer, because the document
+did close cleanly and `Ended` and `Duration` are true of it. What it gains
+first, at the point capture died, is one blockquote in the convention the gap
+and pause markers already use:
+
+```
+> **Capture ended unexpectedly:** 11:03:12 AM. The meeting was not stopped;
+> capture of its audio ended by itself, so nothing was captured or transcribed
+> after this point.
+```
+
+(One line in the file.) The moment is stated because this process observed it,
+which is exactly what the recovery notice cannot say. The framework's own
+reason for the failure is not written there: the meeting screen shows it while
+it matters, and `transcript.md` is a meeting's record rather than a diagnostic
+log. `session.json` carries the status, `endedAt` and `interruptedAt`; the
+Markdown carries the remark and nothing else new.
 
 A meeting ended by a save failure is closed as `failed` and writes no footer:
 `Ended` and `Duration` would be a claim about a document that stopped being
@@ -758,6 +787,13 @@ retained audio has no flush of its own, so the same caveat is wider for it.
 ScribeKit is not crash-proof and does not say it is.
 
 ## Pausing and the session record
+
+`capturedDuration` is written for every session ScribeKit closes, not only for
+one that paused: the runtime has measured it on `CapturedMediaClock` by the
+time it closes a session, so leaving the field absent would describe a record
+written before the field existed rather than the meeting that just ended. It
+is never derived from wall-clock length, and a record that genuinely predates
+the field still decodes with it absent.
 
 `pausedAt` and `capturedDuration` were added to `session.json` additively at
 schema version 1, for the reason `audioRetention` and `audioPath` were: both
@@ -924,7 +960,11 @@ folder has gone does not linger.
 ## History statuses
 
 Every status a record can carry is shown: `completed`, `failed`, `interrupted`
-and `inProgress`, plus `unrecorded` for a transcript with no record.
+and `inProgress`, plus `unrecorded` for a transcript with no record. An
+`interrupted` row does not distinguish a meeting ScribeKit was killed during
+from one whose capture ended under it, because what the row tells the user is
+the same in both: the meeting was not stopped, and the transcript ends at the
+last speech that reached the file.
 `HistorySessionStatus` is `SessionRecoveryStatus` plus that fifth case — history
 is deliberately broader than recovery, which only ever considers `inProgress`.
 
@@ -1332,6 +1372,42 @@ None was added. No `OSLog` category, no transcript text, no PCM, no meeting
 titles, no telemetry.
 
 ## Validation status
+
+### Interval 18 validation
+
+Full suite green after `clean test`. Beyond it, three things were run for real
+on an M1 MacBook Air, macOS 26, Release, with the real `SCStream`, the real
+`AppleSpeechTranscriber` and the real writers.
+
+**Capture interruption.** The semantic change was made from Interval 17's real
+`didStopWithError` and validated deterministically through the runtime path —
+`SCStreamDelegate` → `MeetingRuntime.handleCaptureInterruption` → artifact
+finalisation → persisted status. A real interruption was not manufactured a
+second time; the observed one is what the decision rests on, and the tests
+state the arithmetic better than another accident would. Covered: a user Stop
+records `completed`; an unexpected capture interruption records `interrupted`
+while the transcript, the recording and the review sidecar all still finalise;
+a recogniser that cannot be restarted still records `failed`; the next meeting
+starts afterwards, with the activity assertion balanced and no writer left
+open; History reads the result as Interrupted.
+
+**Presentation cost.** Two twelve-minute three-phase `presentationCost` runs
+plus two 170-second Time Profiler attachments. The profile is in
+`docs/PERFORMANCE.md`: the visible cost is SwiftUI layout of the live
+transcript's scroll view and the form around it, not text layout and not
+ScribeKit's own code, which is under four points. Two narrow optimisations were
+implemented and measured; one was nine points worse, one was inside the noise,
+and both were reverted. Nothing was shipped that no measurement supported.
+
+**Memory.** A twenty-six-minute headless run with `malloc` heap snapshots
+twenty minutes apart. RSS *fell* eight megabytes over the window while the
+malloc heap grew 3.9 MB, so Interval 17's monotonic RSS was a property of that
+run rather than of the program. The largest grower is a framework-typed array
+holding about one element per captured buffer; ScribeKit's own transcript array
+grew 18 KB in twenty minutes. Nothing was released or bounded.
+
+Not shown: any of this on Intel, under memory pressure, or over eight hours;
+and no `.trace` file is committed.
 
 ### Interval 17 validation
 
@@ -2363,8 +2439,10 @@ intervals; the capture observations above were taken through the same path.
   in another launch while this one is open is not noticed until the next scan.
 - Only one save folder is ever scanned: the one currently in use. Sessions in a
   folder the user has moved on from are not found.
-- The record's `interruptedAt` is when ScribeKit noticed, not when the meeting
-  stopped. Nothing observes the second, so nothing states it.
+- The record's `interruptedAt` is when ScribeKit noticed. For a session found
+  after a relaunch that is not when the meeting stopped, because nothing
+  observes the second; for a capture stream that ended while ScribeKit was
+  running, the two are the same moment and it is recorded.
 - Metadata write failure, transcript flush failure, damaged records and
   unsupported schema versions are covered by injected failures in tests and,
   for the last two, live; a real disk-full or permission-revoked failure was
@@ -2389,36 +2467,38 @@ intervals; the capture observations above were taken through the same path.
 
 ## Next interval
 
-Two things Interval 17 measured and deliberately did not act on, in order.
+Interval 18 closed the first two questions Interval 17 left and left one open
+deliberately.
 
-The first is the one with evidence behind it. ScreenCaptureKit produced a real
-`didStopWithError` — *"Failed to find any displays or windows to capture"* —
-and `handleCaptureInterruption` recorded that meeting as `completed`, because
-`closeSession()` defaults to it. Interval 14 raised the question and Interval 15
-could not settle it for want of exactly this event; it exists now, reproducibly,
-from an application whose windows go away mid-meeting. Deciding what a meeting
-that lost its capture stream should be recorded as reaches the recovery screen,
-History's statuses and the recovery service, which is why one observation was
-not enough to change it and why it is the first task rather than a footnote.
+**Closed.** A meeting whose capture ends by itself is recorded as `interrupted`
+rather than `completed`, with its artifacts finalised and kept and one appended
+remark in the transcript; and every session ScribeKit closes now records the
+media time it captured.
 
-The second is the fifteen points. Showing the interface costs about 18 points of
-one core; confining the high-frequency readers to their own views accounted for
-2.4 of them, and the rest is unattributed. That is a Time Profiler question, and
-it is the first time this project has had one worth asking: the update rate is
-known (about 7.8 a second), the per-update cost is known (about 23 ms), and what
-is not known is where inside a re-evaluated `Form` that goes. Nothing further
-should be throttled until it is — the same rule that held for the crash. Worth
-including in that pass: whether an off-screen window should keep evaluating at
-all, since `orderOut` saves only two to three points and `AGENTS.md` already
-says presentation may be throttled or skipped while the interface is hidden.
+**Open, with a profile behind it.** The interface still costs about fifteen
+points of one core beyond the headless floor, and Instruments now says where:
+SwiftUI re-measuring the live transcript's scroll view and the form around it,
+about 30% of the process's CPU in layout, against 1.5% in text layout and under
+4% in ScribeKit's own capture path. Two narrow fixes were measured and neither
+helped — one made it nine points worse by moving a changing row out of the
+fixed-height scroll view that was containing its layout. What the evidence
+points at is not another view split but the presentation lifecycle: with the
+window merely off screen the graph stays attached and AppKit keeps laying it
+out, and only taking the hosting view down returns the process to the floor.
+`AGENTS.md` already permits skipping presentation work while the interface is
+hidden. Doing that safely — capture, recognition, persistence and the menu bar
+all untouched, the window reconstructing current state when it reopens, no
+second runtime and no stale partial — is a design interval, not a patch, and it
+is the recommended one.
 
-Two smaller things. The hour-long footprint drift — 91.5 MB to 106.3 MB, about
-0.27 MB a minute, monotonic — is under a megabyte accounted for by ScribeKit's
-own state and unattributed beyond that; it does not threaten an hour and would
-matter over eight, and it is the same Instruments pass. And
-`ScreenCaptureKitAudioCapturer.stop()` still never calls
-`removeStreamOutput(_:type:)`, which Interval 15 noted and nothing has since
-either implicated or cleared.
+**Not open any more.** The RSS drift. Resident size fell while the heap grew,
+the growth that is there is framework-typed, and ScribeKit's own retained state
+is the transcript, which is required. There is nothing to fix and no cache to
+clear speculatively.
+
+Still unaddressed and unchanged: `ScreenCaptureKitAudioCapturer.stop()` never
+calls `removeStreamOutput(_:type:)`, which Interval 15 noted and nothing has
+since either implicated or cleared.
 
 The earlier note stands. Nothing in Interval 13 needs revisiting
 first: the write boundary it opened is one protocol wide, it can address one
