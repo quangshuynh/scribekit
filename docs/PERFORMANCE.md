@@ -53,9 +53,11 @@ seconds in the soak and every 180 in the comparisons, so the instrument does
 not become part of the workload. CPU is process CPU seconds over wall seconds:
 100% means one core saturated, on a machine with eight.
 
-## An unresolved crash
+## A crash, found here and resolved in Interval 16
 
-This is the most important thing the interval found, and it is still open.
+This is the most important thing the interval found. It was left open here and
+diagnosed in Interval 16; the evidence below is what this interval had, and
+the section that closes it is **What is not known**, corrected at the end.
 
 ScribeKit crashes during sustained meetings with `EXC_BAD_ACCESS` / `SIGBUS`,
 `KERN_PROTECTION_FAILURE` against a stack guard region, on
@@ -124,19 +126,20 @@ recorded as a correctness fix, not as a remedy for this.
   no longer a candidate explanation for this crash, since the control run had
   no Resume, but it is worth looking at on its own.
 
-### What is not known
+### What was not known here, and what it turned out to be
 
-The mechanism. A shallow stack that faults on its guard page is not explained
-by anything found this interval. Two hypotheses were formed and both were
-falsified by the next measurement — that the main-actor hop caused it, and that
-Pause/Resume caused it — so no further production change was made on a guess.
-One of the four reports says the kernel "could not determine thread index for
-stack guard region", which would fit a write to an unmapped page better than it
-fits recursion, but that is an observation about a message, not a diagnosis.
+The mechanism. Two hypotheses were formed here and both were falsified by the
+next measurement — that the main-actor hop caused it, and that Pause/Resume
+caused it — so no further production change was made on a guess.
 
-What it needs is a debugger on a reproducing run, which is cheap now that the
-recipe is known: real capture, compressed retention, leave it running, expect
-it between twenty and twenty-six minutes.
+The stacks above were read as shallow, and they are not. The `.ips` format
+collapses recursive frames; each of these reports carries a
+`recursionInfoArray` and an `originalLength` recording what was removed. The
+real stacks are about 5,570 frames deep, of which roughly 2,768 are a
+repeating two-frame thunk cycle between the monitor's publish and the observer
+it calls. The delivery queue's 512 KB stack was being exhausted by an observer
+that grew by one wrapper per published update, at 2 Hz. Interval 16's entry in
+`CONTEXT.md` has the diagnosis, the isolated reproduction and the fix.
 
 ## Retention modes
 

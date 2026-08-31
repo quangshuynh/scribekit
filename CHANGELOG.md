@@ -6,6 +6,18 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Long meetings no longer die between twenty and twenty-six minutes. The
+  capture activity summary was published through an observer stored as a bare
+  function inside a `Mutex`; copying a function back out of the lock
+  re-abstracted it, and the thunk it gained was left behind in the stored
+  value. Every published snapshot therefore added two frames to the chain the
+  next one would call through, and after roughly 2,770 updates — twice a
+  second, so a little over twenty minutes — the chain overran the audio
+  delivery queue's 512 KB stack and the process took `SIGBUS` against its
+  guard page, losing the unfinalised recording with it. The observer is now
+  held inside a value, so a publish costs the same stack on a meeting's last
+  buffer as on its first. This is the crash `docs/PERFORMANCE.md` recorded as
+  open.
 - A meeting no longer creates a main-actor task on ScreenCaptureKit's audio
   delivery queue. The capture activity summary was published by a handler that
   runs on that queue, and the handler created an unstructured `Task` to hop to
@@ -14,9 +26,8 @@ All notable changes to this project are documented in this file.
   the main actor is the one thing the capture pipeline may not do. The summary
   now crosses through a single long-lived consumer of a stream that keeps only
   the newest snapshot, so the delivery queue creates nothing and no snapshot
-  can accumulate. This is a correctness fix against the pipeline's own rules;
-  it is **not** a fix for the crash described in `docs/PERFORMANCE.md`, which
-  is still open.
+  can accumulate. This is a correctness fix against the pipeline's own rules,
+  and was never a fix for the crash above, which had a separate cause.
 - An explicit Resume now gives the recogniser its restart budget back. The
   bound on automatic self-restarts belongs to a capture run rather than to the
   whole meeting: a person choosing to carry on is not an automatic retry, and
