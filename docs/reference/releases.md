@@ -1,28 +1,30 @@
 # Releases
 
-ScribeKit is in early development and has no tagged release yet. There is no
-signed distributable build, so running it means
-[building from source](../getting-started/build-and-run.md).
+ScribeKit's first release, **v0.1.0**, is a **source release**. No signed or
+notarized application is published with it, so running ScribeKit means
+[building it from source](../getting-started/build-and-run.md). That is a
+distribution limitation and nothing else: a build made from this source runs
+entirely on your Mac, with no account and no network.
 
-## The v0.1.0 distribution candidate
+## v0.1.0
 
 The application's release identity is frozen. It builds as version **0.1.0**,
 build **1**, bundle identifier **`quang.ScribeKit`**, requiring **macOS 26.5 or
-later** and running on Apple Silicon; the identifier is the one every existing
+later** and tested on Apple Silicon; the identifier is the one every existing
 sandbox container and security-scoped bookmark on a developer's Mac already
 uses, and it was kept rather than changed on the eve of a first release. A
 Release archive carries the App Sandbox, app-scoped bookmarks and user-selected
 read/write entitlements and nothing else — no network client — with the
 hardened runtime enabled and `get-task-allow` absent.
 
-**There is no signed disk image, and there cannot be one yet.** Publishing a
-macOS application means a Developer ID Application certificate and Apple
-notarization, and both require a paid Apple Developer Program membership.
-ScribeKit is developed under a personal team, which can issue neither. Until
-that changes, the candidate stops at a verified archive: the export, the
-notarization, the stapling, the Gatekeeper assessment and a packaged first
-install are all unevidenced. See [Building](../development/building.md) for the
-sequence that runs once a certificate exists.
+**There is no signed disk image.** Publishing a macOS application outside the
+App Store means a Developer ID Application certificate and Apple notarization,
+and neither is available for this release. The release therefore stops at a
+verified archive: the export, the notarization, the stapling, the Gatekeeper
+assessment and a packaged first install are all unevidenced, and none of them
+is claimed. Signed distribution is deferred, not abandoned; see
+[Building](../development/building.md) for the sequence that runs once a
+certificate exists.
 
 ## Changelog
 
@@ -62,7 +64,8 @@ implemented or not — nothing is described here as working before it is.
 | 23 | Interrupted-session continuation: investigated, deferred | Decided |
 | 24 | History and notes usability assessment | Done |
 | 25 | Release hardening and manual evidence | Done |
-| 26 | Application identity, icon and macOS distribution | Blocked |
+| 26 | Application identity, icon and macOS distribution | Done — distribution deferred |
+| 27 | v0.1.0 source-release presentation | Done |
 
 ## Not planned for the first release
 

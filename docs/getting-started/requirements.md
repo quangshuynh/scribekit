@@ -3,11 +3,13 @@
 | Requirement | Version | Why |
 | --- | --- | --- |
 | macOS | 26.5 or later | The built application declares `LSMinimumSystemVersion` 26.5, so macOS refuses to launch it on anything earlier. The APIs it uses — `SpeechAnalyzer`/`SpeechTranscriber` and the ScreenCaptureKit behaviour ScribeKit relies on — are available from macOS 26.0, but no build has been made or tested against a lower target. |
-| Xcode | 26 or later | Builds the macOS 26.5 target. Only needed to build from source, not to run a packaged release. |
-| On-device speech model | Installed for the recognition language | Recognition is local; ScribeKit does not download models. |
+| Mac | Apple Silicon | The only architecture ScribeKit has been built and validated on. The project builds a universal binary, but nothing has been tested on Intel. |
+| Xcode | 26 or later | Builds the macOS 26.5 target, and is currently the only way to get a running ScribeKit. |
+| On-device speech model | Installed for the recognition language | Recognition is local; ScribeKit does not download models, and there is no network fallback. |
 
-ScribeKit is not distributed as a signed release build yet, so building from
-source in Xcode is currently the only way to run it.
+**v0.1.0 is a source release.** No signed or notarized application is
+published, so [building from source](build-and-run.md) is the only way to run
+ScribeKit. See [Releases](../reference/releases.md).
 
 ## Permissions
 

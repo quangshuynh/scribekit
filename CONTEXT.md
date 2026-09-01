@@ -5,17 +5,26 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 26 — final application identity and macOS distribution. The identity
-is frozen and the icon is real: ScribeKit builds as 0.1.0, build 1,
-`quang.ScribeKit`, macOS 26.5 or later, arm64, with an application icon in
-every asset-catalog slot. A Release archive was produced and inspected, and it
-carries the intended entitlements with the hardened runtime on and
-`get-task-allow` gone. **Distribution stops there.** A Developer ID Application
-certificate cannot be issued to a personal team and Apple's notary service is
-not available to one, so there is no export, no notarization, no DMG and no
-packaged install, and Interval 26 closes as *not ready — distribution blocker
-remains*. See *Interval 26* below. **Feature freeze for v0.1.0 remains in
-force.**
+Interval 27 — the v0.1.0 source-release presentation. No product code changed.
+The identity frozen in Interval 26 stands: ScribeKit builds as 0.1.0, build 1,
+`quang.ScribeKit`, macOS 26.5 or later, with an application icon in every
+asset-catalog slot — **now human-approved as final for v0.1.0** in Finder and
+the Dock. The distribution decision is settled and public: **v0.1.0 is a source
+release.** No signed or notarized application is published, no disk image is
+advertised, and the README, the docs site, the requirements page, the
+limitations page and the releases page all say so in current-facing terms
+rather than as a pending blocker. The repository now carries three screenshots
+and a real 45-second demo of synthetic content, both build-from-source paths
+were verified against a clean clone, and the exact v0.1.0 tag, title and
+release notes are drafted below for Interval 28 to publish. **Feature freeze
+for v0.1.0 remains in force.**
+
+One correction to Interval 26's record: the archived executable is a
+**universal `x86_64 arm64` binary**, not `arm64` alone — the project sets no
+`ARCHS` and takes the standard architectures. `LC_BUILD_VERSION minos` 26.5
+still holds. Public wording therefore says *tested on Apple Silicon* and
+states that Intel is untested, rather than claiming either support or an
+arm64-only build.
 
 ## Current implementation
 
@@ -1666,6 +1675,41 @@ success. Nothing is uploaded and no entitlement was added.
 
 ## Validation status
 
+### Interval 27 validation
+
+**No Swift or project change**, so Interval 26's suite stands: 703 tests in 65
+suites. Documentation and asset validation was run instead.
+
+- `mkdocs build --strict`: passes.
+- **Build from source, verified against a clean clone** of `main` at
+  `a78b6ed` in a throwaway worktree, with the exact commands the README and
+  `docs/getting-started/build-and-run.md` publish. Both succeeded:
+  `xcodebuild … build` (automatic signing, which picked up the local Apple
+  Development identity) and the ad-hoc form
+  `CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= … build`,
+  which is what a clone without the project's committed development team
+  needs. The instructions are published because they were run, not because
+  they looked plausible.
+- **Icon, approved by a person.** The Interval 26 Release build was staged and
+  inspected in Finder icon view and in the Dock. Verdict: approve. The icon is
+  final for v0.1.0 and was not changed.
+- **Screenshots and demo, produced from the running Release build** against a
+  synthetic meeting: a QuickTime Player document of speech synthesised from a
+  written script, captured as the selected application. Nothing personal, no
+  real meeting content, no third-party windows, no menu bar and no desktop in
+  frame. The transcript excerpt in the README is copied verbatim from a
+  transcript ScribeKit actually wrote during that run, pause remark included.
+- **Human visual approval, all four.** The application icon, the hero
+  screenshot, the demo and the README as rendered were each shown and each
+  approved. None of them was marked approved without a person looking.
+- **Assets.** `docs/images/meeting-setup.png`, `meeting-live.png`,
+  `history-review.png` and `scribekit-demo.gif` — 1.1 MB, 560x663, 8 fps,
+  45 s. The full-resolution MP4 master is kept outside the repository; only
+  the optimised GIF is tracked, because a screen recording at capture quality
+  is not repository weight worth carrying.
+- **Not re-run, and not claimed:** the unit suite, the Release archive, and
+  every piece of Interval 25 and 26 human evidence.
+
 ### Interval 25 validation
 
 **Automated, on this Mac (macOS 26.6.2 25G83, Xcode 26.6 17F113).**
@@ -3184,6 +3228,92 @@ playback was confirmed by the player's own control state rather than by
 listening. The meeting-finished reload was not reproduced with a real meeting;
 it is the same `load()` call as the Refresh button, which was. The full
 VoiceOver-with-no-mouse pass is still outstanding and belongs to Interval 25.
+
+## v0.1.0 GitHub release draft
+
+Prepared in Interval 27, **not published**. No tag exists, no GitHub release
+exists, and no artifact is attached — the release carries source only.
+Interval 28 publishes this verbatim, adjusting only what has actually changed.
+
+**Tag:** `v0.1.0`
+**Title:** `ScribeKit v0.1.0`
+**Attachments:** none. Do not attach a disk image, signed or otherwise.
+
+```markdown
+ScribeKit is a native macOS app for meeting transcription that stays on your
+Mac. It captures audio from the applications you select — not the whole system,
+not a microphone — recognises the speech with Apple's on-device models, and
+appends a timestamped Markdown transcript into a folder you chose.
+
+## This release is source only
+
+**There is no signed or notarized download.** Publishing a macOS application
+outside the App Store needs a Developer ID certificate and Apple notarization,
+and neither is available for v0.1.0, so ScribeKit is built from source. That is
+a distribution limitation and nothing more: a build made from this source runs
+entirely on your Mac, with no account and no network.
+
+```bash
+git clone https://github.com/quangshuynh/scribekit.git
+cd scribekit
+xcodebuild -project ScribeKit.xcodeproj -scheme ScribeKit -destination 'platform=macOS' build
+```
+
+A free Apple ID is enough to build and run it; select your own team in Xcode's
+*Signing & Capabilities* tab, or sign ad-hoc with
+`CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=`.
+
+## Highlights
+
+- Selective application-audio capture through ScreenCaptureKit
+- On-device transcription with `SpeechAnalyzer`/`SpeechTranscriber`, no network
+  fallback
+- A durable `transcript.md` appended to as speech is finalised, readable in any
+  editor while the meeting runs
+- Pause and resume on separate wall-clock and captured-media clocks
+- Background operation: the meeting outlives its window, and a menu bar item
+  can stop it
+- Recovery of a meeting the process did not survive, recorded as interrupted
+  rather than completed
+- Optional retained audio, raw `.caf` or compressed `.m4a`, off by default
+- Read-only History with local search, uncertainty review against retained
+  audio, and Markdown notes in a sidecar of their own
+- Local diagnostic export — counts and states only, uploaded nowhere
+
+## Requirements
+
+- macOS 26.5 or later
+- Tested on Apple Silicon (a universal binary is built; Intel is untested)
+- Xcode 26 or later, to build
+- The on-device speech model for your recognition language, already installed
+- Screen & System Audio Recording permission
+
+## Local-first
+
+No accounts, no analytics, no telemetry, no cloud database and no third-party
+runtime dependencies. ScribeKit ships without the network client entitlement,
+so the sandbox does not permit it to open a network connection at all, and
+recognition has no server-backed mode to fall back to. ScribeKit does not
+encrypt what it writes: your transcripts and recordings are ordinary files, as
+private as the folder you chose.
+
+## Known limitations
+
+- No signed or notarized application; source build only
+- An interrupted meeting is preserved but cannot be continued as the same
+  session
+- History is read-only — no editing, renaming, deleting or exporting — and a
+  transcript restructured outside ScribeKit can stop History parsing it
+- Compressed audio cut short by an abrupt process death may be unreadable
+- Recognition accuracy is Apple's on-device recogniser's
+- Nothing is encrypted by ScribeKit
+
+Full list: https://quangshuynh.github.io/scribekit/reference/limitations/
+
+## Documentation
+
+https://quangshuynh.github.io/scribekit/
+```
 
 ## Feature freeze
 
