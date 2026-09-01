@@ -68,6 +68,15 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- The stated minimum macOS version is now the one the application actually
+  enforces. Every build configuration targets macOS 26.5 and the built binary
+  declares `LSMinimumSystemVersion` 26.5, so macOS will not launch it on 26.0
+  through 26.4 — but the README and the requirements and building pages all
+  said *macOS 26 or later*. The APIs ScribeKit uses are available from 26.0 and
+  the deployment target was deliberately **not** lowered to match the wording:
+  claiming support for a version family nothing has been built or run against
+  would be a guess. The documentation now says 26.5.
+
 - Long meetings no longer die between twenty and twenty-six minutes. The
   capture activity summary was published through an observer stored as a bare
   function inside a `Mutex`; copying a function back out of the lock

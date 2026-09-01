@@ -2,7 +2,7 @@
 
 ## Requirements
 
-macOS 26 or later and Xcode 26 or later. See
+macOS 26.5 or later and Xcode 26 or later. See
 [Requirements](../getting-started/requirements.md).
 
 ## Build
