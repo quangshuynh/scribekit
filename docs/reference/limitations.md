@@ -140,15 +140,19 @@ are consequences of decisions, and several of them are deliberate.
 
 ## Accessibility
 
-- **No recorded VoiceOver pass.** The accessibility tree of a running build was
-  inspected and the strings under it are covered by tests, but nobody has
-  driven VoiceOver through setup, an active meeting and History and written
-  down what they heard. ScribeKit claims no conformance to any accessibility
-  standard.
+- **VoiceOver has been heard along one representative path only.** In
+  Interval 25 a person drove setup, an active meeting with Pause and Resume,
+  History, review and notes with VoiceOver on and recorded what they heard.
+  Anything outside that path is still unheard, and ScribeKit claims no
+  conformance to any accessibility standard.
+- **Reaching every control by Tab needs macOS Keyboard navigation turned on.**
+  That setting is off by default on macOS. Without it, ⌘1, ⌘2, ⌘F and the
+  arrow keys still work; with it, Start, Pause, Resume, Stop, the notes editor
+  and Save are all reachable.
 - **The tab bar is reached with ⌘1 and ⌘2**, not with Tab.
-- **The Help menu is empty.** ScribeKit has no network entitlement and does not
-  open external links, so it does not link to its documentation site from
-  inside the app.
+- **The Help menu holds only *Export Diagnostics….*** ScribeKit has no network
+  entitlement and does not open external links, so it does not link to its
+  documentation site from inside the app.
 
 ## Process and CI
 
