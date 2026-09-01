@@ -90,6 +90,14 @@ final class HistoryModel {
     private let service: HistoryService
     private let saveLocation: SaveLocationPersisting
 
+    /// The meeting whose derived state is currently attached.
+    ///
+    /// Remembered because a reload replaces the listing wholesale and the
+    /// selection lives in the view. Without it, a reload would leave the
+    /// notes editor and the reviewed marks detached from a meeting that is
+    /// still on screen.
+    private var selectedSessionID: URL?
+
     /// Creates the model.
     ///
     /// - Parameters:
@@ -151,13 +159,27 @@ final class HistoryModel {
     /// The folder comes from the bookmark the user's choice was stored under.
     /// When it cannot be restored or opened, the screen says so rather than
     /// listing meetings from somewhere the user did not choose.
+    /// The meeting still on screen keeps its notes and its reviewed marks: a
+    /// reload re-attaches derived state to whichever session is selected, and
+    /// detaches it only when that session is no longer in the folder. A
+    /// listing being rebuilt is not the user leaving a meeting.
     func load() async {
         player.stop()
-        derived.clear()
         state = .loading
         index = .empty
         results = []
 
+        await readFolder()
+        refreshResults()
+        await selectSession(selectedSessionID)
+    }
+
+    /// Reads the save folder into ``state`` and ``index``.
+    ///
+    /// Split out so that every outcome — a bookmark that will not restore, no
+    /// folder at all, a folder that will not list, or a successful read —
+    /// leaves ``load()`` free to re-attach the selection afterwards.
+    private func readFolder() async {
         let folder: URL?
         do {
             folder = try saveLocation.restore()
@@ -180,7 +202,6 @@ final class HistoryModel {
         } catch {
             state = .unavailable(message: Self.message(for: error))
         }
-        refreshResults()
     }
 
     /// The text of one session, for the detail pane's preview.
@@ -200,6 +221,7 @@ final class HistoryModel {
     ///
     /// - Parameter id: The selected session's directory, or `nil`.
     func selectSession(_ id: URL?) async {
+        selectedSessionID = id
         guard let id, let document = document(for: id) else {
             derived.clear()
             return
