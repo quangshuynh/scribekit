@@ -4,7 +4,29 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- ScribeKit has a real application icon. The asset catalog declared ten macOS
+  representations and filled none of them, so the application had been showing
+  the generic placeholder in Finder, the Dock and the app switcher for
+  twenty-five intervals. The ten are generated from the existing brand mark —
+  the document, quill and waveform on a dark rounded square, with no wordmark
+  or tagline to lose at 16 points — placed on Apple's macOS icon grid so it
+  sits at the same visual size as every other application's.
+  `Tools/AppIcon/make-appicon.swift` records how, and regenerates them.
+
+- `Tools/Release/package.sh` records the macOS distribution sequence: archive,
+  export, verify, notarize, staple, disk image, notarize and staple the image,
+  Gatekeeper assessment, SHA-256. It stores no credentials and reads a
+  `notarytool` keychain profile. Only its archive step has been run: a
+  Developer ID Application certificate cannot be issued to a personal team.
+
 ### Changed
+
+- The application's version metadata is frozen for the first release. It had
+  carried Xcode's template `1.0`/`1` since Interval 1; it now builds as
+  `0.1.0`, build `1`. The bundle identifier `quang.ScribeKit` and the macOS
+  26.5 deployment target were reviewed and deliberately kept.
 
 - A meeting with the main window closed no longer pays for an interface.
   Closing a SwiftUI `Window` scene leaves its view graph installed: the
