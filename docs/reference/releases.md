@@ -40,6 +40,8 @@ implemented or not — nothing is described here as working before it is.
 | 21 | Application menus, keyboard routes and accessible presentation | Done |
 | 22 | Local diagnostics and supportability | Done |
 | 23 | Interrupted-session continuation: investigated, deferred | Decided |
+| 24 | History and notes usability assessment | Done |
+| 25 | Release hardening and manual evidence | In progress |
 
 ## Not planned for the first release
 

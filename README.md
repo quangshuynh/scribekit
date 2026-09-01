@@ -74,8 +74,8 @@ See [Privacy & Data](https://quangshuynh.github.io/scribekit/privacy/local-first
 
 ## Requirements
 
-- macOS 26 or later
-- Xcode 26 or later
+- macOS 26.5 or later
+- Xcode 26 or later (only to build from source)
 - An installed on-device speech model for the recognition language
 
 ## Build
