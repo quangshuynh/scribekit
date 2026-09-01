@@ -5,11 +5,14 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 24 — History and notes usability assessment. The existing experience
-was exercised against a representative save folder and found sufficient for
-v0.1.0 in every respect but one, which was a release blocker and is fixed. See
-*History and notes usability* below. **Feature freeze for v0.1.0 begins after
-Interval 24.**
+Interval 25 — release hardening and manual evidence. The automated gates all
+pass and the application's own configuration was audited against what the
+documentation claims. One documentation-truth release blocker was found and
+fixed: the published minimum macOS version. The human-driven evidence this
+interval exists to collect — a real meeting, VoiceOver, a keyboard-only pass
+and a visual review — was **not** collected, because no person performed it.
+See *Interval 25 validation* below. **Feature freeze for v0.1.0 remains in
+force.**
 
 ## Current implementation
 
@@ -101,10 +104,7 @@ Interval 24.**
   `String(describing:)`), `DiagnosticReport` with its assembly,
   `DiagnosticReportWriter`, and `MeetingDiagnostics`, the process-lifetime
   owner of the export.
-- `ScribeKitTests/`: Swift Testing suites (695 tests, 65 suites).
-
-Audio retention writes a file; nothing plays one. Pause and resume do not
-exist.
+- `ScribeKitTests/`: Swift Testing suites (703 tests, 65 suites).
 
 ## Meeting ownership
 
@@ -226,16 +226,19 @@ left enabled.
 
 `MenuBarExtra` with `.menu` style. The label is one SF Symbol per status; the
 menu shows the meeting's title, `Transcribing · mm:ss`, the applications being
-captured and the retention mode, then Stop Meeting, Show Transcript in Finder
-and Show Audio in Finder when there are any, then Open ScribeKit and Quit
-ScribeKit. Idle, it is three lines: the state, Open and Quit.
+captured and the retention mode, then Pause Meeting or Resume Meeting when the
+runtime would act on one, Stop Meeting, Show Transcript in Finder and Show
+Audio in Finder when there are any, then Open ScribeKit and Quit ScribeKit. Idle, it is three lines: the state, Open and Quit.
 
 `MeetingMenuBarPresentation` is a pure value built from the status, the
 snapshot and the two artifact URLs, so the mapping is unit tested. Elapsed time
 is deliberately outside it: it changes every second and nothing else there
 does.
 
-There is **no Pause item**. Pause is not implemented — see the limitations.
+Pause Meeting and Resume Meeting appear when `canPause` and `canResume` say
+the runtime would act on them, alongside Stop Meeting. The application's own
+menus in `MeetingCommands` are built from the same presentation value, so the
+window's menus and the menu bar cannot disagree about what a meeting can take.
 
 ## Elapsed time
 
@@ -1659,6 +1662,72 @@ atomically, and reports a failure rather than presenting a partial file as a
 success. Nothing is uploaded and no entitlement was added.
 
 ## Validation status
+
+### Interval 25 validation
+
+**Automated, on this Mac (macOS 26.6.2 25G83, Xcode 26.6 17F113).**
+
+- `xcodebuild … clean test`: **703 tests in 65 suites, all passing**. The only
+  three warnings are the AppIntents metadata note; no compiler warnings.
+- `xcodebuild -configuration Release … build`: **BUILD SUCCEEDED**, zero
+  warnings.
+- `mkdocs build --strict`: passes.
+- Regression inventory: every category the release depends on still has a suite
+  behind it — discovery, save-location persistence, capture, the recognition
+  abstraction, Markdown persistence, recovery, retention, pause/resume,
+  History/search, review/playback, derived state, long-run durability,
+  interruption truth, readiness and start failure, accessibility semantics,
+  diagnostic privacy, and Interval 24's History-reload and unsaved-draft
+  boundaries. No test was added: no release-critical path was found uncovered.
+
+**Observed on the real system, not through a test double.**
+
+- The **Release build launches cleanly outside the test harness**, runs as an
+  ordinary application and quits cleanly from an idle state. No crash report
+  was produced.
+- **No network socket.** `lsof -nP -a -p <pid> -i` against the running Release
+  process returns nothing at idle. The built app's entitlements are
+  `app-sandbox`, `files.bookmarks.app-scope`, `files.user-selected.read-write`
+  and `get-task-allow` — **there is no network client entitlement**, so the
+  network policy holds as a capability rather than as a convention.
+  `get-task-allow` is present because this was signed locally; a Developer ID
+  export must not carry it, which is Interval 26's problem.
+- **No stray handles while idle.** The idle process holds no descriptor on the
+  user's save folder.
+- Built product metadata: `LSMinimumSystemVersion` 26.5, `LC_BUILD_VERSION`
+  `minos 26.5`, `CFBundleShortVersionString` 1.0, `CFBundleVersion` 1,
+  identifier `quang.ScribeKit`.
+
+**One release blocker found and fixed: the minimum macOS claim.** All four
+build configurations set `MACOSX_DEPLOYMENT_TARGET = 26.5`, and the built
+binary declares `minos 26.5`, so macOS refuses to launch it on 26.0 through
+26.4. The README, `docs/getting-started/requirements.md` and
+`docs/development/building.md` all said *macOS 26 or later*, which would have
+shipped a release naming a floor two hundredths below the one the binary
+enforces. The APIs themselves are available from 26.0, but the target was not
+lowered: broadening support would be a guess without a 26.0–26.4 machine to
+test on, and Part L of this interval prefers documenting the version actually
+supported. The documentation now says **26.5**, which is the configured target
+and the only version family the application has been run on.
+
+**Two stale current-state claims in this file, fixed.** *Pause and resume do
+not exist*, *nothing plays one* and *There is no Pause item — Pause is not
+implemented* all survived from before Intervals 11, 12 and 21. `MeetingCommands`
+and `MeetingMenuBarView` both offer Pause and Resume from a shared
+`MeetingMenuBarPresentation`, and `RetainedAudioPlayer` plays retained audio.
+The test count was also stale at 695.
+
+**Not collected, and not simulated: every piece of human evidence this interval
+was created to gather.** No person drove the application. There was therefore
+no real human-driven meeting, no real transcript produced by speaking into it,
+no observed Pause/Resume/Stop on a live meeting, no background/window/menu-bar
+lifecycle pass, no quit-during-meeting pass, no History/review/notes workflow
+by hand, no keyboard-only pass, no VoiceOver pass, and no light/dark or layout
+inspection. None of it was approximated through the Accessibility API and
+reported as a human pass, because that is the substitution the previous four
+intervals already made and the one this interval was meant to stop making.
+These remain **unresolved**, and they are why v0.1.0 is not yet a source
+release candidate.
 
 ### Interval 23 validation
 
@@ -3087,14 +3156,35 @@ files written by AVFoundation directly, and the recovery path they concern is
 covered by tests and by Interval 12's live SIGKILL run rather than by a fresh
 one.
 
-**Interval 25.** The evidence that cannot be automated is now the only large
-gap left in the release, and it is the same one four intervals have named: a
-live first-run on a Mac that has not granted anything, driven by hand, with
-VoiceOver on and the mouse untouched. Interval 24 narrowed what it has to cover
-— History's controls, their labels and their keyboard routes are now known to
-be present and correct through the Accessibility API — but a person still has
-to hear them. Nothing in the code needs to change for it; what it produces is
-either confirmation or a list of real defects.
+**Interval 25 did not close it.** Everything that could be established without
+a person was established: the clean test, the Release build, the strict docs
+build, a real launch of the Release application, the absence of a network
+socket, the entitlement set, the built product's metadata, and a documentation
+audit that found and fixed a false minimum-macOS claim. What remains is exactly
+what four intervals have now named and none has produced — a person driving the
+application. Not an Accessibility API script standing in for one.
+
+**The source release candidate is blocked on human evidence, not on code.** The
+outstanding list is a real meeting spoken into by hand, with Pause, Resume and
+Stop observed live and the resulting artifacts inspected; the background,
+window and menu-bar lifecycle; quit during a meeting; the History, review and
+notes workflow by hand; a keyboard-only pass; a VoiceOver pass; and a light,
+dark and layout inspection. Nothing in the code needs to change for any of it,
+and each produces either confirmation or a list of real defects.
+
+**Also still open, and unchanged.** Source disappearance during a running
+capture, `ScreenCaptureKitAudioCapturer.stop()` not calling
+`removeStreamOutput(_:type:)` since Interval 15, and the visible-presentation
+cost Interval 18 profiled.
+
+**Interval 26 inherits a packaging list, not a code list.** The application's
+version metadata still says `1.0`/`1` and must become `0.1.0` with a real build
+number; the bundle identifier `quang.ScribeKit` is a decision that has not been
+made deliberately; the locally signed build carries `get-task-allow`, which a
+Developer ID export must not; and the deployment target is settled at 26.5
+unless a 26.0–26.4 machine becomes available to test a lower one against.
+Signing identity, notarization credentials, archive and export, the DMG,
+Gatekeeper and a fresh packaged installation all belong there.
 
 ## Interval 22's closing note
 
