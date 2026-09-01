@@ -6,13 +6,13 @@ Current working state of the repository. Keep this short and current; see
 ## Current milestone
 
 Interval 25 — release hardening and manual evidence. The automated gates all
-pass and the application's own configuration was audited against what the
-documentation claims. One documentation-truth release blocker was found and
-fixed: the published minimum macOS version. The human-driven evidence this
-interval exists to collect — a real meeting, VoiceOver, a keyboard-only pass
-and a visual review — was **not** collected, because no person performed it.
-See *Interval 25 validation* below. **Feature freeze for v0.1.0 remains in
-force.**
+pass, and the human evidence four intervals had deferred was collected: a
+person drove a real meeting end to end, listened to VoiceOver, worked the
+application without a mouse and inspected it in both appearances. One
+documentation-truth release blocker was found and fixed — the published minimum
+macOS version — and the accessibility and Help-menu pages were corrected to
+match what the application does. No production code changed. See *Interval 25
+validation* below. **Feature freeze for v0.1.0 remains in force.**
 
 ## Current implementation
 
@@ -1717,17 +1717,72 @@ and `MeetingMenuBarView` both offer Pause and Resume from a shared
 `MeetingMenuBarPresentation`, and `RetainedAudioPlayer` plays retained audio.
 The test count was also stale at 695.
 
-**Not collected, and not simulated: every piece of human evidence this interval
-was created to gather.** No person drove the application. There was therefore
-no real human-driven meeting, no real transcript produced by speaking into it,
-no observed Pause/Resume/Stop on a live meeting, no background/window/menu-bar
-lifecycle pass, no quit-during-meeting pass, no History/review/notes workflow
-by hand, no keyboard-only pass, no VoiceOver pass, and no light/dark or layout
-inspection. None of it was approximated through the Accessibility API and
-reported as a human pass, because that is the substitution the previous four
-intervals already made and the one this interval was meant to stop making.
-These remain **unresolved**, and they are why v0.1.0 is not yet a source
-release candidate.
+**Collected by a person, in a second sitting: the human evidence four
+intervals had deferred.** A tester drove the Release build by hand on this Mac,
+against a disposable save folder, with synthetic speech played from QuickTime
+Player. Nothing below was produced through the Accessibility API.
+
+- **Readiness.** All four rows reported their state; Start was disabled naming
+  the one unmet prerequisite, and choosing a source cleared it with no stale
+  warning left behind. This is the first **real granted-permission** evidence:
+  capture access and the speech model were reported ready by the application
+  itself, not by a double. Real **denial** is still unreached on this Mac.
+- **One real meeting, 9 min 54 s wall, 5 min 46 s captured.** Speech became
+  live transcript. The window was closed mid-meeting and capture, recognition
+  and both writers continued; the menu bar showed the meeting running with a
+  ticking clock and offered Pause. Pause was taken from the menu bar, the
+  window reopened onto a correctly reconstructed *Paused* meeting with no
+  second runtime, Resume returned it to transcribing, new speech reached the
+  transcript, and Stop closed it cleanly.
+- **The artifacts are truthful.** One session directory; `transcript.md`,
+  `.scribekit/session.json`, `.scribekit/review.json` and `audio.m4a` and
+  nothing else. `capturedDuration` 345.78 s against 594 s of wall clock, and
+  the retained recording is 345.78 s — the pause was not padded into the file.
+  The transcript states `Paused: 4:35:15 PM` and `Resumed: 4:39:22 PM, after
+  4 min 8 s paused`, which is exactly the difference between the two clocks,
+  and closes with both durations. Every written time states AM or PM.
+- **History, review and notes by hand.** The meeting listed with its status,
+  its transcript previewed, search found a phrase and clearing restored the
+  list, and **retained audio played and landed on the right passage, confirmed
+  by listening** rather than by the player's control state. A mark and a note
+  survived a quit and relaunch.
+- **Interval 24's fix holds, confirmed by a person.** An unsaved note survived
+  the same-meeting ⌘1/⌘2 reload with its editor and Save intact, and was
+  discarded only by selecting a different meeting, which is the documented
+  behaviour.
+- **Keyboard.** ⌘1, ⌘2, ⌘F and arrow-key list navigation work as shipped. With
+  macOS Keyboard navigation turned on — off by default on macOS — Tab reaches
+  the setup controls, Start, Pause, Resume, Stop, the notes editor and Save. No
+  essential action was unreachable and no focus trap was found.
+- **VoiceOver, heard rather than inspected.** Readiness rows read out their
+  state, a History row carries its status and date, Pause was announced, and
+  Start reads as *dimmed* while blocked and loses that once a source is chosen.
+  The essential workflow was usable. No conformance to any standard is claimed,
+  and flows outside that path remain unheard.
+- **Visual.** Light and dark, at normal and minimum practical window size, with
+  the longest text on screen: no clipping, overlap, unreadable contrast, broken
+  resizing, colour-only status or misleading control state.
+- **Quit.** Quitting while idle exits cleanly. Quitting during a meeting offers
+  *Stop Meeting and Quit* or *Cancel*; Cancel left the meeting running, and
+  Stop Meeting and Quit finalised the session as `completed` with its audio
+  written before the process exited.
+- **Diagnostics.** A real report written after a real meeting carries counts and
+  states only — no transcript text, no note text, no application name and no
+  path survived a canary scan for the words that were actually spoken and typed.
+- **No network socket** while a meeting was capturing and transcribing, and
+  none after Stop. **No artifact handle** on the transcript, the recording or
+  the save folder after Stop.
+
+**Two things the pass found, neither a blocker.** A collapsed History sidebar
+hides the meeting list while the detail pane says *No Meeting Selected*, which
+reads as an empty History; the standard toolbar toggle restores it. And a
+transcript edited outside ScribeKit stopped parsing, so History reported the
+meeting as having nothing transcribed while still showing its byte count —
+ScribeKit neither repaired nor rewrote the file, which is the contract, and the
+preview returned when the file did. Neither was changed under feature freeze.
+
+**Still unresolved.** Real permission denial, and a pristine first install —
+the latter belongs with the packaged artifact in Interval 26.
 
 ### Interval 23 validation
 
@@ -3156,26 +3211,30 @@ files written by AVFoundation directly, and the recovery path they concern is
 covered by tests and by Interval 12's live SIGKILL run rather than by a fresh
 one.
 
-**Interval 25 did not close it.** Everything that could be established without
-a person was established: the clean test, the Release build, the strict docs
-build, a real launch of the Release application, the absence of a network
-socket, the entitlement set, the built product's metadata, and a documentation
-audit that found and fixed a false minimum-macOS claim. What remains is exactly
-what four intervals have now named and none has produced — a person driving the
-application. Not an Accessibility API script standing in for one.
+**Closed by Interval 25.** The evidence gap four intervals named is closed. A
+person drove the Release build through a real meeting with real speech, closed
+and reopened the window under it, paused and resumed it from the menu bar,
+stopped it, read the artifacts, worked History, review and notes by hand,
+listened to VoiceOver, and used the application without touching the mouse. The
+automated gates pass, the application holds no network socket while capturing,
+and it closes its artifact handles at Stop. Nothing in the product needed to
+change: the interval's only corrections were to documentation that had drifted
+from what the code does.
 
-**The source release candidate is blocked on human evidence, not on code.** The
-outstanding list is a real meeting spoken into by hand, with Pause, Resume and
-Stop observed live and the resulting artifacts inspected; the background,
-window and menu-bar lifecycle; quit during a meeting; the History, review and
-notes workflow by hand; a keyboard-only pass; a VoiceOver pass; and a light,
-dark and layout inspection. Nothing in the code needs to change for any of it,
-and each produces either confirmation or a list of real defects.
+**What the human pass found, and why neither blocks.** A collapsed History
+sidebar makes a populated list look like an empty one — recoverable with the
+standard toolbar toggle. A transcript edited outside ScribeKit stops parsing,
+and History then reports the meeting as having nothing transcribed while still
+showing its byte count; ScribeKit correctly refused to repair or rewrite the
+file, and the preview returned with the file. Both are recorded rather than
+fixed, because feature freeze admits release blockers only.
 
 **Also still open, and unchanged.** Source disappearance during a running
 capture, `ScreenCaptureKitAudioCapturer.stop()` not calling
 `removeStreamOutput(_:type:)` since Interval 15, and the visible-presentation
-cost Interval 18 profiled.
+cost Interval 18 profiled. Still unresolved as evidence: a real permission
+denial, and a pristine first install — the latter belongs with the packaged
+artifact in Interval 26.
 
 **Interval 26 inherits a packaging list, not a code list.** The application's
 version metadata still says `1.0`/`1` and must become `0.1.0` with a real build

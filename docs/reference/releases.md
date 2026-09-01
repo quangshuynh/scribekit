@@ -41,7 +41,7 @@ implemented or not — nothing is described here as working before it is.
 | 22 | Local diagnostics and supportability | Done |
 | 23 | Interrupted-session continuation: investigated, deferred | Decided |
 | 24 | History and notes usability assessment | Done |
-| 25 | Release hardening and manual evidence | In progress |
+| 25 | Release hardening and manual evidence | Done |
 
 ## Not planned for the first release
 
