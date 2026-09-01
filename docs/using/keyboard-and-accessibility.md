@@ -81,14 +81,18 @@ pushing controls out of reach.
 
 ## Known gaps
 
-- **There is no Help content.** The Help menu is empty rather than carrying an
-  item that reports that help is unavailable. ScribeKit has no network
-  entitlement and does not open external links, so it does not link to this
-  site from inside the app; the documentation is read here instead.
-- **VoiceOver has not been driven by hand through every flow.** The
-  accessibility tree was inspected on a running build and the semantics below
-  it are covered by tests, but a full VoiceOver pass is a person's job and has
-  not been recorded. See
-  [Limitations](../reference/limitations.md).
+- **There is no Help content.** The Help menu carries *Export Diagnostics…*
+  and nothing else. ScribeKit has no network entitlement and does not open
+  external links, so it does not link to this site from inside the app; the
+  documentation is read here instead.
+- **VoiceOver has been driven by hand along a representative path, not through
+  every flow.** In Interval 25 a person turned VoiceOver on and worked through
+  the readiness rows, source selection, Start, an active meeting, Pause, Resume,
+  Stop, History rows, a session's status, playback and review controls, the
+  notes editor and Save. The readiness rows read out their state, a session row
+  carries its status and date, Pause was announced, and Start reads as *dimmed*
+  while blocked and loses that once a source is chosen. Flows outside that path
+  remain unheard, and ScribeKit claims no conformance to any accessibility
+  standard. See [Limitations](../reference/limitations.md).
 - **The tab bar is not itself in the Tab-key order.** ⌘1 and ⌘2 are the
   keyboard route between screens.
