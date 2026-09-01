@@ -108,14 +108,30 @@ final class DerivedSessionModel {
 
     /// Reads the derived state of one meeting.
     ///
-    /// Unsaved notes are not carried across a selection change: the editor is
-    /// reloaded from disk, so what it shows is always what was actually
-    /// written.
+    /// Unsaved notes are not carried across a selection change: choosing
+    /// another meeting reloads the editor from disk, so what it shows is
+    /// always what was actually written.
+    ///
+    /// Re-reading the same meeting is not that. History rebuilds its listing
+    /// for reasons the user did not ask for — returning to the tab, a meeting
+    /// finishing elsewhere — and text typed into the editor survives one,
+    /// because losing it would be data loss without an action to blame it on.
+    /// It is carried only when the sidecar on disk is still the version the
+    /// editor was working from; a file that changed underneath is shown as it
+    /// now is rather than being silently outranked by a draft.
     ///
     /// - Parameters:
     ///   - session: The meeting whose detail pane is open.
     ///   - destination: The save folder it sits in, for sandbox access.
     func load(_ session: HistorySession, destination: URL?) async {
+        let previousSessionID = sessionID
+        let previousRevision = saved?.revision
+        let carriedDraft = session.sessionID != nil
+            && session.sessionID == previousSessionID
+            && hasUnsavedNotes
+            ? notesDraft
+            : nil
+
         clear()
         directory = session.directory
         self.destination = destination
@@ -133,7 +149,11 @@ final class DerivedSessionModel {
         do {
             let loaded = try await service.load(sessionID: id, in: session.directory, destination: destination)
             saved = loaded
-            notesDraft = loaded?.notes ?? ""
+            if let carriedDraft, loaded?.revision == previousRevision {
+                notesDraft = carriedDraft
+            } else {
+                notesDraft = loaded?.notes ?? ""
+            }
             state = .ready
         } catch {
             state = .refused(message: Self.message(for: error))

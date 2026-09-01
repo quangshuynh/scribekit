@@ -5,9 +5,11 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 23 — interrupted-session continuation. Investigated and decided
-against for v0.1.0; no production change. See *Interrupted-session
-continuation* below.
+Interval 24 — History and notes usability assessment. The existing experience
+was exercised against a representative save folder and found sufficient for
+v0.1.0 in every respect but one, which was a release blocker and is fixed. See
+*History and notes usability* below. **Feature freeze for v0.1.0 begins after
+Interval 24.**
 
 ## Current implementation
 
@@ -1567,10 +1569,12 @@ nothing to save, and one line of status — *No notes yet*, *Unsaved changes*,
 toolbar, no rendering, no attachments, no document management. Empty by default,
 and nothing generates a word of it.
 
-Unsaved text is discarded when the selection changes or History reloads, and the
-pane says so rather than implying a draft is kept. A meeting with no session
-record has no identity to attach derived state to and says that instead of
-offering an editor.
+Unsaved text is discarded when the user selects another meeting, and the pane
+says so rather than implying a draft is kept. A reload is not that: since
+Interval 24 a rebuilt listing re-attaches derived state to whichever meeting is
+still selected and carries an unsaved draft through it. A meeting with no
+session record has no identity to attach derived state to and says that instead
+of offering an editor.
 
 ## Logging
 
@@ -2987,6 +2991,81 @@ intervals; the capture observations above were taken through the same path.
 - **The export was driven through the accessibility API, not by a person.**
   What a first-time user makes of the save panel's wording is unmeasured.
 
+## History and notes usability
+
+Interval 24 assessed the whole History workflow — open History, tell the
+meetings apart, find one, search transcript text, select a result, read the
+transcript, read the status, inspect review candidates, play retained audio,
+mark reviewed, switch meetings and return, write and save a note, relaunch —
+against a disposable save folder of eighteen synthetic meetings covering
+completed, interrupted, failed, legacy, retained audio present, retained audio
+absent, review candidates present, none flagged, a recogniser that reported no
+confidence, an existing long note, a very long title, a four-hundred-passage
+transcript and enough filler for search and sorting to matter. The folder was
+built by the real writers, driven through the Accessibility API on a running
+Debug build, and removed afterwards; the user's own save-folder bookmark was
+restored.
+
+**One release blocker, found and fixed.** With a meeting selected, any rebuild
+of the listing cleared the derived model and never re-attached it. Three things
+rebuild the listing and only one of them is deliberate: the Refresh button,
+returning to the History tab, and a meeting finishing while History is open.
+The consequences were an unsaved note destroyed by ordinary ⌘1/⌘2 navigation
+with no prompt; a Notes pane left permanently reading *Reading this meeting's
+notes…* with no editor and no Save; Mark Reviewed and Mark Unreviewed gone from
+every candidate; and the *N of M marked reviewed* summary silently dropped. It
+did not recover on its own — the user had to select another meeting and come
+back. Observed live in the running app and held by tests.
+
+The correction is two small changes and no new concept. `HistoryModel`
+remembers which session `selectSession` was last given and re-attaches derived
+state at the end of every load, detaching it only when that session is no
+longer in the folder. `DerivedSessionModel` carries an unsaved draft across a
+re-read of the same meeting when the sidecar on disk is still the revision the
+editor was working from; a sidecar that changed underneath is shown as it now
+is, because that is the version a save would have to land on. Selecting a
+different meeting still discards the draft, which is documented and warned
+about, and the in-app caption now says *another meeting* rather than *this
+meeting* because that was the half of the sentence the old behaviour broke.
+
+**Everything else was found sufficient and deliberately left alone.** Ordering
+is newest first and legible; completed, interrupted, failed and legacy are
+words in a capsule rather than a colour, each with a full explanation sentence
+in the detail pane and in its accessibility label; a long title truncates in
+the row and is shown whole in the detail; ⌘2 opens History and ⌘F reaches the
+search field; the list is keyboard navigable and selecting by arrow key opens
+the right meeting; substring search over transcript text returns *1 of 18* with
+an excerpt and a timestamp, and clearing it restores the list; *no meetings* and
+*no meeting matches* are distinct sentences; a meeting that flagged nothing is
+distinguished from one whose recogniser reported no confidence, and both from
+a meeting that kept no recording; Play Audio and Mark Reviewed are separate
+actionable controls and playback state stays on the candidate that owns it;
+Save says *Saved* only after the write, and a reviewed mark survives a quit and
+relaunch. No grouping, filtering, sorting control, fuzzy search, scrubber,
+autosave or navigation confirmation was added, and none was justified.
+
+**Artifact invariance, measured rather than asserted.** Across the whole
+session — eighteen meetings listed, searched, selected, read, one recording
+played, a mark written, a note saved, repeated reloads and a full relaunch —
+exactly one file in the save folder was written: `derived.json` in the single
+meeting the user acted on. Every `transcript.md`, `audio.m4a`, `session.json`
+and `review.json` was byte-identical afterwards, checked by digest.
+
+**Evidence limits.** Everything above was driven through the Accessibility API,
+not by a person: no human read the screen, and no VoiceOver was running. Audio
+playback was confirmed by the player's own control state rather than by
+listening. The meeting-finished reload was not reproduced with a real meeting;
+it is the same `load()` call as the Refresh button, which was. The full
+VoiceOver-with-no-mouse pass is still outstanding and belongs to Interval 25.
+
+## Feature freeze
+
+Feature freeze for v0.1.0 begins after Interval 24. Intervals 25 to 28 may fix
+release blockers and defects found through evidence, and may not add
+discretionary product features. Deferred product ideas — interrupted-session
+continuation, notes search, summaries, export, transcript editing, document
+management — do not become pre-release intervals.
+
 ## Next interval
 
 **Closed by Interval 23.** Whether an interrupted meeting should be continuable
@@ -3008,12 +3087,14 @@ files written by AVFoundation directly, and the recovery path they concern is
 covered by tests and by Interval 12's live SIGKILL run rather than by a fresh
 one.
 
-**Interval 24.** The evidence that cannot be automated is now the largest gap
-in the release, and it is the same one three intervals have named: a live
-first-run on a Mac that has not granted anything, driven by hand, with
-VoiceOver on. Nothing in the code needs to change for it; what it produces is
-either confirmation or a list of real defects, and either is worth more before
-v0.1.0 than another feature.
+**Interval 25.** The evidence that cannot be automated is now the only large
+gap left in the release, and it is the same one four intervals have named: a
+live first-run on a Mac that has not granted anything, driven by hand, with
+VoiceOver on and the mouse untouched. Interval 24 narrowed what it has to cover
+— History's controls, their labels and their keyboard routes are now known to
+be present and correct through the Accessibility API — but a person still has
+to hear them. Nothing in the code needs to change for it; what it produces is
+either confirmation or a list of real defects.
 
 ## Interval 22's closing note
 

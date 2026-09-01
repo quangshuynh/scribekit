@@ -9,9 +9,16 @@ Mac and go nowhere.
 
 Notes are saved when you press **Save**, and ScribeKit says *Saved* only after
 the file was actually written. Until then it says *Unsaved changes*; if a save
-fails it says why and your text stays in the editor. Leaving the meeting before
-saving discards the text you had not saved — there is no draft that survives
-leaving the screen, and the pane says so.
+fails it says why and your text stays in the editor. Selecting a different
+meeting before saving discards the text you had not saved — there is no draft
+that follows you to another meeting, and the pane says so.
+
+Text you have typed survives History rebuilding its listing. Returning to the
+History tab, pressing **Refresh** and a meeting finishing elsewhere all re-read
+the save folder, and none of them is you leaving the meeting: the same meeting
+stays selected and your unsaved text stays in the editor. If the notes file
+changed on disk in the meantime, the editor shows what is now on disk instead,
+because that is the version a save would have to land on.
 
 A reviewed mark, by contrast, is a discrete decision and is written the moment
 you make it. Marking a passage writes the notes already on disk, not the draft;

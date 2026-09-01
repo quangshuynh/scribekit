@@ -237,4 +237,49 @@ struct DerivedSessionModelTests {
         #expect(model.notesDraft.isEmpty)
         #expect(store.writeCount == 0)
     }
+
+    @Test("Re-reading the same meeting keeps text the user has not saved")
+    func reloadCarriesUnsavedDraft() async {
+        let model = makeModel(FakeDerivedSessionStore())
+        let meeting = session(sessionID: UUID())
+
+        await model.load(meeting, destination: nil)
+        model.notesDraft = "Half a thought about the rollback owner."
+        await model.load(meeting, destination: nil)
+
+        #expect(model.notesDraft == "Half a thought about the rollback owner.")
+        #expect(model.hasUnsavedNotes)
+        #expect(model.state == .ready)
+    }
+
+    @Test("Re-reading a meeting whose sidecar changed shows what is on disk")
+    func reloadPrefersChangedDisk() async throws {
+        let store = FakeDerivedSessionStore()
+        let model = makeModel(store)
+        let id = UUID()
+        let meeting = session(sessionID: id)
+
+        await model.load(meeting, destination: nil)
+        model.notesDraft = "A draft the editor never saved."
+
+        let elsewhere = DerivedSessionState(sessionID: id, notes: "Written elsewhere.", reviewedSpanIndexes: [])
+        store.plant(try elsewhere.encoded(), for: layout)
+
+        await model.load(meeting, destination: nil)
+
+        #expect(model.notesDraft == "Written elsewhere.")
+        #expect(!model.hasUnsavedNotes)
+    }
+
+    @Test("Selecting a different meeting still discards an unsaved draft")
+    func otherMeetingDiscardsDraft() async {
+        let model = makeModel(FakeDerivedSessionStore())
+
+        await model.load(session(sessionID: UUID()), destination: nil)
+        model.notesDraft = "Notes about the first meeting."
+        await model.load(session(sessionID: UUID()), destination: nil)
+
+        #expect(model.notesDraft.isEmpty)
+        #expect(!model.hasUnsavedNotes)
+    }
 }

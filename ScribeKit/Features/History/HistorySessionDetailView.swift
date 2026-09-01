@@ -349,7 +349,7 @@ struct HistorySessionDetailView: View {
 
                 Text("Your notes are Markdown source, kept in this meeting's folder beside the "
                      + "transcript and never written into it. They stay on this Mac. Unsaved text is "
-                     + "discarded if you leave this meeting before saving.")
+                     + "discarded if you select another meeting before saving.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
