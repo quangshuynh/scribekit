@@ -9,17 +9,18 @@ telemetry and no analytics, and the app ships without the network client
 entitlement, so the sandbox does not permit it to open a network connection at
 all.
 
-!!! note "Status: v0.1.0 release candidate — source only"
+!!! note "Status: v0.1.0 — source release"
 
-    ScribeKit is feature-frozen for its first release. Audio capture from
+    ScribeKit's first release is **v0.1.0**. Audio capture from
     selected applications, live on-device transcription, durable Markdown
     transcripts, pause and resume, crash recovery, optional audio retention,
     background operation with a menu bar item, transcript history and search,
     uncertainty review with playback, local meeting notes and diagnostic export
     all work end to end.
 
-    **There is no prebuilt signed or notarized download.** v0.1.0 ships as
-    source and is [built from source](getting-started/build-and-run.md). See
+    **There is no prebuilt signed or notarized download.** v0.1.0 is
+    published as source and is
+    [built from source](getting-started/build-and-run.md). See
     [Releases](reference/releases.md) for why, and
     [Limitations](reference/limitations.md) for what is not built.
 
