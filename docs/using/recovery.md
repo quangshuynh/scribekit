@@ -11,9 +11,19 @@ the finding for next time.
 ## What recovery does not do
 
 Recovery **does not resume a meeting**. It does not restart capture, does not
-start recognition, and does not rewrite recognised speech. Continuing an
-interrupted meeting into the same session is a planned feature, not an
-implemented one.
+start recognition, and does not rewrite recognised speech.
+
+Continuing an interrupted meeting into the same session is deliberately not
+offered. The interrupted session is preserved exactly as it is, you can mark it
+as interrupted, and **starting a new meeting** is how you carry on recording and
+transcribing; the two transcripts stay two honest documents rather than one
+document with an invented middle. The reasons are concrete: a session's
+retained recording is replaced rather than extended if it is opened for writing
+again, an unfinalised `audio.m4a` cannot even be read back, and a meeting that
+was killed while capturing recorded no captured length for a later run to
+continue its media offsets from. Continuing without lying about the timeline
+would mean a second recording file per session, which is a change to what a
+session is rather than a control on a screen.
 
 Recovery also does not pretend a crashed meeting completed. Reading a record
 back may not invent what was never written: not the moment the process stopped,

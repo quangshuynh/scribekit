@@ -653,6 +653,30 @@ struct MarkdownTranscriptStoreTests {
         #expect(layout.metadataURL.path(percentEncoded: false).hasSuffix(".scribekit/session.json"))
     }
 
+    /// Establishes the other constraint that decided Interval 23: a meeting
+    /// that is still running has recorded no captured length to continue from.
+    ///
+    /// The record is written at the start, at each pause, at each resume and
+    /// at the close, and nothing checkpoints it in between, so a meeting
+    /// killed while capturing leaves `capturedDuration` absent. Continuing
+    /// such a session would have to reconstruct the media offset the next span
+    /// starts at from the recording or from the transcript — a guess rather
+    /// than a measurement, which is why nothing offers to.
+    @Test("A running meeting has recorded no captured length to continue from")
+    func startRecordsNoCapturedDuration() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+
+        let layout = try await start(store)
+        try await store.appendFinalSegment(segment("Recognised while capturing.", start: 12))
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+
+        #expect(record.status == .inProgress)
+        #expect(record.capturedDuration == nil)
+        #expect(record.pausedAt == nil)
+        #expect(recoveryStore.writes.count == 1)
+    }
+
     @Test("The record names the recording a meeting is keeping", arguments: [
         (AudioRetentionMode.raw, "audio.caf"),
         (AudioRetentionMode.compressed, "audio.m4a")

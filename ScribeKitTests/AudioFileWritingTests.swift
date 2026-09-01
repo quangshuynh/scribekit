@@ -160,6 +160,30 @@ struct AudioFileWritingTests {
         }
     }
 
+    /// Establishes the constraint that decided Interval 23: a session's
+    /// retained recording cannot be continued by writing to it again.
+    ///
+    /// `AVAudioFile` opens a file for writing by replacing it, so a second run
+    /// over a session's audio URL starts at frame zero and the audio the first
+    /// run captured is gone. Continuing an interrupted meeting into its own
+    /// session would therefore have to write a second file rather than reopen
+    /// this one, whatever the retention mode — which is a change to the
+    /// session's artifact layout, not a persistence detail.
+    @Test("Reopening a session's recording replaces it rather than continuing it")
+    func reopeningTheRecordingReplacesIt() throws {
+        try withFolder { directory in
+            let first = try write(.raw, seconds: 2, in: directory)
+            let lengthAfterFirstRun = try AVAudioFile(forReading: first).length
+
+            let second = try write(.raw, seconds: 1, in: directory)
+
+            #expect(second == first)
+            #expect(lengthAfterFirstRun == 96_000)
+            // One second, not three: the first run's audio was replaced.
+            #expect(try AVAudioFile(forReading: second).length == 48_000)
+        }
+    }
+
     @Test("Audio in another format is refused rather than written")
     func mismatchedFormatIsRefused() throws {
         try withFolder { directory in

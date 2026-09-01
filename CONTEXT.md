@@ -5,7 +5,9 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 22 — diagnostics and supportability. Complete.
+Interval 23 — interrupted-session continuation. Investigated and decided
+against for v0.1.0; no production change. See *Interrupted-session
+continuation* below.
 
 ## Current implementation
 
@@ -1058,6 +1060,78 @@ worth preventing is writing it twice. An interruption is therefore at worst
 recorded without its note, never noted twice, and a note that cannot be appended
 is reported.
 
+## Interrupted-session continuation
+
+Interval 23 asked one question — should an interrupted meeting be continuable
+into the same session before v0.1.0 — and answered **no**. The answer is a
+decision backed by two measurements, not a scoping compromise, and the code is
+unchanged.
+
+Five cases were kept apart, because reusing one's machinery for another would
+weaken it. Pause and resume inside one process is the only one that resumes
+anything, and it is implemented. Capture ending under a running ScribeKit
+closes the meeting as `interrupted` with a dated marker. A killed process
+leaves a record saying `inProgress`. A relaunch finds that record and offers to
+mark it interrupted. A session already `interrupted` is a closed account of a
+meeting. Continuation would be a sixth thing: a second capture run appended to
+a session a previous process left behind.
+
+**What was measured.**
+
+- **A retained recording cannot be reopened and continued.** `AVAudioFile`
+  opens a file for writing by replacing it: a second writer over an existing
+  `audio.caf` reports `framePosition == 0` and the finished file holds only the
+  second run — the first run's audio is gone. Measured in a standalone harness
+  and then pinned as a test against the shipping `AVAudioFileCreator`. This
+  falsifies the assumption that raw CAF is the easy case: it is not merely
+  unsupported, reusing the path is destructive. Appending would need a
+  different file-writing implementation altogether, and none exists here.
+- **An unfinalised `audio.m4a` is still unreadable.** Reproduced independently
+  of Interval 12's SIGKILL run, by writing AAC and leaving the process without
+  releasing the file: `ExtAudioFileOpenURL` refuses it. There is nothing to
+  continue, and repairing an MPEG-4 container is not something ScribeKit does.
+- **A meeting killed while capturing has recorded no captured length.**
+  `session.json` is written at the start, at each pause, at each resume and at
+  the close, and nothing checkpoints it in between, so the record left by the
+  case continuation exists for carries `capturedDuration == nil`. Pinned as a
+  test. The remaining candidates for a restart base are the recording's own
+  duration — unreadable for a killed M4A, and absent when retention is
+  `none` — and the transcript's last span, which under-reports by whatever was
+  captured but never finalised. Continuation would therefore start its offsets
+  from a guess, and an offset that names the wrong second of a recording is
+  exactly the thing the two-clock rule exists to prevent.
+
+**What follows.** Honest continuation needs a second recording per session:
+`audio-0001.caf`, `audio-0002.caf`. That is not a persistence tweak. It changes
+what a session directory is; `session.json`'s `audioPath` from one name to a
+list, at six call sites that resolve exactly one URL; `review.json`, whose
+candidates carry bare `startTime`/`endTime` seconds and no segment identity, so
+review playback could no longer turn an offset into a file; History's
+presentation of a recording; and the Finder actions in the menu bar and the
+menus. Every session recorded before the change would need reading through the
+old shape as well. That is a persistence-format change immediately before a
+first release, for a condition that recovery already handles truthfully.
+
+The transcript side is no cheaper. `TranscriptFileStoring.createFile` truncates
+an existing file — `FileManager.createFile` returns `true` and leaves zero
+bytes, checked — so continuation would need a new open-for-append path on the
+canonical artifact's write path. And the entry point could only ever be an
+`inProgress` session that has not yet been marked: an `interrupted` one already
+carries its footer and its interruption note, and appending speech after those
+would make the document state an ending in its middle. "You may continue a
+meeting, but only if you have not pressed the one button recovery offers" is
+not a user model worth shipping.
+
+**What was not done.** No production code was written, no abstraction was left
+half-wired, and the probe harness was deleted; what survives is the two tests
+that establish the constraints. `ScreenCaptureKitAudioCapturer.stop()` and
+`removeStreamOutput(_:type:)` were left alone: no continuation testing reached
+a stream lifecycle, so nothing implicates it.
+
+**What a user does instead.** Keep the interrupted session — its transcript
+holds every finalised span that reached the file — mark it as interrupted, and
+start a new meeting. Two truthful documents, and nothing invented between them.
+
 ## History discovery
 
 `HistoryService.load(_:)` lists the immediate children of the folder the user
@@ -1581,6 +1655,21 @@ atomically, and reports a failure rather than presenting a partial file as a
 success. Nothing is uploaded and no entitlement was added.
 
 ## Validation status
+
+### Interval 23 validation
+
+- Two standalone AVFoundation probes, run outside the app and then deleted:
+  reopening an existing `audio.caf`/`audio.m4a` for writing truncates it to
+  zero and the finished file holds only the second run; an AAC file left by a
+  process that exited without releasing it (67 KB of encoded audio) is refused
+  by `ExtAudioFileOpenURL`.
+- `FileManager.createFile` over an existing transcript returns `true` and
+  leaves the file empty. Checked in one line, not shipped as a test: nothing in
+  ScribeKit calls it on a file that exists.
+- Two tests added, both passing: *Reopening a session's recording replaces it
+  rather than continuing it* and *A running meeting has recorded no captured
+  length to continue from*.
+- Full clean `xcodebuild ... test` on macOS and `mkdocs build --strict`.
 
 ### Interval 22 validation
 
@@ -2775,15 +2864,11 @@ intervals; the capture observations above were taken through the same path.
   recording around a flagged passage. It offers no way to play a meeting from
   the top, no scrubber and no waveform, and it still never decodes a recording
   merely to list it.
-- **Pause and resume are not implemented, and were deliberately left out.**
-  Doing it honestly means deciding what a resumed run means for two timelines
-  at once: the transcript's offsets, which are measured from the first captured
-  frame, and the retained recording, which is one file with one time origin.
-  Splicing discontinuous audio into that file would silently break the
-  alignment between recording and transcript that Interval 8 established, and
-  the alternative — a second file, or a gap of real silence — is a format
-  decision, not a control. `MeetingState.paused` stays unused, and the menu bar
-  offers no Pause rather than a fake one.
+- **Pause and resume work within one process only.** Interval 12 implemented
+  them — see *Pause and resume* above — by keeping one file with one time
+  origin and letting captured media time stop while wall-clock time does not.
+  Nothing carries that across a process: a meeting that was paused when
+  ScribeKit stopped is offered for recovery, not for resumption.
 - No throttling boundary exists between the runtime and the interface. A closed
   window renders nothing because its scene is gone; a merely hidden one is
   still evaluated by SwiftUI, and the measurement that would justify building a
@@ -2839,8 +2924,10 @@ intervals; the capture observations above were taken through the same path.
 - Audio and CPU were observed on one Mac, in a Debug build, over one-minute
   windows. A multi-hour retention run has not been measured.
 - Recovery recovers the artifact and the record, not the meeting. It never
-  resumes capture or recognition; continuing into the same session is a later
-  interval, and was left out deliberately rather than half-built.
+  resumes capture or recognition, and continuing into the same session is not
+  a later interval any more: Interval 23 investigated it and decided against it
+  for v0.1.0, for the reasons in *Interrupted-session continuation* above. The
+  answer to an interrupted meeting is to keep it and start a new one.
 - Surviving a power loss depends on the flush every 25 appends and at Stop, so
   an abrupt power cut can cost the appends since the last one. ScribeKit does
   not claim to be crash-proof.
@@ -2901,6 +2988,34 @@ intervals; the capture observations above were taken through the same path.
   What a first-time user makes of the save panel's wording is unmeasured.
 
 ## Next interval
+
+**Closed by Interval 23.** Whether an interrupted meeting should be continuable
+into the same session is answered, and the answer is no for v0.1.0. It is
+answered with measurements rather than with an estimate of effort: a retained
+recording is replaced rather than extended when it is reopened, an unfinalised
+M4A cannot be read at all, and the record a killed meeting leaves has no
+captured length to continue offsets from. The documentation says so plainly,
+the roadmap no longer lists continuation as planned, and two tests hold the
+constraints in place.
+
+**Open.** Everything Interval 22 left open is still open: the
+VoiceOver-with-no-mouse human pass, source disappearance during a running
+capture, `ScreenCaptureKitAudioCapturer.stop()` not calling
+`removeStreamOutput(_:type:)` since Interval 15, and the visible-presentation
+cost Interval 18 profiled. New and honest: nothing here was validated against a
+real interrupted meeting on this Mac either — the constraints were measured on
+files written by AVFoundation directly, and the recovery path they concern is
+covered by tests and by Interval 12's live SIGKILL run rather than by a fresh
+one.
+
+**Interval 24.** The evidence that cannot be automated is now the largest gap
+in the release, and it is the same one three intervals have named: a live
+first-run on a Mac that has not granted anything, driven by hand, with
+VoiceOver on. Nothing in the code needs to change for it; what it produces is
+either confirmation or a list of real defects, and either is worth more before
+v0.1.0 than another feature.
+
+## Interval 22's closing note
 
 **Closed by Interval 22.** ScribeKit can now be supported without being
 trusted. Its own transitions and failures are named in the unified log under

@@ -36,10 +36,19 @@ implemented or not — nothing is described here as working before it is.
 | 17 | Soak and interface performance | Done |
 | 18 | Runtime-truth profiling | Done |
 | 19 | Presentation lifecycle, and explicit AM/PM in transcript times | Done |
+| 20 | Start readiness, and endings described rather than implied | Done |
+| 21 | Application menus, keyboard routes and accessible presentation | Done |
+| 22 | Local diagnostics and supportability | Done |
+| 23 | Interrupted-session continuation: investigated, deferred | Decided |
 
-## Planned, not available
+## Not planned for the first release
 
-- Continuing an interrupted meeting into the same session.
+- **Continuing an interrupted meeting into the same session.** Investigated in
+  Interval 23 and deferred: it cannot be done without a second recording file
+  per session, and a meeting killed while capturing has recorded no captured
+  length to continue its offsets from. An interrupted meeting is preserved and
+  a new meeting is started instead. See
+  [Limitations](limitations.md) and [Recovery](../using/recovery.md).
 
 Measured evidence gathered along the way — long-session soaks, retention-mode
 costs, profiling results and the crash they surfaced — is recorded in

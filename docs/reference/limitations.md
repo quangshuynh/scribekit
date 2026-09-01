@@ -5,9 +5,16 @@ are consequences of decisions, and several of them are deliberate.
 
 ## Not built
 
-- **No continuation of an interrupted meeting.** Recovery records the
-  interruption and leaves the transcript closed; continuing into the same
-  session is planned, not available.
+- **No continuation of an interrupted meeting.** An unfinished meeting is
+  preserved and can be marked as interrupted; ScribeKit does not append a
+  later capture run to it. Start a new meeting to carry on recording and
+  transcribing. This is a decision, not an omission: a retained recording
+  cannot be reopened and written to without replacing it, a meeting killed
+  while capturing has recorded no captured length for a later run to continue
+  its offsets from, and continuing honestly would mean a second audio file per
+  session — which changes what a session directory is, what `session.json`
+  names and how review playback finds the audio for an offset. See
+  [Recovery](../using/recovery.md).
 - **No editing, renaming, deleting or exporting.** Transcript history is
   read-only; the files are yours to manage in the Finder.
 - **No search over your notes.** History's search runs over titles,
