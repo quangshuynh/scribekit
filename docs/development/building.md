@@ -37,3 +37,39 @@ block the other. See [Documentation](documentation.md).
 ScribeKit prefers Apple platform frameworks over third-party dependencies. A
 dependency is added only when the platform genuinely cannot do the job, and the
 pull request has to say why.
+
+## Distribution
+
+A distributable ScribeKit is a Developer ID signed, notarized and stapled disk
+image, `ScribeKit-<version>.dmg`, holding `ScribeKit.app` beside an
+`Applications` alias. `Tools/Release/package.sh` runs the sequence: archive,
+export, verify, notarize, staple, build the image, notarize and staple the
+image, and report the Gatekeeper assessment and the SHA-256.
+
+It stores no credentials. Notarization reads a `notarytool` keychain profile,
+created once and interactively so no secret is ever written to the repository
+or to a shell history:
+
+```bash
+xcrun notarytool store-credentials ScribeKit --apple-id <apple-id> --team-id <team-id>
+```
+
+Set `SCRIBEKIT_NOTARY_PROFILE` to use a differently named profile. Everything
+the script writes lands in `build/release`, which is not tracked.
+
+**The signing half of this has never run.** Distribution requires a paid Apple
+Developer Program membership: a Developer ID Application certificate cannot be
+issued to a personal team, and Apple's notary service is not available to one
+either. This project currently has a personal team, so the archive step is the
+last step that has been exercised. What that archive proves is recorded in
+[Releases](../reference/releases.md); an Apple Development signature is not a
+substitute, and neither is ad-hoc signing, because neither passes Gatekeeper on
+another Mac.
+
+## The application icon
+
+`Tools/AppIcon/make-appicon.swift` regenerates the ten macOS representations in
+`ScribeKit/Assets.xcassets/AppIcon.appiconset` from the brand mark in
+`docs/images/scribekit-logo2.png`. Run it from the repository root after
+changing the mark; the generated PNGs are tracked, because the build needs
+them.

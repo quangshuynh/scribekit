@@ -5,14 +5,17 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 25 — release hardening and manual evidence. The automated gates all
-pass, and the human evidence four intervals had deferred was collected: a
-person drove a real meeting end to end, listened to VoiceOver, worked the
-application without a mouse and inspected it in both appearances. One
-documentation-truth release blocker was found and fixed — the published minimum
-macOS version — and the accessibility and Help-menu pages were corrected to
-match what the application does. No production code changed. See *Interval 25
-validation* below. **Feature freeze for v0.1.0 remains in force.**
+Interval 26 — final application identity and macOS distribution. The identity
+is frozen and the icon is real: ScribeKit builds as 0.1.0, build 1,
+`quang.ScribeKit`, macOS 26.5 or later, arm64, with an application icon in
+every asset-catalog slot. A Release archive was produced and inspected, and it
+carries the intended entitlements with the hardened runtime on and
+`get-task-allow` gone. **Distribution stops there.** A Developer ID Application
+certificate cannot be issued to a personal team and Apple's notary service is
+not available to one, so there is no export, no notarization, no DMG and no
+packaged install, and Interval 26 closes as *not ready — distribution blocker
+remains*. See *Interval 26* below. **Feature freeze for v0.1.0 remains in
+force.**
 
 ## Current implementation
 
@@ -3236,14 +3239,79 @@ cost Interval 18 profiled. Still unresolved as evidence: a real permission
 denial, and a pristine first install — the latter belongs with the packaged
 artifact in Interval 26.
 
-**Interval 26 inherits a packaging list, not a code list.** The application's
-version metadata still says `1.0`/`1` and must become `0.1.0` with a real build
-number; the bundle identifier `quang.ScribeKit` is a decision that has not been
-made deliberately; the locally signed build carries `get-task-allow`, which a
-Developer ID export must not; and the deployment target is settled at 26.5
-unless a 26.0–26.4 machine becomes available to test a lower one against.
-Signing identity, notarization credentials, archive and export, the DMG,
-Gatekeeper and a fresh packaged installation all belong there.
+**Interval 26 froze the identity and hit a wall it cannot climb from here.**
+The packaging list it inherited is half done, and the half that is done is
+done with tool evidence rather than assertion.
+
+*Settled, and verified in a built artifact rather than in the project file.*
+The marketing version is `0.1.0` and the build number is `1`, which is what a
+first build of a first release is; the built `Info.plist` says so. The bundle
+identifier stays `quang.ScribeKit`. It was reviewed rather than assumed: it is
+the sandbox container and the security-scoped bookmark scope every meeting on
+this Mac already uses, Developer ID signing and notarization place no
+constraint on it, and changing identity days before a first release would
+invalidate existing preferences and bookmarks to buy nothing. The deployment
+target agrees at all three levels — project `MACOSX_DEPLOYMENT_TARGET`, built
+`LSMinimumSystemVersion`, Mach-O `LC_BUILD_VERSION minos` — at 26.5, and the
+executable is `arm64` alone.
+
+*The icon exists.* Twenty-five intervals shipped the generic placeholder,
+because `AppIcon.appiconset` declared ten macOS slots and named no files. All
+ten are now generated from the brand mark the README and the documentation site
+already use, which was already an app-icon composition: no wordmark, no
+tagline, nothing that dissolves at 16 points. It is placed on Apple's icon grid
+— an 824 pt body centred on 1024 — so ScribeKit sits at the same visual size as
+its neighbours in the Dock, and `Tools/AppIcon/make-appicon.swift` records how
+it was produced rather than leaving ten PNGs of unknown provenance. The built
+bundle carries `AppIcon.icns` and `CFBundleIconName`.
+
+*The entitlement gap Interval 25 flagged is closed at the archive.* A Release
+archive's application is signed with the hardened runtime enabled
+(`flags=0x10000(runtime)`) and carries exactly three entitlements — App
+Sandbox, app-scoped bookmarks, user-selected read/write. No network client.
+**No `get-task-allow`**: the archive action strips it, so the thing Interval 25
+saw in a local Debug-signed build was an artifact of local signing rather than
+of the configuration. This is deterministic tool evidence read off the archived
+binary, not inference from the entitlements file.
+
+*The disk image layout works.* `hdiutil` was run over a staging folder holding
+`ScribeKit.app` and an `Applications` symlink, and the mounted image contained
+those two things and nothing else: 2.7 MB compressed from a 4.3 MB application.
+That image was deleted rather than kept, because an unnotarized image is not a
+release candidate and should not be mistaken for one.
+
+*What blocks, and it is not a configuration problem.* There is no Developer ID
+Application identity on this Mac — `security find-identity -v -p codesigning`
+finds one Apple Development certificate — and no `notarytool` keychain profile.
+Neither can be created: the Apple account behind this project is a **personal
+team**, and a personal team can be issued no Developer ID certificate and given
+no access to the notary service. That is a paid Apple Developer Program
+membership, which is a decision with a price on it rather than a command to
+run, and the decision taken this interval was not to enrol. There is therefore
+no exported Developer ID application, no notarization submission, no stapled
+artifact, no `ScribeKit-0.1.0.dmg`, no SHA-256, no Gatekeeper assessment, no
+packaged installation into `/Applications`, and no packaged capture. None of
+that was simulated, and an Apple Development signature was not substituted for
+a distribution one: it would not pass Gatekeeper on another Mac, so it would be
+evidence of nothing.
+
+*Still open as evidence, and now for a stated reason.* The pristine packaged
+first install Interval 25 handed here is **not** closed, and neither is the
+real permission denial that would most likely have surfaced during it. Both
+wait on an artifact that can be installed, which waits on the certificate. The
+application icon has not been approved by eye in Finder, the Dock or
+`/Applications` either.
+
+**Interval 27 inherits a fork, not a queue.** With a membership, what remains is
+mechanical and `Tools/Release/package.sh` records it: `DEVELOPMENT_TEAM` moves
+off the personal team `W785GN4X52` to the new one, credentials are stored in the
+keychain, and the script's unexercised half — export, notarize, staple, image,
+Gatekeeper — runs for the first time, followed by the fresh-account packaged
+install, the packaged smoke test and the network check. Without one, ScribeKit's
+distribution story is *build it from source*, and the README, the documentation
+and the release notes have to say that plainly rather than implying a download
+that does not exist. Either way ScribeKit is not released, and nothing here is
+a tag.
 
 ## Interval 22's closing note
 
