@@ -2,7 +2,40 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.1.0 — Unreleased
+
+The first release of ScribeKit, published as source. There is no signed or
+notarized application: v0.1.0 is built from source, and everything it does
+happens on the Mac that builds it.
+
+**What it does.** Captures audio from the applications you select through
+ScreenCaptureKit — not the whole system and not a microphone — and transcribes
+it with Apple's on-device `SpeechAnalyzer`/`SpeechTranscriber` against a model
+installed locally, with no network fallback. Finalised speech is appended to a
+timestamped Markdown `transcript.md` in a folder you chose, readable in any
+editor while the meeting runs. A meeting can be paused and resumed on separate
+wall-clock and captured-media clocks, keeps running when its window is closed,
+and can be stopped from a menu bar item. Audio is retained only if you ask, as
+raw `.caf` or compressed `.m4a`. Finished meetings are read back through a
+read-only History with local substring search, an uncertainty review that
+plays retained audio back at the passage in question, and Markdown notes kept
+in a sidecar that cannot reach the transcript. A meeting the process did not
+survive is recovered on the next launch and recorded as interrupted rather than
+completed. A local diagnostic report can be exported; it carries counts and
+states only and is uploaded nowhere.
+
+**Requirements.** macOS 26.5 or later, tested on Apple Silicon; Xcode 26 or
+later to build; the on-device speech model for the recognition language must
+already be installed; Screen & System Audio Recording permission.
+
+**Known limitations.** No signed or notarized download. No continuation of an
+interrupted meeting as the same session. No editing, renaming, deleting or
+exporting from History, and a transcript restructured outside ScribeKit can
+stop History parsing it. Nothing is encrypted. Compressed audio cut short by an
+abrupt process death may be unreadable. Recognition accuracy is Apple's
+recogniser's. The full list is in the documentation's *Limitations* page.
+
+The detail behind all of it follows.
 
 ### Added
 

@@ -57,14 +57,13 @@ xcrun notarytool store-credentials ScribeKit --apple-id <apple-id> --team-id <te
 Set `SCRIBEKIT_NOTARY_PROFILE` to use a differently named profile. Everything
 the script writes lands in `build/release`, which is not tracked.
 
-**The signing half of this has never run.** Distribution requires a paid Apple
-Developer Program membership: a Developer ID Application certificate cannot be
-issued to a personal team, and Apple's notary service is not available to one
-either. This project currently has a personal team, so the archive step is the
-last step that has been exercised. What that archive proves is recorded in
+**The signing half of this has never run.** A Developer ID Application
+certificate and Apple's notary service both require a paid Apple Developer
+Program membership, which this release does not have, so the archive step is
+the last step that has been exercised. What that archive proves is recorded in
 [Releases](../reference/releases.md); an Apple Development signature is not a
 substitute, and neither is ad-hoc signing, because neither passes Gatekeeper on
-another Mac.
+another Mac. v0.1.0 therefore ships as source.
 
 ## The application icon
 

@@ -3,6 +3,19 @@
 What ScribeKit does not do, stated plainly. Nothing here is a bug report; these
 are consequences of decisions, and several of them are deliberate.
 
+## Platform and distribution
+
+- **macOS 26.5 or later, and Apple Silicon.** Earlier macOS versions are not
+  supported and will refuse to launch the build. Apple Silicon is the only
+  architecture ScribeKit has been built and validated on; the project produces
+  a universal binary, but Intel is untested.
+- **No signed or notarized application.** v0.1.0 is a source release: there is
+  no disk image and no download to install, and ScribeKit must be built from
+  source. Signed distribution is deferred. See
+  [Releases](releases.md).
+- **The on-device speech model must already be installed** for the recognition
+  language. ScribeKit does not download models and has no network fallback.
+
 ## Not built
 
 - **No continuation of an interrupted meeting.** An unfinished meeting is
