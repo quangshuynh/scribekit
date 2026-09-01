@@ -214,4 +214,67 @@ struct HistoryModelTests {
         #expect(document.spans.map(\.text) == ["Nothing blocking today."])
         #expect(model.document(for: directory("nothing-here")) == nil)
     }
+
+    // MARK: - Reload and the selected meeting
+
+    /// A model whose derived state is written to an in-memory sidecar.
+    ///
+    /// - Parameter store: The sidecar.
+    /// - Returns: The History model and the derived model it owns.
+    private func makeModelWithDerived(
+        _ store: FakeHistoryStore,
+        derivedStore: FakeDerivedSessionStore
+    ) -> (HistoryModel, DerivedSessionModel) {
+        let derived = DerivedSessionModel(
+            service: DerivedSessionService(store: derivedStore, access: FakeSecurityScopedAccess())
+        )
+        let model = HistoryModel(
+            service: HistoryService(store: store, access: FakeSecurityScopedAccess()),
+            saveLocation: FakeHistorySaveLocation(folder: destination),
+            derived: derived
+        )
+        return (model, derived)
+    }
+
+    @Test("A reload leaves the selected meeting's notes and marks usable")
+    func reloadKeepsDerivedAttached() async throws {
+        let (model, derived) = makeModelWithDerived(try makeStore(), derivedStore: FakeDerivedSessionStore())
+        await model.load()
+        let selected = directory("2026-08-29-standup")
+        await model.selectSession(selected)
+        #expect(derived.isEditable)
+
+        await model.load()
+
+        #expect(derived.isEditable, "a rebuilt listing must not detach the meeting still on screen")
+        #expect(derived.state == .ready)
+    }
+
+    @Test("A reload keeps notes the user has typed but not saved")
+    func reloadKeepsUnsavedNotes() async throws {
+        let (model, derived) = makeModelWithDerived(try makeStore(), derivedStore: FakeDerivedSessionStore())
+        await model.load()
+        await model.selectSession(directory("2026-08-29-standup"))
+        derived.notesDraft = "Ask about the migration deadline."
+
+        await model.load()
+
+        #expect(derived.notesDraft == "Ask about the migration deadline.")
+        #expect(derived.hasUnsavedNotes)
+    }
+
+    @Test("A reload detaches a meeting that is no longer in the folder")
+    func reloadDetachesMissingMeeting() async throws {
+        let store = try makeStore()
+        let (model, derived) = makeModelWithDerived(store, derivedStore: FakeDerivedSessionStore())
+        await model.load()
+        await model.selectSession(directory("2026-08-29-standup"))
+        #expect(derived.isEditable)
+
+        store.removeSession(directory("2026-08-29-standup"), in: destination)
+        await model.load()
+
+        #expect(derived.state == .idle)
+        #expect(derived.notesDraft.isEmpty)
+    }
 }

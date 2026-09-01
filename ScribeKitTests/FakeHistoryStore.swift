@@ -121,6 +121,18 @@ nonisolated final class FakeHistoryStore: HistoryStoring, @unchecked Sendable {
         }
     }
 
+    /// Removes a session directory from the save folder, as deleting it in the
+    /// Finder between two listings would.
+    ///
+    /// - Parameters:
+    ///   - directory: The session directory to drop.
+    ///   - destination: The save folder it sat in.
+    func removeSession(_ directory: URL, in destination: URL) {
+        state.withLock {
+            $0.directories[Self.key(destination)]?.removeAll { Self.key($0) == Self.key(directory) }
+        }
+    }
+
     func failListing() { state.withLock { $0.listingFails = true } }
 
     /// Makes one session record present but impossible to read.
