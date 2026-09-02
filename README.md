@@ -17,10 +17,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"></a>
 </p>
 
-> ### Status: v0.1.0 release candidate — source only
+> ### Status: v0.1.0 — source release
 >
-> ScribeKit is feature-frozen for its first release. **There is no prebuilt
-> signed or notarized download.** v0.1.0 ships as source, and you
+> ScribeKit's first release is **v0.1.0**, published as source. **There is no
+> prebuilt signed or notarized download.** You
 > [build it yourself](#build-from-source). Nothing about that is a network
 > requirement: ScribeKit runs entirely on your Mac either way.
 

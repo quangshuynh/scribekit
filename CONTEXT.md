@@ -5,7 +5,7 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 27 — the v0.1.0 source-release presentation. No product code changed.
+Interval 28 — the v0.1.0 release. No product code changed since Interval 25.
 The identity frozen in Interval 26 stands: ScribeKit builds as 0.1.0, build 1,
 `quang.ScribeKit`, macOS 26.5 or later, with an application icon in every
 asset-catalog slot — **now human-approved as final for v0.1.0** in Finder and
@@ -16,8 +16,16 @@ limitations page and the releases page all say so in current-facing terms
 rather than as a pending blocker. The repository now carries three screenshots
 and a real 45-second demo of synthetic content, both build-from-source paths
 were verified against a clean clone, and the exact v0.1.0 tag, title and
-release notes are drafted below for Interval 28 to publish. **Feature freeze
-for v0.1.0 remains in force.**
+release notes are recorded below.
+
+Interval 28 verified the release commit end to end from a clean worktree —
+full test suite, Release build, the documented ad-hoc source build, strict
+documentation build, bundle metadata read off the built artifact, README
+assets and links, and a secret and personal-content scan — and turned the
+current-facing wording from *release candidate* to *source release*, dated the
+changelog entry and stated the tag on the releases page. **Feature freeze for
+v0.1.0 remains in force.** Publication itself — merge, tag, push and the
+GitHub release — waits on explicit human authorization and is not done here.
 
 One correction to Interval 26's record: the archived executable is a
 **universal `x86_64 arm64` binary**, not `arm64` alone — the project sets no
@@ -3231,9 +3239,9 @@ VoiceOver-with-no-mouse pass is still outstanding and belongs to Interval 25.
 
 ## v0.1.0 GitHub release draft
 
-Prepared in Interval 27, **not published**. No tag exists, no GitHub release
-exists, and no artifact is attached — the release carries source only.
-Interval 28 publishes this verbatim, adjusting only what has actually changed.
+Prepared in Interval 27 and verified against the source and documentation in
+Interval 28. No artifact is attached — the release carries source only. This is
+the text to paste into the GitHub release verbatim.
 
 **Tag:** `v0.1.0`
 **Title:** `ScribeKit v0.1.0`
@@ -3283,7 +3291,7 @@ A free Apple ID is enough to build and run it; select your own team in Xcode's
 ## Requirements
 
 - macOS 26.5 or later
-- Tested on Apple Silicon (a universal binary is built; Intel is untested)
+- Tested on Apple Silicon only; Intel is untested
 - Xcode 26 or later, to build
 - The on-device speech model for your recognition language, already installed
 - Screen & System Audio Recording permission

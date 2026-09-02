@@ -8,9 +8,15 @@ entirely on your Mac, with no account and no network.
 
 ## v0.1.0
 
+Tagged **`v0.1.0`**. The release carries the source only: the archives GitHub
+generates for the tag, and no binary attachment — no disk image, no
+application archive, no installer. Requires **macOS 26.5 or later**, and has
+been **tested on Apple Silicon only**. A Release *archive* of this source is a
+universal `x86_64 arm64` binary, but the Intel slice has never been run; an
+ordinary `xcodebuild build` produces a binary for the Mac that builds it.
+
 The application's release identity is frozen. It builds as version **0.1.0**,
-build **1**, bundle identifier **`quang.ScribeKit`**, requiring **macOS 26.5 or
-later** and tested on Apple Silicon; the identifier is the one every existing
+build **1**, bundle identifier **`quang.ScribeKit`**; the identifier is the one every existing
 sandbox container and security-scoped bookmark on a developer's Mac already
 uses, and it was kept rather than changed on the eve of a first release. A
 Release archive carries the App Sandbox, app-scoped bookmarks and user-selected
@@ -66,6 +72,7 @@ implemented or not — nothing is described here as working before it is.
 | 25 | Release hardening and manual evidence | Done |
 | 26 | Application identity, icon and macOS distribution | Done — distribution deferred |
 | 27 | v0.1.0 source-release presentation | Done |
+| 28 | v0.1.0 release verification and publication | Done |
 
 ## Not planned for the first release
 

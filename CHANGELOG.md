@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.1.0 — Unreleased
+## 0.1.0 — 2026-09-01
 
 The first release of ScribeKit, published as source. There is no signed or
 notarized application: v0.1.0 is built from source, and everything it does
