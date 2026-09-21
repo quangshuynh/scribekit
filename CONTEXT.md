@@ -5,34 +5,34 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 28 — the v0.1.0 release. No product code changed since Interval 25.
-The identity frozen in Interval 26 stands: ScribeKit builds as 0.1.0, build 1,
-`quang.ScribeKit`, macOS 26.5 or later, with an application icon in every
-asset-catalog slot — **now human-approved as final for v0.1.0** in Finder and
-the Dock. The distribution decision is settled and public: **v0.1.0 is a source
-release.** No signed or notarized application is published, no disk image is
-advertised, and the README, the docs site, the requirements page, the
-limitations page and the releases page all say so in current-facing terms
-rather than as a pending blocker. The repository now carries three screenshots
-and a real 45-second demo of synthetic content, both build-from-source paths
-were verified against a clean clone, and the exact v0.1.0 tag, title and
-release notes are recorded below.
+Interval 29 — transcription-gap incidents. The first work after v0.1.0, and
+unreleased: the tag, the release notes and the changelog entry for 0.1.0 are
+untouched.
 
-Interval 28 verified the release commit end to end from a clean worktree —
-full test suite, Release build, the documented ad-hoc source build, strict
-documentation build, bundle metadata read off the built artifact, README
-assets and links, and a secret and personal-content scan — and turned the
-current-facing wording from *release candidate* to *source release*, dated the
-changelog entry and stated the tag on the releases page. **Feature freeze for
-v0.1.0 remains in force.** Publication itself — merge, tag, push and the
-GitHub release — waits on explicit human authorization and is not done here.
+A real meeting produced a transcript flooded with near-identical warnings —
+one `> **Transcription gap:** approximately 0.5 seconds …` blockquote roughly
+every half second, for minutes. That was truthful and unreadable. The pipeline
+was reporting *observations* of a continuing condition as if each were a
+separate gap.
 
-One correction to Interval 26's record: the archived executable is a
-**universal `x86_64 arm64` binary**, not `arm64` alone — the project sets no
-`ARCHS` and takes the standard architectures. `LC_BUILD_VERSION minos` 26.5
-still holds. Public wording therefore says *tested on Apple Silicon* and
-states that Intel is untested, rather than claiming either support or an
-arm64-only build.
+Gap observations are now accumulated into a **`TranscriptGapIncident`** and
+written as one marker when the incident ends. A marker states two quantities
+and keeps them apart: the range the incident spanned, and the audio it actually
+cost. The total is a sum over distinct discarded buffers — the bounded backlog
+hands each evicted buffer back exactly once — and is never derived from the
+range, because recognition goes on transcribing between the losses.
+
+What closes an incident is evidence, not a delay. `TranscriptionAudioInput`
+reports `closesIncident` once the backlog has accepted a full capacity of audio
+without having to evict any of it, which it could not do while still full;
+`MeetingRuntime` additionally closes one at every boundary the pipeline cannot
+see — pause, recogniser restart, capture ending, stop, persistence failure.
+
+Because a marker cannot be written until the incident ends, an open incident is
+noted in `.scribekit/session.json` as `openGapStartedAt` the moment it opens,
+and cleared once the marker is in the file. Recovery reports it, stating only
+the start: the end and the total were still being measured. The v0.1.0 release
+state and history are unchanged.
 
 ## Current implementation
 
@@ -40,19 +40,23 @@ arm64-only build.
   `MeetingSession`, `AudioCaptureState`, `TranscriptSegment` (with a
   `RecognitionState` of partial or final), `TranscriptionEvent` /
   `TranscriptionInterruption`, `TranscriptionState`,
-  `SpeechRecognitionAvailability`, and new for this interval `TranscriptGap`,
-  `TranscriptPersistenceState` and `MeetingStartRequest`; new for this
-  interval, `AudioRetentionState`.
-  `TranscriptionInterruption.audioDropped` now carries an optional
-  run-relative `startTime`.
+  `SpeechRecognitionAvailability`, `TranscriptGap`,
+  `TranscriptPersistenceState`, `MeetingStartRequest` and
+  `AudioRetentionState`; new for this interval, `TranscriptGapIncident`.
+  `TranscriptionInterruption.audioDropped` now carries a `DroppedAudio`
+  payload: the seconds lost, the run-relative start and end of the audio the
+  report covers, and whether the backlog has caught up. `TranscriptGap` gained
+  an `endTime`, so one marker can state the range an incident spanned beside
+  the audio it cost.
 - `ScribeKit/Capture/`: discovery, `CapturedPCMBuffer`, `AudioSampleConsuming`
   with `BroadcastingAudioSampleConsumer`, and `ScreenCaptureKitAudioCapturer`.
   `AudioCaptureConfiguration` now exposes `requestedFormat`, the one place that
   says what format capture is asked for.
 - `ScribeKit/Transcription/`: `SpeechTranscribing` (now with `eventTally`),
   `TranscriptionConfiguration` / `TranscriptionLocale`, `BoundedAudioQueue`,
-  `SpeechAudioConverter`, `TranscriptionAudioInput` (which now reports where
-  dropped audio fell), `AppleSpeechTranscriber`,
+  `SpeechAudioConverter`, `TranscriptionAudioInput` (which reports where
+  dropped audio fell and, now, when the backlog has caught up),
+  `AppleSpeechTranscriber`,
   `TranscriptionEventPublisher` / `TranscriptionEventTally`, and
   `SpeechAvailabilityProviding` / `SystemSpeechAvailability`.
 - `ScribeKit/Review/`, new for this interval: `TranscriptReviewReason` /
@@ -388,6 +392,58 @@ accumulated and reported as `.interrupted(.audioDropped)` once it reaches half
 a second, and the remainder is flushed at stop, so a badly behind recogniser
 produces a readable statement rather than one event per buffer. The interface
 states the total as untranscribed seconds.
+
+Each report carries the start and end of the audio it covers, and each evicted
+buffer is handed back exactly once — so the seconds across reports are distinct
+audio and may be summed, while the range they fell in is a separate fact. The
+input also reports `closesIncident` when the queue has accepted `capacity`
+buffers without evicting one: appending to a full queue always evicts, so that
+run of appends proves the backlog was never full across it, which is the
+evidence that recognition caught up. A report that only carries that news has
+zero seconds and is not shown as an interruption.
+
+## Gap incidents
+
+`TranscriptGapIncident` accumulates observations into the one condition they
+describe, and `MeetingRuntime` owns the open one. The rules:
+
+- An observation extends the open incident unless the previous one closed it.
+- A closed incident takes nothing further, so the next observation opens a new
+  one — separate trouble stays separate in the document.
+- Pause, recogniser restart, capture ending by itself, stop and persistence
+  failure close the open incident explicitly. Those are boundaries the audio
+  pipeline cannot see, and merging across one would hide a failure.
+- A `recognizerRestarted` gap is a single measured event and never coalesces.
+- Closing writes one `TranscriptGap` through `recordGap`; an incident that cost
+  no audio is dropped rather than written.
+
+`TranscriptMarkdownFormatter.gap(_:)` picks the wording from what the incident
+knows: a range of a second or more is written as `between … and …` with the
+lost seconds stated separately, anything narrower keeps the concise `around …`
+form, and an incident with no position states a length alone.
+
+Media offsets throughout: a pause adds nothing to an incident's range, and a
+resumed incident's offsets are rebased onto the meeting's timeline before the
+formatter maps them to the wall clock through its epochs.
+
+## Open gap incidents across a crash
+
+A marker cannot be written until the incident ends, so holding one only in
+memory would let a killed process take it with it. `TranscriptPersisting`
+therefore has a non-throwing `noteOpenGapIncident(startingAt:)`:
+`MarkdownTranscriptStore` maps the media offset to the wall clock through its
+own epochs and stores it as `SessionRecoveryMetadata.openGapStartedAt` — an
+additive optional field, schema version deliberately unchanged, like
+`pausedAt`. It is written when an incident opens and cleared **after** the
+marker has reached the file, so the failure window repeats a notice rather than
+losing one. `closed(_:at:capturedDuration:)` clears it too, so no finished
+meeting leaves anything outstanding.
+
+`SessionRecoveryService.recordInterruption` prepends
+`TranscriptMarkdownFormatter.unfinishedGapNotice(startedAt:timeZone:)` to the
+interruption note, in the same single append. It states the start and refuses
+the rest: the end and the total were still being measured when the process
+died.
 
 ## Retained audio formats
 
@@ -3450,6 +3506,48 @@ distribution story is *build it from source*, and the README, the documentation
 and the release notes have to say that plainly rather than implying a download
 that does not exist. Either way ScribeKit is not released, and nothing here is
 a tag.
+
+## Interval 29's closing note
+
+**Closed by Interval 29.** A sustained recognition backlog no longer floods a
+transcript. The observations the pipeline makes about it are summarised into
+one incident and one marker, and the marker keeps the two quantities apart that
+the old wording invited a reader to confuse — the range the trouble spanned and
+the audio it actually cost. The total is a sum over distinct evicted buffers
+rather than a length read off the range, so it is reported because it is known,
+not because it was available.
+
+**What decides a boundary is evidence.** The backlog accepting a full capacity
+without evicting anything is the proof that recognition caught up, and it is
+the only thing that merges or separates two observations. There is no interface
+delay in the rule. Everything the audio pipeline cannot see — a pause, a
+recogniser restart, capture ending by itself, a stop, a persistence failure —
+closes the open incident in `MeetingRuntime` instead.
+
+**Deliberate persistence.** A marker's range is not known until the incident
+ends, so an open incident would otherwise live only in memory. It is now noted
+in `.scribekit/session.json` when it opens and cleared after the marker reaches
+the file — that order, so the failure window repeats a notice rather than
+losing one — and recovery states the start and refuses to invent the end or the
+total. The canonical Markdown is still append-only and nothing in it is
+rewritten.
+
+**Open.** No real meeting has been driven through the new path by hand: the
+evidence here is 753 unit tests over doubles and, for the regression, the real
+Markdown writer against a real file. The 0.5-second reporting threshold in
+`TranscriptionAudioInput` is unchanged, so a long incident still costs one
+main-actor event every half second — cheap, but it is a rate nothing has
+measured under a real recogniser. And an incident that ends without anything
+following it — no further loss, no speech, no boundary — is closed only by the
+backlog-recovery report, which needs capture to keep delivering buffers; a
+meeting whose capture dies at that exact moment closes it at the boundary
+instead, which is correct but later.
+
+Still open from earlier intervals: source disappearance during a running
+capture, `ScreenCaptureKitAudioCapturer.stop()` not calling
+`removeStreamOutput(_:type:)` since Interval 15, the visible-presentation cost
+Interval 18 profiled, the VoiceOver-with-no-mouse human pass, and the packaged
+first install that waits on a Developer ID certificate.
 
 ## Interval 22's closing note
 

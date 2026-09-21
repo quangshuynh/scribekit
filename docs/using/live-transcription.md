@@ -39,6 +39,35 @@ Two things produce a gap:
 A gap is positioned where the audio fell when the pipeline knows where that
 was, and is honest about the length alone when it does not.
 
+## One incident, one marker
+
+A recogniser that has fallen behind does not lose audio once. It keeps losing
+it for as long as it stays behind, and the pipeline sees that as a loss every
+half second or so. Those observations are summarised into one **incident**
+rather than written out one by one, so a meeting that spent four minutes behind
+capture leaves one marker instead of several hundred:
+
+```
+> **Transcription gap:** approximately 215.0 seconds of audio was not transcribed between 11:38:00 AM and 11:41:23 AM; recognition fell behind capture.
+```
+
+Read that sentence as two separate facts. The **range** is how long the meeting
+was in trouble; the **seconds** are how much audio that cost. They are not the
+same number, and the range does not mean that everything inside it is missing:
+recognition goes on transcribing between the losses, so speech from inside the
+range is usually in the transcript above and below the marker. An incident
+narrower than a second keeps the concise wording that names the moment instead.
+
+Nothing is merged that ScribeKit cannot show belongs together. A new incident
+is started whenever the backlog demonstrably caught up in between, and a pause,
+a recogniser restart, capture ending or the meeting stopping all close the
+incident that was open — so two separate spells of trouble stay two markers.
+
+The marker is written when the incident ends, which is the first moment its
+range is known. While one is going on, the session record beside the transcript
+notes that it started, so a ScribeKit that never gets to finish still leaves
+evidence of it: see [Recovery](recovery.md).
+
 ## When recognition cannot be brought back
 
 A recogniser that has used up its restarts ends the meeting: capture stops, the

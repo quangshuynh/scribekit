@@ -20,6 +20,22 @@ rewrite recognised speech. Reading a record back may not invent what was never
 written: not the moment the process stopped, not the length of a gap, and not a
 word of speech.
 
+## A gap that was still open
+
+A transcription-gap incident is written to the transcript when it ends, so a
+meeting killed in the middle of one has no marker for it. The session record
+therefore notes when an open incident began, and recovery says so:
+
+```markdown
+> **Transcription gap:** audio was not being fully transcribed from approximately 11:38:00 AM onwards, because recognition fell behind capture. ScribeKit stopped before that ended, so how long it lasted and how much audio it cost are not known.
+```
+
+Only the start is recorded, because only the start had been established: the
+end and the total were still being measured when the process died, and stating
+either would be inventing it. A meeting that closed normally has written its
+marker already and leaves nothing outstanding, so the note appears only for a
+meeting that genuinely stopped mid-incident, and only once.
+
 ## What crossed the durability boundary
 
 | Survives | Does not survive |

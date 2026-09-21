@@ -29,6 +29,15 @@ Recovery also does not pretend a crashed meeting completed. Reading a record
 back may not invent what was never written: not the moment the process stopped,
 not the length of a gap, and not a word of speech.
 
+## A gap that had not finished
+
+A transcription gap is written to the transcript as one marker when the
+incident ends, so a meeting that was killed in the middle of one never got to
+write it. Recording the interruption also states that an incident had started,
+with the time it started and nothing else: how long it lasted and how much
+audio it cost were still being measured when ScribeKit stopped. A meeting that
+closed normally has already written its marker and gains no such note.
+
 ## What survives
 
 ScribeKit preserves finalised transcript content that reached durable storage

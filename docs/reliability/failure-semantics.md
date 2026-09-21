@@ -78,5 +78,21 @@ there too.
 Audio that was never transcribed is written into the transcript as an explicit
 gap marker, positioned where the audio fell when the pipeline knows and honest
 about the length alone when it does not. The timeline of what *was* transcribed
-keeps its real offsets. See
-[Live Transcription](../using/live-transcription.md).
+keeps its real offsets.
+
+One marker describes one incident. A recogniser that stays behind capture loses
+audio repeatedly, and those repeated losses are summarised into a single marker
+stating the range they fell in and how much audio was actually lost — two
+quantities the wording keeps apart, because audio between the losses was still
+being transcribed. Nothing is merged across a boundary that would hide a
+separate failure: recognition catching up, a pause, a recogniser restart,
+capture ending and the meeting stopping each close the incident that was open.
+Summarising changes what the document says once rather than what it reports:
+no loss is dropped, and the total is a sum over distinct audio rather than a
+length derived from the range.
+
+An incident still open when ScribeKit stops is recorded in the session record,
+so recovery can state that one had started rather than losing it with the
+process — without inventing the end or the total it never measured. See
+[Live Transcription](../using/live-transcription.md) and
+[Crash Recovery](crash-recovery.md).

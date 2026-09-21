@@ -89,6 +89,10 @@ are consequences of decisions, and several of them are deliberate.
   capture queue.
 - **Falling more than about three seconds behind capture drops the oldest
   audio** to keep memory bounded, and the lost time is reported as a gap.
+- **A sustained backlog is reported as one incident, not one marker per
+  loss.** The marker states the range the incident spanned and, separately, how
+  much audio it cost; it is written when the incident ends, so it appears in
+  the document a moment after the trouble does.
 - **A recogniser that stops by itself is restarted at most twice.** Audio
   arriving during a restart is counted as a gap. One that cannot be brought
   back ends the meeting.

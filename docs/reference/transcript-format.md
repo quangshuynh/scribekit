@@ -29,10 +29,35 @@ Today, we are learning about closures in Swift.
 | `**<h:mm:ss AM/PM>**` | The wall-clock time of the finalised span that follows. |
 | Plain paragraphs | Recognised speech, exactly as it was finalised. |
 | `> **...:**` blockquotes | ScribeKit's own structural remarks — gaps, pauses, resumes, capture interruptions. |
+| `> **Transcription gap:**` | One incident of untranscribed audio, written once when the incident ends. |
 | `---` then footer | `**Ended:**`, `**Duration:**`, and `**Captured:**` for a meeting that was paused. |
 
 `**Duration:**` is the meeting's wall-clock length. `**Captured:**` is the
 length of the recording. Neither is derived from the other.
+
+## Gap markers
+
+A gap marker takes one of three forms, and which one is written follows from
+what the pipeline actually established:
+
+```markdown
+> **Transcription gap:** approximately 0.8 seconds of audio around 10:01:41 AM was not transcribed; recognition fell behind capture.
+> **Transcription gap:** approximately 215.0 seconds of audio was not transcribed between 11:38:00 AM and 11:41:23 AM; recognition fell behind capture.
+> **Transcription gap:** approximately 2.4 seconds of audio was not transcribed; the recogniser was restarted.
+```
+
+The first names the moment a short loss fell at. The second is used once the
+affected stretch is a second or more wide, and states two different quantities:
+the **range** the incident spanned and the **seconds of audio** it cost. The
+range is not a claim that everything inside it is missing — recognition carries
+on between the losses, so spans from inside the range appear in the document
+around the marker. The third states a length and no position, because no audio
+clock was running to place it against.
+
+One marker means one incident, however many separate losses the pipeline
+observed while it lasted. A marker never opens a minute heading, and one is
+never rewritten: the range is known when the incident ends, which is when the
+marker is appended.
 
 ## Text handling
 
