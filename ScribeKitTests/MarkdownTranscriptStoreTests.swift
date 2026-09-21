@@ -493,6 +493,99 @@ struct MarkdownTranscriptStoreTests {
         ))
     }
 
+    @Test("An incident spanning minutes is one blockquote stating a range and a loss")
+    func rangeGapIsWrittenOnce() async throws {
+        let (store, fileStore, _) = makeStore()
+        _ = try await start(store)
+        let before = fileStore.file.text
+
+        try await store.recordGap(TranscriptGap(
+            startTime: 2_280,
+            endTime: 2_483,
+            duration: 37.5,
+            reason: .audioDropped
+        ))
+
+        let written = String(fileStore.file.text.dropFirst(before.count))
+        #expect(written == """
+            > **Transcription gap:** approximately 37.5 seconds of audio was not transcribed \
+            between 11:38:00 AM and 11:41:23 AM; recognition fell behind capture.
+
+
+            """)
+        // One blockquote, not one per observation.
+        #expect(written.components(separatedBy: "> **Transcription gap:**").count == 2)
+    }
+
+    @Test("An open incident is recorded on the wall clock, and cleared once it is written")
+    func openIncidentIsRecorded() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, fileStore, _) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+
+        await store.noteOpenGapIncident(startingAt: 2_280)
+
+        let open = try #require(recoveryStore.storedMetadata(in: layout.directory))
+        #expect(open.openGapStartedAt == startedAt.addingTimeInterval(2_280))
+        #expect(open.status == .inProgress)
+        // The record is bookkeeping: the transcript has not been touched.
+        #expect(!fileStore.file.text.contains("Transcription gap"))
+
+        try await store.recordGap(TranscriptGap(
+            startTime: 2_280,
+            endTime: 2_483,
+            duration: 37.5,
+            reason: .audioDropped
+        ))
+        await store.noteOpenGapIncident(startingAt: nil)
+
+        let cleared = try #require(recoveryStore.storedMetadata(in: layout.directory))
+        #expect(cleared.openGapStartedAt == nil)
+        #expect(fileStore.file.text.contains("Transcription gap"))
+    }
+
+    @Test("An open incident's wall-clock start accounts for time the meeting was paused")
+    func openIncidentStartAccountsForPauses() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+        try await store.recordPause(at: startedAt.addingTimeInterval(40), capturedDuration: 40)
+        try await store.recordResume(at: startedAt.addingTimeInterval(340), capturedDuration: 40)
+
+        await store.noteOpenGapIncident(startingAt: 50)
+
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+        // Media offset 50 is ten seconds after the resume, which is five
+        // minutes later on the wall clock than a meeting that never paused.
+        #expect(record.openGapStartedAt == startedAt.addingTimeInterval(350))
+    }
+
+    @Test("A session that finishes is not recorded as still having a gap open")
+    func finishedSessionClearsTheOpenIncident() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+        let layout = try await start(store)
+        await store.noteOpenGapIncident(startingAt: 12)
+
+        try await store.finishSession(endedAt: startedAt.addingTimeInterval(600))
+
+        let record = try #require(recoveryStore.storedMetadata(in: layout.directory))
+        #expect(record.status == .completed)
+        #expect(record.openGapStartedAt == nil)
+    }
+
+    @Test("Noting the same open incident twice writes the record once")
+    func openIncidentIsNotRewrittenPerObservation() async throws {
+        let recoveryStore = FakeSessionRecoveryStore()
+        let (store, _, _) = makeStore(recoveryStore: recoveryStore)
+        _ = try await start(store)
+        let writesAfterStart = recoveryStore.writes.count
+
+        for _ in 0..<50 { await store.noteOpenGapIncident(startingAt: 12) }
+
+        #expect(recoveryStore.writes.count == writesAfterStart + 1)
+    }
+
     @Test("Appending without a session is refused")
     func appendNeedsASession() async {
         let (store, _, _) = makeStore()

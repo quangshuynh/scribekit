@@ -58,7 +58,12 @@ struct TranscriptSegmentTests {
 
     @Test("An interruption explains itself in the terms the user needs")
     func interruptionsExplainThemselves() {
-        #expect(TranscriptionInterruption.audioDropped(seconds: 1.5).message.contains("1.5"))
-        #expect(TranscriptionInterruption.recognitionFailed(message: "boom").message.contains("boom"))
+        #expect(TranscriptionInterruption.audioDropped(seconds: 1.5).message?.contains("1.5") == true)
+        #expect(TranscriptionInterruption.recognitionFailed(message: "boom").message?.contains("boom") == true)
+    }
+
+    @Test("A report that only says recognition caught up has nothing to tell the user")
+    func caughtUpReportHasNoMessage() {
+        #expect(TranscriptionInterruption.audioDropped(seconds: 0, closesIncident: true).message == nil)
     }
 }

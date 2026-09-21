@@ -35,6 +35,11 @@ A recogniser that stops by itself is restarted at most twice. Audio arriving
 during a restart is not transcribed and is counted as a gap, and a restarted
 run's spans keep the meeting's own offsets rather than starting again at zero.
 
+A restart also closes whatever backpressure incident was open. The run that was
+losing audio is being torn down and the next one counts from a new origin, so
+folding losses from either side of it into one marker would hide one failure
+inside another.
+
 A recogniser that cannot be brought back ends the meeting rather than becoming
 a state to sit in: capture stops, the durable artifacts are closed and kept,
 the session is recorded as the failure it was, and every hold on the process is
@@ -45,3 +50,11 @@ released.
 A missing model, an unsupported language, a recogniser that stops by itself,
 and audio that recognition fell too far behind to transcribe are all reported
 rather than absorbed. Transcription uncertainty is surfaced, not hidden.
+
+Reporting is summarised, never reduced. A backlog that lasts loses audio every
+half second or so, and those observations become one incident with one marker;
+the incident's total is a sum over distinct discarded audio, stated beside the
+range it fell in rather than derived from it. The evidence that separates one
+incident from the next is the backlog's own behaviour — it has accepted a full
+capacity of audio without having to evict any — rather than a delay chosen for
+readability.

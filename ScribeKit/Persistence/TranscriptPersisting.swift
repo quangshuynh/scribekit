@@ -58,6 +58,25 @@ nonisolated protocol TranscriptPersisting: Sendable {
     ///   or the write fails.
     func recordGap(_ gap: TranscriptGap) async throws
 
+    /// Notes in the session record that a transcription-gap incident is open,
+    /// or that the one that was open has been written to the transcript.
+    ///
+    /// A run of recognition-backpressure losses becomes one gap marker, and
+    /// that marker cannot be written until the incident ends. This is what
+    /// keeps the durable artifacts honest in the meantime: a ScribeKit that is
+    /// killed mid-incident leaves a record saying a gap had started, so
+    /// recovery can say so instead of the incident vanishing with the process.
+    ///
+    /// It is deliberately not throwing. The record is bookkeeping beside a
+    /// transcript that is intact either way, and failing a meeting — or
+    /// worsening a backlog the pipeline is already struggling with — over a
+    /// note about a gap would be the wrong trade. A failure is logged.
+    ///
+    /// - Parameter startTime: Seconds of captured audio from the start of the
+    ///   meeting to the first audio the open incident affected, or `nil` once
+    ///   the incident's marker has been written and nothing is outstanding.
+    func noteOpenGapIncident(startingAt startTime: Double?) async
+
     /// Records that the user paused the meeting.
     ///
     /// The session stays open. The marker is a structural remark rather than

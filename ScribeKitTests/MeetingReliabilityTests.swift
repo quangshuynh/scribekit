@@ -171,7 +171,15 @@ struct MeetingReliabilityTests {
             harness.emitFinal("Never saved.")
         case .gap:
             harness.persistence.failAppends(with: TranscriptPersistenceError(.writeFailed))
-            harness.transcriber.emit(.interrupted(.audioDropped(seconds: 0.8, startTime: 3)))
+            // The marker is written when the incident closes, so the report
+            // that carries the evidence of recognition catching up is the one
+            // that reaches the failing writer.
+            harness.transcriber.emit(.interrupted(.audioDropped(
+                seconds: 0.8,
+                startTime: 3,
+                endTime: 3.8,
+                closesIncident: true
+            )))
         case .pauseMarker:
             harness.persistence.failPauseMarkers(with: TranscriptPersistenceError(.writeFailed))
             await harness.runtime.pause()

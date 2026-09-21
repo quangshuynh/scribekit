@@ -215,6 +215,41 @@ final class ReliabilityHarness {
         return absolute
     }
 
+    /// Reports audio the bounded backlog discarded, the way a saturated
+    /// recognition run reports it.
+    ///
+    /// The offsets are given on the meeting's own timeline and converted to
+    /// the run-relative form a recogniser publishes, so a test states where
+    /// the audio was rather than where the current run happens to count from.
+    ///
+    /// - Parameters:
+    ///   - seconds: How much audio the observation says was discarded.
+    ///   - from: Where the first discarded audio fell, on the meeting's
+    ///     timeline.
+    ///   - to: Where the last discarded audio ended, on the meeting's timeline.
+    ///   - closesIncident: Whether the backlog has caught up.
+    func dropAudio(
+        seconds: Double,
+        from start: Double,
+        to end: Double,
+        closesIncident: Bool = false
+    ) {
+        transcriber.emit(.interrupted(.audioDropped(
+            seconds: seconds,
+            startTime: start - runOrigin,
+            endTime: end - runOrigin,
+            closesIncident: closesIncident
+        )))
+    }
+
+    /// Reports that the backlog has caught up, with nothing left unreported.
+    func reportRecognitionCaughtUp() {
+        transcriber.emit(.interrupted(.audioDropped(seconds: 0, closesIncident: true)))
+    }
+
+    /// The gap markers the writer accepted, in order.
+    var writtenGaps: [TranscriptGap] { persistence.gaps }
+
     /// Reports the recogniser stopping by itself and waits for whatever the
     /// runtime decides to do about it.
     ///

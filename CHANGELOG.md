@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Changed
+
+- **A sustained transcription gap is one marker, not hundreds.** Recognition
+  falling behind capture loses audio repeatedly for as long as it stays behind,
+  and each loss was previously written into `transcript.md` as its own
+  blockquote — roughly one every half second, for as long as the condition
+  lasted. Those observations are now accumulated into a single incident and
+  written once, when the incident ends.
+- **A gap marker distinguishes the range from the loss.** An incident a second
+  or more wide is written as `approximately N seconds of audio was not
+  transcribed between <start> and <end>`, stating how long the meeting was in
+  trouble and, separately, how much audio that cost. The total is a sum over
+  distinct discarded audio and is never derived from the range; a shorter
+  incident keeps the existing wording naming the moment it fell at, and a gap
+  with no known position still states its length alone. No loss is dropped and
+  no failure reporting is weakened.
+
+### Added
+
+- **Incidents are separated by evidence rather than by a delay.** A new
+  incident begins once the bounded backlog has demonstrably caught up, and a
+  pause, a recogniser restart, capture ending by itself, a stop or a
+  persistence failure each close the incident that was open, so two separate
+  spells of trouble stay two markers.
+- **An unfinished incident survives a ScribeKit that does not.** The session
+  record notes when an open incident began, and recovery says so in the
+  transcript — stating the start and refusing to invent the end or the total,
+  neither of which had been measured. The field is additive and the record's
+  schema version is unchanged.
+
 ## 0.1.0 — 2026-09-01
 
 The first release of ScribeKit, published as source. There is no signed or

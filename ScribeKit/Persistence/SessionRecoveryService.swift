@@ -252,6 +252,14 @@ actor SessionRecoveryService {
     /// longer marked in progress — because another ScribeKit already handled
     /// it — is returned unchanged rather than annotated again.
     ///
+    /// A record that says a transcription-gap incident was still open when
+    /// ScribeKit stopped is reported too, because the marker summarising that
+    /// incident never reached the document. Nothing is invented for it: the
+    /// note states when the trouble began and says plainly that its end and
+    /// its cost are not known. ``SessionRecoveryMetadata/markingInterruption(recordedAt:)``
+    /// is what stops it being said twice — the record is no longer in progress
+    /// afterwards, so a second pass adds nothing.
+    ///
     /// - Parameters:
     ///   - candidate: The unfinished session, from ``scan(_:)``.
     ///   - date: When the interruption is being recorded, which is now. It is
@@ -272,10 +280,20 @@ actor SessionRecoveryService {
 
             let updated = current.markingInterruption(recordedAt: date)
             try store.writeMetadata(updated, to: candidate.layout)
-            try store.appendToTranscript(
-                TranscriptMarkdownFormatter.interruptionNotice(recordedAt: date, timeZone: timeZone),
-                at: transcriptURL
-            )
+            // A gap incident the meeting was in the middle of is stated before
+            // the interruption note, because that is where it happened: it
+            // began while the meeting was still running and the marker for it
+            // never got written. It is one append with the note, so a
+            // transcript never gains half of this.
+            var text = ""
+            if let gapStartedAt = current.openGapStartedAt {
+                text += TranscriptMarkdownFormatter.unfinishedGapNotice(
+                    startedAt: gapStartedAt,
+                    timeZone: timeZone
+                )
+            }
+            text += TranscriptMarkdownFormatter.interruptionNotice(recordedAt: date, timeZone: timeZone)
+            try store.appendToTranscript(text, at: transcriptURL)
             ScribeKitLog.recovery.info("Interruption recorded for an unfinished session")
             return updated
         }

@@ -183,6 +183,157 @@ struct TranscriptMarkdownFormatterTests {
             """)
     }
 
+    @Test("A gap incident spanning minutes is written once as a range")
+    func rangeGapIsFormatted() {
+        let formatter = makeFormatter()
+
+        // The real failure: recognition fell behind at 11:38:00 and had not
+        // caught up by 11:41:23, and 37.5 seconds of audio went missing in
+        // between. Both facts are stated, and neither stands in for the other.
+        let block = formatter.gap(TranscriptGap(
+            startTime: 2_280,
+            endTime: 2_483,
+            duration: 37.5,
+            reason: .audioDropped
+        ))
+
+        #expect(block == """
+            > **Transcription gap:** approximately 37.5 seconds of audio was not transcribed \
+            between 11:38:00 AM and 11:41:23 AM; recognition fell behind capture.
+
+
+            """)
+    }
+
+    @Test("A range says how much audio was lost, never that the whole range was")
+    func rangeDoesNotClaimTheWholeSpan() {
+        let formatter = makeFormatter()
+
+        let block = formatter.gap(TranscriptGap(
+            startTime: 2_280,
+            endTime: 2_483,
+            duration: 37.5,
+            reason: .audioDropped
+        ))
+
+        // 203 seconds of meeting, 37.5 seconds of audio. The sentence carries
+        // the second number and never the first.
+        #expect(block.contains("37.5 seconds of audio was not transcribed between"))
+        #expect(!block.contains("203"))
+        #expect(!block.contains("every"))
+    }
+
+    @Test("A gap incident that crosses a minute boundary states both minutes")
+    func rangeGapCrossesAMinute() {
+        let formatter = makeFormatter()
+
+        let block = formatter.gap(TranscriptGap(
+            startTime: 116,
+            endTime: 124,
+            duration: 5,
+            reason: .audioDropped
+        ))
+
+        #expect(block.contains("between 11:01:56 AM and 11:02:04 AM"))
+    }
+
+    @Test("A gap incident that runs through noon states the period on both ends")
+    func rangeGapCrossesNoon() {
+        // A meeting that began at 11:00 AM: the incident starts two seconds
+        // before noon and ends four seconds after it.
+        let formatter = makeFormatter()
+
+        let block = formatter.gap(TranscriptGap(
+            startTime: 3_598,
+            endTime: 3_604,
+            duration: 3,
+            reason: .audioDropped
+        ))
+
+        #expect(block.contains("between 11:59:58 AM and 12:00:04 PM"))
+    }
+
+    @Test("A gap incident narrower than a written second keeps the concise wording")
+    func narrowGapStaysAPosition() {
+        let formatter = makeFormatter()
+
+        let block = formatter.gap(TranscriptGap(
+            startTime: 271.4,
+            endTime: 272.2,
+            duration: 0.8,
+            reason: .audioDropped
+        ))
+
+        #expect(block == """
+            > **Transcription gap:** approximately 0.8 seconds of audio around 11:04:31 AM \
+            was not transcribed; recognition fell behind capture.
+
+
+            """)
+        #expect(!block.contains("between"))
+    }
+
+    @Test("A gap range written after a resume reads on the wall clock the meeting kept")
+    func rangeGapAfterAResume() {
+        var formatter = makeFormatter()
+        // 100 seconds captured, then ten minutes paused, then capture resumes.
+        formatter.resume(at: startedAt.addingTimeInterval(100 + 600), capturedDuration: 100)
+
+        let block = formatter.gap(TranscriptGap(
+            startTime: 110,
+            endTime: 130,
+            duration: 12,
+            reason: .audioDropped
+        ))
+
+        // Media offsets 110 and 130 are ten minutes later on the wall clock
+        // than they would be in a meeting that never paused, and the pause
+        // itself is in neither the range nor the twelve seconds.
+        #expect(block.contains("between 11:11:50 AM and 11:12:10 AM"))
+        #expect(block.contains("approximately 12.0 seconds"))
+    }
+
+    @Test("A range gap does not open a minute heading either")
+    func rangeGapDoesNotDisturbMinuteHeadings() {
+        var formatter = makeFormatter()
+        _ = formatter.finalSegment(segment("One.", start: 0))
+
+        _ = formatter.gap(TranscriptGap(startTime: 100, endTime: 200, duration: 60, reason: .audioDropped))
+        let next = formatter.finalSegment(segment("Two.", start: 30))
+
+        #expect(!next.contains("###"))
+    }
+
+    // MARK: - Unfinished incidents
+
+    @Test("A gap still open when ScribeKit stopped states its start and invents no end")
+    func unfinishedGapNoticeInventsNothing() {
+        let notice = TranscriptMarkdownFormatter.unfinishedGapNotice(
+            startedAt: startedAt.addingTimeInterval(2_280),
+            timeZone: zone
+        )
+
+        #expect(notice == """
+            > **Transcription gap:** audio was not being fully transcribed from approximately \
+            11:38:00 AM onwards, because recognition fell behind capture. ScribeKit stopped \
+            before that ended, so how long it lasted and how much audio it cost are not known.
+
+
+            """)
+        #expect(!notice.contains("seconds of audio"))
+        #expect(notice.hasPrefix("> "))
+    }
+
+    @Test("An unfinished gap that began in the afternoon says so")
+    func unfinishedGapNoticeStatesItsPeriod() {
+        let notice = TranscriptMarkdownFormatter.unfinishedGapNotice(
+            startedAt: startedAt.addingTimeInterval(3_604),
+            timeZone: zone
+        )
+
+        #expect(notice.contains("12:00:04 PM"))
+    }
+
     @Test("A gap does not open a minute heading of its own")
     func gapDoesNotDisturbMinuteHeadings() {
         var formatter = makeFormatter()
