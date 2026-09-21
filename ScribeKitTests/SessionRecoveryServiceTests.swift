@@ -386,6 +386,62 @@ struct SessionRecoveryServiceTests {
         #expect(!note.contains("Ended"))
     }
 
+    @Test("A gap that was still open when ScribeKit stopped is reported, before the interruption note")
+    func openGapIsReported() async throws {
+        let store = FakeSessionRecoveryStore()
+        let session = directory("2026-08-31-training")
+        let record = metadata(title: "Training", status: .inProgress)
+            .notingOpenGap(startedAt: startedAt.addingTimeInterval(2_280))
+        try store.addSession(session, in: destination, metadata: record)
+        let (service, _) = makeService(store)
+        let candidate = try #require(try await service.scan(destination).candidates.first)
+
+        _ = try await service.recordInterruption(for: candidate, at: startedAt.addingTimeInterval(9_000))
+        let note = try #require(store.appends.first?.text)
+
+        // One append, so a transcript never gains half of this.
+        #expect(store.appends.count == 1)
+        #expect(note.hasPrefix("> **Transcription gap:**"))
+        #expect(note.contains("from approximately 11:38:00 AM onwards"))
+        #expect(note.contains("Session interrupted."))
+        #expect(note.range(of: "Transcription gap")!.lowerBound
+                < note.range(of: "Session interrupted.")!.lowerBound)
+        // Neither the end of the incident nor its cost is invented.
+        #expect(note.contains("how much audio it cost are not known"))
+        #expect(!note.contains("seconds of audio"))
+    }
+
+    @Test("A session with no open gap gains no gap notice")
+    func noOpenGapMeansNoGapNotice() async throws {
+        let store = FakeSessionRecoveryStore()
+        let session = directory("2026-08-31-training")
+        try store.addSession(session, in: destination, metadata: metadata(title: "Training", status: .inProgress))
+        let (service, _) = makeService(store)
+        let candidate = try #require(try await service.scan(destination).candidates.first)
+
+        _ = try await service.recordInterruption(for: candidate, at: startedAt)
+
+        #expect(store.appends.count == 1)
+        #expect(store.appends.first?.text.contains("Transcription gap") == false)
+    }
+
+    @Test("An open gap is reported once, not again on a second pass")
+    func openGapIsNotReportedTwice() async throws {
+        let store = FakeSessionRecoveryStore()
+        let session = directory("2026-08-31-training")
+        let record = metadata(title: "Training", status: .inProgress)
+            .notingOpenGap(startedAt: startedAt.addingTimeInterval(60))
+        try store.addSession(session, in: destination, metadata: record)
+        let (service, _) = makeService(store)
+        let candidate = try #require(try await service.scan(destination).candidates.first)
+
+        _ = try await service.recordInterruption(for: candidate, at: startedAt.addingTimeInterval(600))
+        _ = try await service.recordInterruption(for: candidate, at: startedAt.addingTimeInterval(700))
+
+        #expect(store.appends.count == 1)
+        #expect(store.appends.filter { $0.text.contains("Transcription gap") }.count == 1)
+    }
+
     @Test("A session already recorded as interrupted is not annotated a second time")
     func recordingIsNotRepeated() async throws {
         let store = FakeSessionRecoveryStore()

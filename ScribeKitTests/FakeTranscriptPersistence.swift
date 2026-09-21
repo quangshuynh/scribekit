@@ -20,6 +20,7 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
         case started(directory: URL)
         case segment(TranscriptSegment)
         case gap(TranscriptGap)
+        case openGapNoted(startTime: Double?)
         case paused(capturedDuration: Double)
         case resumed(capturedDuration: Double)
         case finished(SessionCompletionOutcome)
@@ -57,6 +58,18 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
     var gaps: [TranscriptGap] {
         entries.compactMap { if case let .gap(gap) = $0 { gap } else { nil } }
     }
+
+    /// Every open-gap note the runtime made, in order: the media offset of the
+    /// incident that is outstanding, or `nil` once one has been written out.
+    ///
+    /// Unlike the real store this records every call rather than only the ones
+    /// that change the record, so a test can see what the runtime asked for.
+    var openGapNotes: [Double?] {
+        entries.compactMap { if case let .openGapNoted(startTime) = $0 { startTime } else { nil } }
+    }
+
+    /// Whether the session record currently says an incident is outstanding.
+    var hasOpenGapNote: Bool { openGapNotes.last.flatMap { $0 } != nil }
 
     /// Thrown by the next `startSession`, when set.
     func failStart(with error: TranscriptPersistenceError) {
@@ -116,6 +129,13 @@ nonisolated final class FakeTranscriptPersistence: TranscriptPersisting, @unchec
 
     func recordGap(_ gap: TranscriptGap) async throws {
         try append(.gap(gap), isFinalized: true)
+    }
+
+    func noteOpenGapIncident(startingAt startTime: Double?) async {
+        state.withLock { state in
+            guard state.isOpen else { return }
+            state.entries.append(.openGapNoted(startTime: startTime))
+        }
     }
 
     func recordPause(at date: Date, capturedDuration: Double) async throws {

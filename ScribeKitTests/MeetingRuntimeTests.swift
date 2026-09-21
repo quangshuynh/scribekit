@@ -618,10 +618,20 @@ struct MeetingRuntimeTests {
         let (model, _, transcriber, persistence) = await makeMeeting()
         await model.start(request([meet]))
 
-        transcriber.emit(.interrupted(.audioDropped(seconds: 0.8, startTime: 12.5)))
+        transcriber.emit(.interrupted(.audioDropped(
+            seconds: 0.8,
+            startTime: 12.5,
+            endTime: 13.3,
+            closesIncident: true
+        )))
 
         #expect(await wait { persistence.gaps.count == 1 })
-        #expect(persistence.gaps.first == TranscriptGap(startTime: 12.5, duration: 0.8, reason: .audioDropped))
+        #expect(persistence.gaps.first == TranscriptGap(
+            startTime: 12.5,
+            endTime: 13.3,
+            duration: 0.8,
+            reason: .audioDropped
+        ))
     }
 
     @Test("Time lost to a recogniser restart is written as a gap with no invented position")

@@ -195,6 +195,69 @@ struct SessionRecoveryMetadataTests {
         #expect(decoded.status == .completed)
     }
 
+    // MARK: - Unfinished gap incidents
+
+    @Test("An open gap incident survives a round trip and states only its start")
+    func openGapRoundTrips() throws {
+        let gapStartedAt = startedAt.addingTimeInterval(2_280)
+        let record = metadata().notingOpenGap(startedAt: gapStartedAt)
+
+        let restored = try SessionRecoveryMetadata.decoded(from: record.encoded())
+
+        #expect(restored.openGapStartedAt == gapStartedAt)
+        #expect(restored.status == .inProgress)
+        #expect(restored == record)
+    }
+
+    @Test("A record written before gap incidents existed carries no such key and still decodes")
+    func recordWithoutOpenGapDecodes() throws {
+        let record = metadata()
+        let json = try #require(String(data: try record.encoded(), encoding: .utf8))
+
+        #expect(!json.contains("openGapStartedAt"))
+        #expect(try SessionRecoveryMetadata.decoded(from: record.encoded()).openGapStartedAt == nil)
+    }
+
+    @Test("An incident whose marker has been written is cleared from the record")
+    func openGapIsCleared() {
+        let record = metadata().notingOpenGap(startedAt: startedAt.addingTimeInterval(60))
+
+        #expect(record.notingOpenGap(startedAt: nil).openGapStartedAt == nil)
+    }
+
+    @Test("Closing a session leaves nothing outstanding for recovery to report")
+    func closingClearsTheOpenGap() {
+        let record = metadata().notingOpenGap(startedAt: startedAt.addingTimeInterval(60))
+
+        let closed = record.closed(.completed, at: startedAt.addingTimeInterval(600))
+
+        #expect(closed.openGapStartedAt == nil)
+        #expect(closed.status == .completed)
+    }
+
+    @Test("Noting an incident changes nothing else about the record")
+    func notingAnOpenGapChangesNothingElse() {
+        let record = metadata().pausing(at: startedAt.addingTimeInterval(30), capturedDuration: 30)
+
+        let noted = record.notingOpenGap(startedAt: startedAt.addingTimeInterval(60))
+
+        #expect(noted.status == record.status)
+        #expect(noted.pausedAt == record.pausedAt)
+        #expect(noted.capturedDuration == record.capturedDuration)
+        #expect(noted.endedAt == record.endedAt)
+        #expect(noted.interruptedAt == record.interruptedAt)
+    }
+
+    @Test("An interruption found after a relaunch keeps the gap the meeting was in the middle of")
+    func interruptionKeepsTheOpenGap() {
+        let gapStartedAt = startedAt.addingTimeInterval(60)
+        let record = metadata().notingOpenGap(startedAt: gapStartedAt)
+
+        let marked = record.markingInterruption(recordedAt: startedAt.addingTimeInterval(9_000))
+
+        #expect(marked.openGapStartedAt == gapStartedAt)
+    }
+
     @Test("The transcript is found relative to the directory the record was read from")
     func transcriptIsResolvedRelatively() {
         let moved = URL(filePath: "/Volumes/Backup/2026-08-31-training", directoryHint: .isDirectory)

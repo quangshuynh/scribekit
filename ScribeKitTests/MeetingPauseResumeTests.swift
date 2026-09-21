@@ -248,7 +248,12 @@ struct MeetingPauseResumeTests {
         await meeting.runtime.pause()
         await meeting.runtime.resume()
 
-        meeting.transcriber.emit(.interrupted(.audioDropped(seconds: 0.6, startTime: 2)))
+        meeting.transcriber.emit(.interrupted(.audioDropped(
+            seconds: 0.6,
+            startTime: 2,
+            endTime: 2.6,
+            closesIncident: true
+        )))
         _ = await wait {
             meeting.persistence.entries.contains { if case .gap = $0 { true } else { false } }
         }
