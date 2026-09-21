@@ -141,7 +141,24 @@ final class MeetingRuntime {
     private(set) var transcriptSpanCount = 0
 
     /// How many gap markers were written into it.
+    ///
+    /// One per incident, not one per observation: a recogniser that spends
+    /// four minutes behind capture produces one marker and this counts one.
     private(set) var gapCount = 0
+
+    /// The transcription-gap incident that is still going on, if one is.
+    ///
+    /// Observations of dropped audio arrive several times a second for as
+    /// long as recognition is behind, and every one of them describes the same
+    /// condition. They are accumulated here and written to the transcript once,
+    /// when the pipeline says the condition is over — so a sustained backlog
+    /// costs the document one blockquote rather than one per half second.
+    ///
+    /// Holding one in memory is only honest because the session record knows
+    /// about it: ``persistence`` is told the moment an incident opens, so a
+    /// ScribeKit that is killed while one is going on leaves a record that says
+    /// so rather than taking the incident with it.
+    private var openGapIncident: TranscriptGapIncident?
 
     /// How long the current meeting has been running.
     let elapsed: MeetingElapsedClock
@@ -511,6 +528,7 @@ final class MeetingRuntime {
         recognitionRestartCount = 0
         transcriptSpanCount = 0
         gapCount = 0
+        openGapIncident = nil
         ScribeKitLog.lifecycle.info(
             """
             Meeting start requested: \(request.sources.count, privacy: .public) source(s), \
@@ -626,6 +644,10 @@ final class MeetingRuntime {
         await transcriber.stop()
         transcriptionState = .idle
         await drainPendingEvents()
+        // A pause ends the condition by ending the capture that fed it, so the
+        // incident is closed here rather than left to reach across the pause
+        // and be reported as one stretch of trouble that it was not.
+        await closeGapIncident()
 
         // Taken after the drain, so pre-pause spans keep the base they were
         // recognised under, and read from the media clock rather than the wall
@@ -786,6 +808,11 @@ final class MeetingRuntime {
     ///   ``SessionCompletionOutcome/failed``: an artifact that did not close is
     ///   the more serious fact about the meeting.
     private func closeSession(outcome: SessionCompletionOutcome) async {
+        // Whatever ended the meeting also ended any gap incident that was
+        // going on, and the marker for it belongs in the document before the
+        // closing block rather than nowhere. It is written while the session is
+        // still open, which is the only time it can be.
+        await closeGapIncident()
         let audioFailure = finishRetainedAudio()
         guard persistenceState.isActive else { return }
         let layout = persistenceState.layout
@@ -904,8 +931,17 @@ final class MeetingRuntime {
         case let .final(segment):
             await persist(segment)
         case let .interrupted(interruption):
-            if let gap = interruption.gap { await persist(gap) }
-            if case .recognitionFailed = interruption { await recoverRecognition() }
+            switch interruption {
+            case let .audioDropped(drop):
+                await accumulate(drop)
+            case .recognitionFailed:
+                // A restart is a boundary of its own: the run that lost the
+                // audio is being torn down, the next one counts from a new
+                // origin, and folding what follows into what came before would
+                // hide one failure inside another.
+                await closeGapIncident()
+                await recoverRecognition()
+            }
         }
     }
 
@@ -928,11 +964,13 @@ final class MeetingRuntime {
             return .partial(rebased(segment))
         case let .final(segment):
             return .final(rebased(segment))
-        case let .interrupted(.audioDropped(seconds, startTime)):
-            return .interrupted(.audioDropped(
-                seconds: seconds,
-                startTime: startTime.map { $0 + mediaOffsetBase }
-            ))
+        case let .interrupted(.audioDropped(drop)):
+            return .interrupted(.audioDropped(DroppedAudio(
+                seconds: drop.seconds,
+                startTime: drop.startTime.map { $0 + mediaOffsetBase },
+                endTime: drop.endTime.map { $0 + mediaOffsetBase },
+                closesIncident: drop.closesIncident
+            )))
         case .interrupted:
             return event
         }
@@ -986,6 +1024,70 @@ final class MeetingRuntime {
         }
     }
 
+    /// Folds one observation of dropped audio into the incident it belongs to.
+    ///
+    /// Whether it belongs to the open one is the pipeline's judgement and not
+    /// this type's: an observation carries the evidence about whether the
+    /// backlog had caught up before it, so there is no delay to tune here and
+    /// no interface timer deciding what counts as the same trouble. What this
+    /// adds is the boundaries the pipeline cannot see — a pause, a recogniser
+    /// restart, the end of a meeting — which close an incident explicitly.
+    ///
+    /// The session record is told as soon as an incident opens, before any of
+    /// it is written to the transcript, so the window in which a crash could
+    /// lose the whole incident is the width of one metadata write rather than
+    /// the length of the incident.
+    ///
+    /// - Parameter drop: What the pipeline reported, already on the meeting's
+    ///   own media timeline.
+    private func accumulate(_ drop: DroppedAudio) async {
+        if openGapIncident?.accepts(drop) == true {
+            openGapIncident?.extend(with: drop)
+        } else {
+            await closeGapIncident()
+            guard drop.seconds > 0 else { return }
+            openGapIncident = TranscriptGapIncident(drop)
+        }
+        guard let incident = openGapIncident else { return }
+        guard !incident.isClosed else {
+            // The observation that opened this one also ended it, so it goes
+            // straight into the document and the record is never told about an
+            // incident that was outstanding for no time at all.
+            await closeGapIncident()
+            return
+        }
+        // Repeated for every observation and written once: the store compares
+        // the moment against the one already recorded, so a condition lasting
+        // minutes costs the record a single write.
+        await persistence.noteOpenGapIncident(startingAt: incident.startTime)
+    }
+
+    /// Writes the open gap incident to the transcript as one marker and
+    /// forgets it.
+    ///
+    /// Called both when the pipeline says recognition caught up and at every
+    /// boundary that ends the condition by ending what produced it: a pause, a
+    /// recogniser restart, a stop, a capture stream that died. An incident that
+    /// never cost any audio is dropped rather than written, because a
+    /// blockquote stating that nothing was lost is not transcript material.
+    private func closeGapIncident() async {
+        guard let incident = openGapIncident else { return }
+        openGapIncident = nil
+        guard !incident.isEmpty else {
+            await persistence.noteOpenGapIncident(startingAt: nil)
+            return
+        }
+        ScribeKitLog.recognition.notice(
+            "Transcription gap incident closed after \(incident.observationCount, privacy: .public) observation(s)"
+        )
+        await persist(incident.gap)
+        // Cleared after the marker is in the file, never before. The other
+        // order would leave a window in which the record says nothing is
+        // outstanding and the transcript does not carry it either, which is
+        // the one outcome that loses the incident rather than repeating it.
+        await persistence.noteOpenGapIncident(startingAt: nil)
+    }
+
     /// Writes one gap marker to the transcript.
     ///
     /// - Parameter gap: The untranscribed stretch.
@@ -1027,6 +1129,10 @@ final class MeetingRuntime {
             "Transcript persistence failed after \(self.transcriptSpanCount, privacy: .public) span(s)"
         )
         persistenceState = .failed(message: message, layout: persistenceState.layout)
+        // Nothing more can reach the transcript, so an open incident is
+        // dropped rather than written: a write that is already failing cannot
+        // be made truthful by adding one more to it.
+        openGapIncident = nil
         try? await persistence.finishSession(
             endedAt: now(),
             outcome: .failed,

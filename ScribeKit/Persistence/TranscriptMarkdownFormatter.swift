@@ -139,13 +139,36 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
     /// timeline rather than speech, and a gap whose position is unknown has no
     /// minute to head.
     ///
+    /// One marker describes one incident, however many separate losses the
+    /// pipeline observed while it was going on. Which of the three sentences
+    /// is written follows from what the incident actually knows:
+    ///
+    /// - No position at all — time lost while the recogniser was being rebuilt
+    ///   — states the length and nothing else.
+    /// - A position but no width worth stating names the moment it happened.
+    /// - A width of a second or more is written as a range, and the range is
+    ///   stated *beside* the amount of audio lost rather than instead of it.
+    ///   The two are different quantities: the range is how long the meeting
+    ///   was in trouble, and the seconds are how much audio that cost. Audio
+    ///   inside the range was still being transcribed between the losses, so
+    ///   nothing here may be read as saying the whole range is missing.
+    ///
     /// - Parameter gap: The untranscribed stretch.
     /// - Returns: Markdown ending in a blank line.
     func gap(_ gap: TranscriptGap) -> String {
         let seconds = String(format: "%.1f", gap.duration)
-        let position = gap.startTime.map { " around \(clock(wallClock(offset: $0), includingSeconds: true))" } ?? ""
-        return "> **Transcription gap:** approximately \(seconds) seconds of audio"
-            + "\(position) was not transcribed; \(gap.reasonDescription).\n\n"
+        var text = "> **Transcription gap:** approximately \(seconds) seconds of audio"
+        if gap.spansRange, let startTime = gap.startTime, let endTime = gap.endTime {
+            text += " was not transcribed between "
+            text += clock(wallClock(offset: startTime), includingSeconds: true)
+            text += " and \(clock(wallClock(offset: endTime), includingSeconds: true))"
+            text += "; \(gap.reasonDescription).\n\n"
+            return text
+        }
+        if let startTime = gap.startTime {
+            text += " around \(clock(wallClock(offset: startTime), includingSeconds: true))"
+        }
+        return text + " was not transcribed; \(gap.reasonDescription).\n\n"
     }
 
     /// The closing block, appended once when the session ends.
@@ -225,6 +248,29 @@ nonisolated struct TranscriptMarkdownFormatter: Equatable, Sendable {
         "> **Capture ended unexpectedly:** \(clock(date, includingSeconds: true)). "
             + "The meeting was not stopped; capture of its audio ended by itself, "
             + "so nothing was captured or transcribed after this point.\n\n"
+    }
+
+    /// The note recovery appends for a gap incident that was still open when
+    /// ScribeKit stopped.
+    ///
+    /// A meeting killed mid-incident knows where the trouble started and
+    /// nothing else about it: not when it ended, because it was still going
+    /// on, and not how much audio it cost in total, because the losses were
+    /// still being counted. The note therefore states the one fact the session
+    /// record carried and refuses the other two, rather than closing the range
+    /// at the moment the interruption happened to be noticed.
+    ///
+    /// - Parameters:
+    ///   - startedAt: The wall-clock moment the open incident began, as the
+    ///     session record stored it.
+    ///   - timeZone: The zone the time is written in.
+    /// - Returns: Markdown ending in a blank line.
+    static func unfinishedGapNotice(startedAt: Date, timeZone: TimeZone = .current) -> String {
+        let formatter = TranscriptMarkdownFormatter(startedAt: startedAt, timeZone: timeZone)
+        return "> **Transcription gap:** audio was not being fully transcribed from approximately "
+            + "\(formatter.clock(startedAt, includingSeconds: true)) onwards, because recognition "
+            + "fell behind capture. ScribeKit stopped before that ended, so how long it lasted and "
+            + "how much audio it cost are not known.\n\n"
     }
 
     /// The note recovery appends to a transcript whose meeting never finished.

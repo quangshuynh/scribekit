@@ -70,15 +70,19 @@ final class LiveTranscriptModel {
             guard !segment.displayText.isEmpty else { return }
             finalizedSegments.append(segment)
         case let .interrupted(interruption):
-            lastInterruption = interruption
             switch interruption {
-            case let .audioDropped(seconds, _):
-                untranscribedSeconds += seconds
+            case let .audioDropped(drop):
+                untranscribedSeconds += drop.seconds
+                // A report that only carries the news that recognition caught
+                // up closes a gap incident and has no loss of its own; showing
+                // it would replace a real interruption on screen with nothing.
+                guard drop.seconds > 0 else { return }
             case .recognitionFailed:
                 // The hypothesis was never finalised and the recogniser that
                 // produced it has stopped, so it is not transcript material.
                 partialSegment = nil
             }
+            lastInterruption = interruption
         }
     }
 

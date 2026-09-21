@@ -102,9 +102,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
     nonisolated func consume(_ buffer: CapturedPCMBuffer) {
         guard let input = input.withLock({ $0 }) else { return }
         if let dropped = input.append(buffer) {
-            publisher.publish(.interrupted(
-                .audioDropped(seconds: dropped.seconds, startTime: dropped.startTime)
-            ))
+            publisher.publish(.interrupted(.audioDropped(dropped)))
         }
     }
 
@@ -203,9 +201,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         input.withLock { $0 = nil }
 
         if let dropped = run.input.takeUnreportedDrop() {
-            publisher.publish(.interrupted(
-                .audioDropped(seconds: dropped.seconds, startTime: dropped.startTime)
-            ))
+            publisher.publish(.interrupted(.audioDropped(dropped)))
         }
         run.input.close()
 

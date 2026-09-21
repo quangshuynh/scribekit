@@ -225,10 +225,12 @@ nonisolated struct DiagnosticReport: Codable, Equatable, Sendable {
         /// How many finalised spans reached the transcript.
         let transcriptSpanCount: Int
 
-        /// How many gaps were written into it.
+        /// How many gap markers were written into it, which is one per
+        /// incident rather than one per reported loss.
         let gapCount: Int
 
-        /// How much time those gaps account for.
+        /// How much audio the meeting could not transcribe, summed over every
+        /// loss the pipeline reported rather than over the markers.
         let untranscribedSeconds: Double
 
         /// Whether a recording file was opened.
