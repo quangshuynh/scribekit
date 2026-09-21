@@ -241,6 +241,23 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         current = session
     }
 
+    func noteOpenGapIncident(startingAt startTime: Double?) async {
+        guard var session = current else { return }
+        // The record stores the moment on the wall clock rather than the media
+        // offset, because whoever reads it back — a later launch, after the
+        // process that knew this meeting's pauses is gone — has no way to map
+        // one onto the other. The formatter here still does.
+        let startedAt = startTime.map { session.formatter.wallClock(offset: $0) }
+        guard startedAt != session.metadata.openGapStartedAt else { return }
+        session.metadata = session.metadata.notingOpenGap(startedAt: startedAt)
+        current = session
+        do {
+            try recoveryStore.writeMetadata(session.metadata, to: session.layout)
+        } catch {
+            ScribeKitLog.persistence.error("Open transcription gap not recorded in the session record")
+        }
+    }
+
     func recordPause(at date: Date, capturedDuration: Double) async throws {
         guard var session = current else { throw TranscriptPersistenceError(.noSessionInProgress) }
 

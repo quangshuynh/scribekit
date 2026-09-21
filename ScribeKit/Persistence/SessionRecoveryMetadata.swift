@@ -58,9 +58,9 @@ nonisolated enum SessionRecoveryStatus: String, Codable, Sendable, CaseIterable,
 /// before anything else is interpreted, so a file written by a later ScribeKit
 /// is refused rather than misread as this one.
 ///
-/// ``audioRetention``, ``audioPath``, ``pausedAt`` and ``capturedDuration``
-/// were added after version 1 was in use and the version was deliberately not
-/// raised. All four are optional and additive:
+/// ``audioRetention``, ``audioPath``, ``pausedAt``, ``capturedDuration`` and
+/// ``openGapStartedAt`` were added after version 1 was in use and the version
+/// was deliberately not raised. All are optional and additive:
 /// a record written before they existed decodes with them absent, which is the
 /// truth about a session that kept no audio, and a build that has never heard
 /// of them ignores the extra keys. Raising the version would have made
@@ -136,6 +136,22 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     /// when it was last written.
     let pausedAt: Date?
 
+    /// When a transcription-gap incident that had not finished began.
+    ///
+    /// A run of recognition-backpressure losses is summarised into a single
+    /// gap marker when it ends, so while one is going on the transcript does
+    /// not yet carry it. This is what keeps that honest across a ScribeKit
+    /// that never gets to finish: it is set when an incident opens and cleared
+    /// when the marker has been written, so a record found in progress with
+    /// this present describes a meeting that was losing audio when it stopped.
+    ///
+    /// Only the start is stored. The end and the total were still being
+    /// measured, and a record that guessed at them would be inventing the two
+    /// facts the incident had not established yet. `nil` in every record
+    /// written before gap incidents existed, and in every meeting that was not
+    /// in the middle of one.
+    let openGapStartedAt: Date?
+
     /// Seconds of audio the meeting had captured when the record was last
     /// written.
     ///
@@ -164,6 +180,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - endedAt: When ScribeKit closed the session, if it did.
     ///   - interruptedAt: When ScribeKit recorded an interruption, if it has.
     ///   - pausedAt: When the meeting was paused, while it still is.
+    ///   - openGapStartedAt: When an unfinished gap incident began.
     ///   - capturedDuration: Seconds of audio captured so far.
     init(
         schemaVersion: Int = SessionRecoveryMetadata.currentSchemaVersion,
@@ -179,6 +196,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         endedAt: Date? = nil,
         interruptedAt: Date? = nil,
         pausedAt: Date? = nil,
+        openGapStartedAt: Date? = nil,
         capturedDuration: Double? = nil
     ) {
         self.schemaVersion = schemaVersion
@@ -194,6 +212,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         self.endedAt = endedAt
         self.interruptedAt = interruptedAt
         self.pausedAt = pausedAt
+        self.openGapStartedAt = openGapStartedAt
         self.capturedDuration = capturedDuration
     }
 
@@ -222,6 +241,21 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         )
     }
 
+    /// The same record with an unfinished gap incident noted or cleared.
+    ///
+    /// - Parameter startedAt: When the open incident began, or `nil` once its
+    ///   marker has been written to the transcript and there is nothing
+    ///   outstanding to report.
+    /// - Returns: A copy carrying the new open-gap state.
+    func notingOpenGap(startedAt: Date?) -> SessionRecoveryMetadata {
+        copy(
+            status: status,
+            endedAt: endedAt,
+            interruptedAt: interruptedAt,
+            openGapStartedAt: .some(startedAt)
+        )
+    }
+
     /// The same record marked as closed by ScribeKit.
     ///
     /// - Parameters:
@@ -239,7 +273,11 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         at endedAt: Date,
         capturedDuration: Double? = nil
     ) -> SessionRecoveryMetadata {
-        // A closed meeting is not paused, whatever it was doing a moment ago.
+        // A closed meeting is not paused, whatever it was doing a moment ago,
+        // and it is not in the middle of a gap incident either: every path
+        // that closes a session flushes an open one to the transcript first,
+        // so leaving that field set would have recovery report a gap the
+        // document already carries.
         // An interruption ScribeKit closed itself is dated: unlike one found
         // after a relaunch, this process was running and watched it happen.
         copy(
@@ -247,6 +285,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
             endedAt: endedAt,
             interruptedAt: outcome == .interrupted ? endedAt : interruptedAt,
             pausedAt: .some(nil),
+            openGapStartedAt: .some(nil),
             capturedDuration: capturedDuration
         )
     }
@@ -289,6 +328,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - interruptedAt: The new interruption time.
     ///   - pausedAt: The new pause time, wrapped once so that `.some(nil)`
     ///     clears it and an omitted argument keeps the current one.
+    ///   - openGapStartedAt: The new open-gap time, wrapped the same way.
     ///   - capturedDuration: The new captured duration. Defaults to the
     ///     current one.
     /// - Returns: The copy.
@@ -297,6 +337,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         endedAt: Date?,
         interruptedAt: Date?,
         pausedAt: Date?? = nil,
+        openGapStartedAt: Date?? = nil,
         capturedDuration: Double? = nil
     ) -> SessionRecoveryMetadata {
         SessionRecoveryMetadata(
@@ -313,6 +354,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
             endedAt: endedAt,
             interruptedAt: interruptedAt,
             pausedAt: pausedAt ?? self.pausedAt,
+            openGapStartedAt: openGapStartedAt ?? self.openGapStartedAt,
             capturedDuration: capturedDuration ?? self.capturedDuration
         )
     }
