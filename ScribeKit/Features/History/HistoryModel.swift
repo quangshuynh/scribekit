@@ -61,9 +61,42 @@ final class HistoryModel {
         }
     }
 
-    /// The sessions matching ``query``, best match first, or every session
-    /// when nothing has been typed.
+    /// Which meetings are listed, by where their audio came from.
+    ///
+    /// Independent of ``query``: clearing the search keeps the filter, and
+    /// changing the filter keeps the search.
+    var filter: HistoryCaptureFilter = .all {
+        didSet {
+            guard filter != oldValue else { return }
+            refreshResults()
+        }
+    }
+
+    /// The sessions ``filter`` admits that match ``query``, best match first,
+    /// or every one it admits when nothing has been typed.
     private(set) var results: [HistorySearchResult] = []
+
+    /// What the user typed into the selected transcript's find field.
+    ///
+    /// Kept when another meeting is selected, as a Find field is, and matched
+    /// again in that meeting.
+    var findQuery = "" {
+        didSet {
+            guard findQuery != oldValue else { return }
+            refreshFind()
+        }
+    }
+
+    /// Where ``findQuery`` occurs in the selected transcript, and which
+    /// occurrence is current.
+    private(set) var find = TranscriptFind.inactive
+
+    /// A passage the user asked to see in the transcript preview — a flagged
+    /// passage from Review — or `nil`.
+    ///
+    /// Cleared by a new find, so the preview follows whichever the user did
+    /// last.
+    private(set) var revealedSpanIndex: Int?
 
     /// The loaded transcripts, prepared for matching.
     ///
@@ -222,6 +255,7 @@ final class HistoryModel {
     /// - Parameter id: The selected session's directory, or `nil`.
     func selectSession(_ id: URL?) async {
         selectedSessionID = id
+        refreshFind()
         guard let id, let document = document(for: id) else {
             derived.clear()
             return
@@ -271,9 +305,50 @@ final class HistoryModel {
         player.stop()
     }
 
+    /// Makes the next find match current, wrapping to the first.
+    func findNext() {
+        find.next()
+        revealedSpanIndex = nil
+    }
+
+    /// Makes the previous find match current, wrapping to the last.
+    func findPrevious() {
+        find.previous()
+        revealedSpanIndex = nil
+    }
+
+    /// Shows one passage of the selected transcript in the preview.
+    ///
+    /// - Parameter spanIndex: The span's position.
+    func reveal(spanIndex: Int) {
+        revealedSpanIndex = spanIndex
+    }
+
+    /// The span the preview should show, when there is one: the passage last
+    /// revealed, or else the current find match.
+    var previewAnchor: Int? {
+        revealedSpanIndex ?? find.current?.spanIndex
+    }
+
     /// Re-runs the search over the documents in memory.
     private func refreshResults() {
-        results = TranscriptSearch.results(for: query, in: index)
+        results = TranscriptSearch.results(for: query, in: index, filter: filter)
+    }
+
+    /// Re-runs the find over the selected transcript, already in memory.
+    ///
+    /// Nothing is read from disk and nothing is written: the matches are
+    /// positions in the spans the load produced.
+    private func refreshFind() {
+        revealedSpanIndex = nil
+        guard let selectedSessionID else {
+            find = .inactive
+            return
+        }
+        find = TranscriptFind(
+            query: TranscriptSearch.normalized(findQuery),
+            matches: index.occurrences(of: findQuery, inDocument: selectedSessionID)
+        )
     }
 
     /// Runs work with security-scoped access to the save folder held open for

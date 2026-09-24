@@ -258,6 +258,31 @@ struct HistoryIntegrationTests {
         }
     }
 
+    @Test("Filtering, and finding and stepping through a transcript, leave every artifact byte-identical")
+    func filterAndFindChangeNothing() async throws {
+        try await withSaveFolder { destination in
+            let directory = try writeSession(
+                "2026-08-29-closures-walkthrough",
+                in: destination,
+                title: "Closures Walkthrough",
+                texts: ["A closure captures the variables it refers to.", "Escaping closures outlive the call."]
+            )
+            let before = try fingerprints(of: destination)
+
+            let report = try await makeService().load(destination)
+            let index = TranscriptSearchIndex(report.documents)
+            _ = TranscriptSearch.results(for: "closure", in: index, filter: .applications)
+            _ = TranscriptSearch.results(for: "", in: index, filter: .microphone)
+            var find = TranscriptFind(query: "closure", matches: index.occurrences(of: "closure", inDocument: directory))
+            #expect(find.matches.count == 2)
+            find.next()
+            find.next()
+            find.previous()
+
+            #expect(try fingerprints(of: destination) == before)
+        }
+    }
+
     @Test("Notes and reviewed marks change the derived sidecar and nothing else")
     func derivedWritesLeaveSourceArtifactsIdentical() async throws {
         try await withSaveFolder { destination in

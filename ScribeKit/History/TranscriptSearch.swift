@@ -28,6 +28,10 @@ nonisolated enum HistoryMatchKind: Int, Comparable, Equatable, Sendable {
     /// One of the captured application names contains the query.
     case source
 
+    /// The name of the meeting's capture mode — App Audio or Microphone —
+    /// contains the query.
+    case captureMode
+
     static func < (lhs: HistoryMatchKind, rhs: HistoryMatchKind) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
@@ -104,6 +108,48 @@ nonisolated struct TranscriptExcerpt: Equatable, Sendable {
     }
 }
 
+/// Which meetings History lists, by where their audio came from.
+///
+/// A filter narrows the list before a query is matched, and the two are
+/// independent: clearing the query keeps the filter, and changing the filter
+/// keeps the query.
+nonisolated enum HistoryCaptureFilter: String, CaseIterable, Identifiable, Sendable {
+    /// Every meeting, including those whose capture mode is not known.
+    case all
+
+    /// Meetings that captured application audio.
+    case applications
+
+    /// Meetings that listened to a microphone.
+    case microphone
+
+    var id: String { rawValue }
+
+    /// The name the filter control uses.
+    var displayName: String {
+        switch self {
+        case .all: "All"
+        case .applications: CaptureMode.applications.displayName
+        case .microphone: CaptureMode.microphone.displayName
+        }
+    }
+
+    /// Whether a meeting belongs in the filtered list.
+    ///
+    /// A meeting whose capture mode is not known — one with no session record
+    /// — is listed under All and under neither mode, rather than being guessed
+    /// into one.
+    ///
+    /// - Parameter session: The meeting.
+    func includes(_ session: HistorySession) -> Bool {
+        switch self {
+        case .all: true
+        case .applications: session.knownCaptureMode == .applications
+        case .microphone: session.knownCaptureMode == .microphone
+        }
+    }
+}
+
 /// One session a query matched.
 nonisolated struct HistorySearchResult: Identifiable, Equatable, Sendable {
 
@@ -141,6 +187,26 @@ nonisolated struct HistorySearchResult: Identifiable, Equatable, Sendable {
         self.kind = kind
         self.transcriptMatchCount = transcriptMatchCount
         self.excerpt = excerpt
+    }
+
+    /// What assistive technology reads for this result's row.
+    ///
+    /// One sentence per fact, in the order the row shows them: the title, the
+    /// status as a word, the date, the capture mode when it is known, and for
+    /// a match in speech, where it is, the excerpt verbatim and how many
+    /// matches there are. The excerpt's highlight and the ellipses the row
+    /// draws are presentation and are not read out.
+    ///
+    /// - Parameter date: The row's date, as the row shows it.
+    /// - Returns: The description.
+    func accessibilityDescription(date: String) -> String {
+        var parts = ["\(session.title).", "\(session.status.displayName).", "\(date)."]
+        if let mode = session.knownCaptureMode { parts.append("\(mode.displayName).") }
+        if let excerpt {
+            parts.append("Match at \(excerpt.timestampDescription): \(excerpt.text)")
+            if transcriptMatchCount > 1 { parts.append("\(transcriptMatchCount) matches in the transcript.") }
+        }
+        return parts.joined(separator: " ")
     }
 }
 
@@ -193,6 +259,22 @@ nonisolated struct TranscriptSearchIndex: Sendable {
     /// Whether there is nothing to search.
     var isEmpty: Bool { entries.isEmpty }
 
+    /// Every occurrence of a query in one loaded document, in transcript
+    /// order.
+    ///
+    /// Uses the folded spans the index already holds, so finding within an
+    /// open transcript costs a walk over text already in memory.
+    ///
+    /// - Parameters:
+    ///   - query: What the user typed.
+    ///   - id: The session's directory.
+    /// - Returns: The matches, or none when the query is empty or the session
+    ///   is not in the index.
+    func occurrences(of query: String, inDocument id: URL) -> [TranscriptFindMatch] {
+        guard let entry = entries.first(where: { $0.document.id == id }) else { return [] }
+        return TranscriptSearch.occurrences(of: query, in: entry.document.spans, folded: entry.folded)
+    }
+
     /// Runs `body` over each document and the folded form of its spans.
     ///
     /// - Parameter body: Called once per document.
@@ -202,15 +284,23 @@ nonisolated struct TranscriptSearchIndex: Sendable {
 
     /// The lower-cased ASCII bytes of a string.
     ///
+    /// A tab, line feed or carriage return folds to a space, byte for byte, so
+    /// a phrase that a transcript happened to wrap still matches a query typed
+    /// on one line, and every offset still names the same character.
+    ///
     /// - Parameter text: The string to fold.
-    /// - Returns: Its bytes with `A`–`Z` lowered, or `nil` when the string
-    ///   holds anything outside ASCII.
+    /// - Returns: Its bytes with `A`–`Z` lowered and line breaks and tabs made
+    ///   spaces, or `nil` when the string holds anything outside ASCII.
     static func folded(_ text: String) -> [UInt8]? {
         var bytes: [UInt8] = []
         bytes.reserveCapacity(text.utf8.count)
         for byte in text.utf8 {
             guard byte < 0x80 else { return nil }
-            bytes.append(byte >= UInt8(ascii: "A") && byte <= UInt8(ascii: "Z") ? byte + 32 : byte)
+            switch byte {
+            case UInt8(ascii: "A")...UInt8(ascii: "Z"): bytes.append(byte + 32)
+            case UInt8(ascii: "\t"), UInt8(ascii: "\n"), UInt8(ascii: "\r"): bytes.append(UInt8(ascii: " "))
+            default: bytes.append(byte)
+            }
         }
         return bytes
     }
@@ -250,8 +340,9 @@ nonisolated struct TranscriptSearchIndex: Sendable {
 /// files, so typing a character costs a walk over text that is already in
 /// memory rather than a trip to disk.
 ///
-/// What is searched is deliberately narrow. Recognised speech and the
-/// meeting's own title and source names are searchable; the header block,
+/// What is searched is deliberately narrow. Recognised speech, the meeting's
+/// own title and source names, and the name of its capture mode are
+/// searchable; the header block,
 /// minute headings, gap blockquotes, the interruption notice and the footer
 /// are things ScribeKit wrote *about* the meeting, and matching them would
 /// mean every transcript answering to `ScribeKit`, `Transcription gap` or
@@ -268,17 +359,23 @@ nonisolated enum TranscriptSearch {
     /// Runs a query over the loaded transcripts.
     ///
     /// An empty query is not a failed search; it is the absence of one, so
-    /// every session is returned in the order the load produced — newest
-    /// first.
+    /// every session the filter admits is returned in the order the load
+    /// produced — newest first.
     ///
     /// - Parameters:
-    ///   - query: What the user typed. Surrounding whitespace is ignored.
+    ///   - query: What the user typed. Surrounding whitespace is ignored and
+    ///     runs of whitespace inside it match as one space.
     ///   - index: The loaded transcripts, prepared for matching.
+    ///   - filter: Which meetings to consider at all. Defaults to every one.
     /// - Returns: The matching sessions, best match first.
-    static func results(for query: String, in index: TranscriptSearchIndex) -> [HistorySearchResult] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    static func results(
+        for query: String,
+        in index: TranscriptSearchIndex,
+        filter: HistoryCaptureFilter = .all
+    ) -> [HistorySearchResult] {
+        let needle = normalized(query)
         guard !needle.isEmpty else {
-            return index.documents.map {
+            return index.documents.filter { filter.includes($0.session) }.map {
                 HistorySearchResult(
                     session: $0.session,
                     kind: .unfiltered,
@@ -291,6 +388,7 @@ nonisolated enum TranscriptSearch {
         let foldedNeedle = TranscriptSearchIndex.folded(needle)
         var matches: [(result: HistorySearchResult, firstSpan: Int)] = []
         index.forEachEntry { document, folded in
+            guard filter.includes(document.session) else { return }
             guard let match = evaluate(
                 needle,
                 foldedNeedle: foldedNeedle,
@@ -314,9 +412,50 @@ nonisolated enum TranscriptSearch {
     /// - Returns: The matching sessions, best match first.
     static func results(
         for query: String,
-        in documents: [TranscriptSearchDocument]
+        in documents: [TranscriptSearchDocument],
+        filter: HistoryCaptureFilter = .all
     ) -> [HistorySearchResult] {
-        results(for: query, in: TranscriptSearchIndex(documents))
+        results(for: query, in: TranscriptSearchIndex(documents), filter: filter)
+    }
+
+    /// A query as it is matched: trimmed, with every run of whitespace inside
+    /// it made one space.
+    ///
+    /// Punctuation is left exactly as typed. A query of `deploy` still finds
+    /// `deployment,` because matching is by substring, and a query that
+    /// includes punctuation is asking for it.
+    ///
+    /// - Parameter query: What the user typed.
+    /// - Returns: The query to match, empty when nothing but whitespace was
+    ///   typed.
+    static func normalized(_ query: String) -> String {
+        query.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    /// Every occurrence of a query in a sequence of spans, in transcript
+    /// order, by the same rules History's search matches by.
+    ///
+    /// - Parameters:
+    ///   - query: What the user typed; normalised as ``normalized(_:)`` says.
+    ///   - spans: The spans to look in.
+    ///   - folded: Their folded form from an index, or `nil` to fold them now.
+    /// - Returns: The matches.
+    static func occurrences(
+        of query: String,
+        in spans: [TranscriptSpan],
+        folded: [[UInt8]?]? = nil
+    ) -> [TranscriptFindMatch] {
+        let needle = normalized(query)
+        guard !needle.isEmpty else { return [] }
+        let foldedNeedle = TranscriptSearchIndex.folded(needle)
+        var found: [TranscriptFindMatch] = []
+        for (position, span) in spans.enumerated() {
+            let foldedSpan = folded.map { $0[position] } ?? TranscriptSearchIndex.folded(span.text)
+            for match in matches(of: needle, foldedNeedle: foldedNeedle, in: span, folded: foldedSpan) {
+                found.append(TranscriptFindMatch(spanIndex: span.index, offset: match.offset, length: match.length))
+            }
+        }
+        return found
     }
 
     /// Scores one document against a query.
@@ -354,11 +493,15 @@ nonisolated enum TranscriptSearch {
         let matchesSource = document.session.sourceNames.contains {
             $0.range(of: needle, options: matchOptions, locale: nil) != nil
         }
+        let matchesCaptureMode = document.session.knownCaptureMode.map {
+            $0.displayName.range(of: needle, options: matchOptions, locale: nil) != nil
+        } ?? false
 
         var kinds: [HistoryMatchKind] = []
         if let titleKind { kinds.append(titleKind) }
         if count > 0 { kinds.append(.transcript) }
         if matchesSource { kinds.append(.source) }
+        if matchesCaptureMode { kinds.append(.captureMode) }
         guard let kind = kinds.min() else { return nil }
 
         let result = HistorySearchResult(
