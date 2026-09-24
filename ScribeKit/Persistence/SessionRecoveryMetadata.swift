@@ -58,9 +58,9 @@ nonisolated enum SessionRecoveryStatus: String, Codable, Sendable, CaseIterable,
 /// before anything else is interpreted, so a file written by a later ScribeKit
 /// is refused rather than misread as this one.
 ///
-/// ``audioRetention``, ``audioPath``, ``pausedAt``, ``capturedDuration`` and
-/// ``openGapStartedAt`` were added after version 1 was in use and the version
-/// was deliberately not raised. All are optional and additive:
+/// ``audioRetention``, ``audioPath``, ``pausedAt``, ``capturedDuration``,
+/// ``openGapStartedAt`` and ``captureMode`` were added after version 1 was in
+/// use and the version was deliberately not raised. All are optional and additive:
 /// a record written before they existed decodes with them absent, which is the
 /// truth about a session that kept no audio, and a build that has never heard
 /// of them ignores the extra keys. Raising the version would have made
@@ -82,11 +82,20 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     /// When the meeting's timeline began.
     let startedAt: Date
 
-    /// Display names of the applications that were being captured.
+    /// Display names of the applications that were being captured, or of the
+    /// microphone, as the transcript header names them.
     let sourceNames: [String]
 
     /// The BCP-47 locale recognition ran in.
     let localeIdentifier: String
+
+    /// Where the meeting's audio came from.
+    ///
+    /// Written for every session, App Audio included, so a record states its
+    /// source rather than leaving it to be inferred. `nil` in records written
+    /// before Microphone meetings existed; every one of those captured
+    /// applications, and a reader may say so, but the record itself does not.
+    let captureMode: CaptureMode?
 
     /// The transcript's path relative to the session directory.
     let transcriptPath: String
@@ -172,6 +181,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - startedAt: When the meeting's timeline began.
     ///   - sourceNames: Display names of the captured applications.
     ///   - localeIdentifier: The BCP-47 recognition locale.
+    ///   - captureMode: Where the meeting's audio came from.
     ///   - transcriptPath: The transcript's path relative to the session
     ///     directory.
     ///   - audioRetention: What the meeting was asked to keep of its audio.
@@ -189,6 +199,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         startedAt: Date,
         sourceNames: [String],
         localeIdentifier: String,
+        captureMode: CaptureMode? = nil,
         transcriptPath: String = SessionArtifactLayout.transcriptFileName,
         audioRetention: AudioRetentionMode? = nil,
         audioPath: String? = nil,
@@ -205,6 +216,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         self.startedAt = startedAt
         self.sourceNames = sourceNames
         self.localeIdentifier = localeIdentifier
+        self.captureMode = captureMode
         self.transcriptPath = transcriptPath
         self.audioRetention = audioRetention
         self.audioPath = audioPath
@@ -347,6 +359,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
             startedAt: startedAt,
             sourceNames: sourceNames,
             localeIdentifier: localeIdentifier,
+            captureMode: captureMode,
             transcriptPath: transcriptPath,
             audioRetention: audioRetention,
             audioPath: audioPath,

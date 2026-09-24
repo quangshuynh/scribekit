@@ -168,7 +168,7 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
             do {
                 try file.append(formatter.header(
                     title: session.displayTitle,
-                    sourceNames: session.selectedSources.map(\.displayName),
+                    sourceNames: session.selectedSources.map(\.transcriptName),
                     localeIdentifier: localeIdentifier
                 ))
             } catch {
@@ -180,8 +180,9 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
                 sessionID: session.id,
                 title: session.displayTitle,
                 startedAt: startedAt,
-                sourceNames: session.selectedSources.map(\.displayName),
+                sourceNames: session.selectedSources.map(\.transcriptName),
                 localeIdentifier: localeIdentifier,
+                captureMode: CaptureMode(sources: session.selectedSources),
                 audioRetention: session.audioRetention,
                 audioPath: layout.audioURL(for: session.audioRetention)?.lastPathComponent,
                 status: .inProgress
