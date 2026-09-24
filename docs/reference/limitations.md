@@ -87,24 +87,28 @@ Microphone transcription is unreleased; see
 - **One capture mode per meeting.** A meeting transcribes the selected
   applications or the microphone, never both, and the mode cannot change while
   it runs. There is no mixing, no speaker separation and no identification.
-- **No microphone picker.** ScribeKit listens to the Mac's current sound input.
-  Choosing another means changing the input in System Settings › Sound before
-  starting.
-- **Any change to the input ends the meeting.** A device switched, disconnected
-  or changing format stops the audio engine, and the meeting is recorded as
-  interrupted rather than moved to another microphone. This may include
-  changes that did not concern the input; whether connecting headphones does
-  has not been observed.
+- **One microphone per meeting.** The input is fixed when a meeting starts —
+  System Default is resolved to a device then — and a meeting never follows the
+  Mac to another one. A meeting whose microphone is disconnected, rerouted,
+  reformatted or stopped by macOS ends as interrupted; it is not restarted, even
+  on the same device once it is reconnected, because the stretch in between
+  would be a hole in the transcript with no marker for it.
+- **Output changes are judged by evidence, not yet by observation on every
+  kind of hardware.** Connecting headphones or switching the default input
+  leaves a meeting listening when Core Audio and the audio engine report its
+  input unchanged and still running. If macOS stops the audio engine for an
+  output change, the meeting ends as interrupted rather than restarting; which
+  output changes do that on which Macs is on the manual checklist.
+- **Two microphones with one name look alike.** The picker lists inputs by the
+  name macOS gives them; two identical USB microphones are two rows with the
+  same name.
 - **No microphone audio is kept.** Retention applies to App Audio meetings
   only; a Microphone meeting writes a transcript and nothing else.
 - **Channels are averaged to mono.** A multi-channel interface's channels are
   mixed evenly before recognition, so a microphone on one channel of a
   two-channel interface reaches the recogniser at half its level.
-- **Not yet observed on hardware.** Listening in the background, hidden,
-  minimised or windowless follows from the ownership design and is covered by
-  tests without a microphone, but has not been confirmed with a real one.
-  Sleep and wake, screen lock and permission revoked mid-meeting have not been
-  observed at all.
+- **Not observed on hardware.** Sleep and wake, screen lock and permission
+  revoked mid-meeting have not been observed.
 - **Loss inside the audio engine is not visible.** The tap hands audio to the
   pipeline as it arrives and the recogniser's backlog reports what it drops;
   audio the engine itself never delivered cannot be counted.
@@ -162,9 +166,19 @@ Microphone transcription is unreleased; see
   gap markers, the interruption notice and the footer.
 - **Whole transcripts are held in memory while History is open**, so its cost
   grows with the folder. Measured in a debug build: 200 one-hour meetings —
-  48,000 spans, 7.9 MB — load in 0.82 s and search in 100–160 ms per query, for
-  a 17 MB memory increase. A folder several times larger would justify an
-  on-disk index; nothing smaller does.
+  48,000 spans, 7.9 MB — load in 0.82 s, for a 17 MB memory increase; in an
+  optimised build a keystroke's search over the same size takes at most 20 ms.
+  A folder several times larger would justify an on-disk index; nothing smaller
+  does.
+- **Filtering is by capture mode only.** There is no date filter. A transcript
+  with no session record has no known mode and is listed only under All.
+- **Transcript find covers speech only.** Transcription gaps, pauses and
+  interruption notices are not find targets and are not shown in the preview;
+  open the transcript to see them. Flagged review passages can be jumped to
+  from Review.
+- **The preview shows 50 passages at a time.** It moves to the current find
+  match or a revealed passage; it is not a scrolling reader of the whole
+  transcript.
 
 ## Save folder
 

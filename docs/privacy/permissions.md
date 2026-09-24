@@ -56,6 +56,11 @@ permission state of its own beside it. Reading it never prompts.
 | Denied | *Action needed* | macOS will not ask again. Turn ScribeKit on in System Settings › Privacy & Security › Microphone, then **Check Again** |
 | Restricted | *Action needed* | Set by device management or parental controls; ScribeKit cannot ask for it |
 
+Listing the Mac's microphones for the **Input** picker asks for nothing:
+naming a device is not listening to it, and the list is read from Core Audio
+without microphone access. Choosing a microphone there does not change the
+Mac's own input setting.
+
 ScribeKit asks for the microphone only when a meeting is being started, never
 during a resume: a resume that finds access turned off is refused and the
 meeting stays paused.

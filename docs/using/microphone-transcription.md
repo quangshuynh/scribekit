@@ -11,7 +11,7 @@ exactly one of them:
 
 | | App Audio | Microphone |
 | --- | --- | --- |
-| **Listens to** | The applications you select, through ScreenCaptureKit | The Mac's current sound input |
+| **Listens to** | The applications you select, through ScreenCaptureKit | One sound input: the Mac's default, or one you choose |
 | **Permission** | Screen & System Audio Recording | Microphone |
 | **Audio kept** | Only if you choose raw or compressed retention | Never — only the transcript is written |
 | **Good for** | A call or a video playing on this Mac | Your own voice, or a room, while you work in other apps |
@@ -23,8 +23,8 @@ meeting runs, and there is no way to capture both at once.
 ## Starting a Microphone meeting
 
 1. Choose **Microphone** under **Transcribe from**.
-2. Check the **Microphone** section: it names the input ScribeKit would listen
-   to and says whether macOS allows it.
+2. In the **Microphone** section, choose the **Input** — System Default, or a
+   particular microphone — and check that macOS allows access.
 3. Press **Start Meeting**. The first time, macOS asks whether ScribeKit may
    use the microphone. The question is asked before anything is written, so
    refusing leaves no empty meeting behind.
@@ -41,27 +41,57 @@ the session record, recovery and diagnostics.
 
 ## Which microphone
 
-ScribeKit listens to **the Mac's current sound input** — whichever device is
-selected in System Settings › Sound › Input — and names it on the setup
-screen. There is no microphone picker in ScribeKit. To use a different
-microphone, choose it in System Settings before you start, then **Check
-Again**.
+**Input** lists the Mac's sound inputs — the same devices System Settings ›
+Sound › Input offers, such as the built-in microphone, AirPods, a USB
+microphone or a webcam — with **System Default** first:
 
-The input is fixed when the meeting starts. ScribeKit never follows the system
-to a different microphone during a meeting:
+- **System Default — MacBook Air Microphone** uses whichever input the Mac is
+  set to *when the meeting starts*, and names it. Change the Mac's input in
+  System Settings or Control Center and the next meeting follows it.
+- **A named device** uses that microphone whatever the Mac's default is.
+  Choosing it changes nothing outside ScribeKit: the Mac's own input setting,
+  and every other app, stay as they were.
 
-- If the input changes, is disconnected or changes format while a meeting is
-  listening, the meeting ends and is recorded as **interrupted**. Everything
-  transcribed up to that point is kept, and the transcript says where capture
-  ended.
-- If the input has changed while a meeting is paused, **Resume** is refused
-  and says why; the meeting stays paused and resumable. Put the original input
-  back, or stop.
-- If the input shown on the setup screen is no longer the current one when
-  you press Start, the start is refused. **Check Again** reads it afresh.
+The list follows the hardware while the section is on screen: plug in a
+microphone and it appears; unplug it and it goes.
 
-Nothing about the device is remembered between launches, and its identifier is
-never written into a transcript or a session record.
+Your choice is remembered between launches. A device is remembered by the
+identifier macOS gives it on this Mac, which Apple documents as stable across
+restarts, together with its name. If the remembered device is not connected
+when you next set up a meeting, the picker shows it as **not connected**, the
+readiness row says the next meeting will use System Default instead and names
+that device, and Start still works. Nothing is forgotten: once the device is
+back, ScribeKit uses it again. The device's identifier is kept only in
+ScribeKit's preferences on this Mac — never in a transcript, a session record
+or a diagnostic report.
+
+### During a meeting
+
+A meeting keeps the microphone it started with until it ends. ScribeKit never
+switches microphones in the middle of a transcript, and it tells real changes
+to the input apart from the many audio-configuration notices macOS sends for
+other reasons, by checking what the audio system reports rather than which
+notice arrived:
+
+| What happens | What the meeting does |
+| --- | --- |
+| Headphones or speakers connected, disconnected or switched (output only) | Keeps listening |
+| The Mac's default input changes to another device | Keeps listening to its own microphone — System Default was resolved when it started |
+| Another input is connected or disconnected | Keeps listening |
+| The meeting's microphone is disconnected | Ends as **interrupted**; everything transcribed is kept |
+| The audio input moves to a different microphone | Ends as interrupted, rather than transcribe a microphone nobody chose |
+| The microphone changes sample rate or channel count | Ends as interrupted |
+| macOS stops the audio input | Ends as interrupted |
+
+An interrupted meeting's transcript is complete up to the moment capture
+ended and says so; nothing heard after the change reaches it. Reconnecting the
+microphone afterwards does not revive the meeting or change its record — start
+a new one.
+
+While a meeting is **paused**, its microphone may be unplugged. **Resume** is
+then refused and says the microphone is not connected; the meeting stays
+paused and resumable. Reconnect it and resume, or stop. A Mac whose default
+input changed during the pause resumes on the meeting's own microphone.
 
 ## What is and is not kept
 
@@ -86,14 +116,17 @@ showing. See [Background Operation](background-operation.md).
 | Window closed | Keeps listening and writing; ScribeKit stays running with its menu bar item |
 | Switching between Meeting and History | Keeps listening and writing |
 | Quit | Asks first, then stops the meeting properly before quitting |
-| Input changed or disconnected | Meeting ends as interrupted; transcript kept |
+| Meeting's microphone disconnected | Meeting ends as interrupted; transcript kept |
+| Output device connected or changed | Keeps listening |
 | Microphone permission turned off during a meeting | Not verified; see below |
 | Sleep, wake or screen lock during a meeting | Not verified; see below |
 
 The first five rows are guaranteed by the ownership design and covered by
-automated tests that drive the same runtime without a microphone. They have
-**not yet been confirmed on real hardware with a real microphone**; the
-checklist for doing so is in [Testing](../development/testing.md#microphone-transcription-on-a-real-mac).
+automated tests that drive the same runtime without a microphone, and they were
+checked by hand on an M1 Mac for the release that introduced Microphone
+meetings. The rows about devices are decided by one tested rule; how each
+kind of hardware change looks to that rule on a real Mac is part of the manual
+checklist in [Testing](../development/testing.md#microphone-transcription-on-a-real-mac).
 
 What macOS does to a listening audio engine across sleep and wake, a locked
 screen, or a permission revoked in System Settings has not been observed. If
@@ -107,8 +140,9 @@ records the meeting as interrupted; it does not restart listening on its own.
 | Permission refused, now or earlier | Start is refused before anything is created; the setup screen names System Settings › Privacy & Security › Microphone |
 | Access restricted on this Mac | Start is refused; App Audio meetings are unaffected |
 | No input device | Start is refused until one is present |
+| The chosen microphone was unplugged before Start | The next meeting uses System Default, and the setup screen says so beforehand |
 | The audio engine will not start | The transcript is closed as a start that never began |
-| Input changes or disappears mid-meeting | Interrupted, as above |
+| The meeting's microphone disappears mid-meeting | Interrupted, as above |
 | Recognition falls behind | One transcription-gap marker per incident, exactly as for App Audio |
 
 See [Failure Semantics](../reliability/failure-semantics.md) and

@@ -5,29 +5,34 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 30 — Microphone transcription. Unreleased: the v0.1.0 tag, its
-release notes and its changelog entry are untouched, and nothing here is
+Interval 31 — Transcription workflow and History. Unreleased: the v0.1.0 tag,
+its release notes and its changelog entry are untouched, and nothing here is
 claimed for 0.1.0.
 
-A meeting now has a **capture mode**, chosen with *Transcribe from: App Audio /
-Microphone* at the top of the Meeting tab and fixed when it starts. App Audio
-is everything ScribeKit did before. Microphone listens to the Mac's current
-sound input through `AVAudioEngine` and feeds it into the same pipeline: the
-same `MeetingRuntime`, recogniser boundary, bounded backlog, gap incidents,
-pause and resume, `transcript.md`, session record, recovery, History and
-diagnostics. A meeting is one or the other; there is no mixing.
+Four things, built on Interval 30's two capture modes without changing the
+pipeline under them:
 
-The primary requirement — transcription continues while ScribeKit is not the
-foreground application, is hidden, minimised, windowless or on another tab —
-needed no new mechanism, because the meeting was already owned by
-`ScribeKitAppDelegate` for the process's lifetime and nothing in the runtime
-observes activation, windows or tabs. The interval added a microphone capturer
-behind the existing `AudioCapturing` boundary and tests that hold that
-ownership in place for Microphone meetings. **It has not been run on a Mac**:
-this interval was developed where no Xcode, Swift toolchain or microphone was
-available, so the build, the test suite and the manual lifecycle checklist in
-`docs/development/testing.md` are all still to be run. See the Interval 30
-validation below.
+- **Microphone input selection.** The Microphone section lists the Mac's sound
+  inputs with System Default first. Every Microphone meeting's input unit is
+  bound to one device at its start — System Default is resolved then — so the
+  Mac's default input is never changed and a meeting never follows it. An
+  explicit choice is remembered by Core Audio UID in local preferences only.
+- **Evidence, not notification names.** A configuration change no longer ends
+  a Microphone meeting by itself. The capturer reads what Core Audio and the
+  engine report and ends the meeting only when its device is gone, rerouted,
+  reformatted or stopped.
+- **History filtering and search.** All / App Audio / Microphone, composed with
+  the existing search; capture-mode names are searchable and query whitespace
+  is normalised.
+- **Find within a transcript**, over the spans History already holds, with a
+  bounded preview window that follows the current match, and Review passages
+  that can be shown in the transcript.
+
+The maintainer reports that Interval 30 was built, tested and validated by hand
+on an M1 Mac after it merged. Interval 31 was developed on an M1 MacBook Air
+with Xcode 27: it is built and the suite has been run (see the Interval 31
+validation below); device binding was exercised against real inputs without
+starting capture; the live UI and the manual checklist have not been run.
 
 ## Current implementation
 
@@ -134,8 +139,20 @@ validation below.
   a `mode`, `CaptureSource.Kind` a `microphone` case, `MeetingStartRequest` a
   `refusal`, and `SessionRecoveryMetadata` / `HistorySession` an optional
   `captureMode`.
-- `ScribeKitTests/`: Swift Testing suites. Interval 29 ran 753 tests; Interval
-  30 adds 70 `@Test` functions in 9 new suites, none of which has been run yet.
+- New for Interval 31: `MicrophoneInputCatalog` / `MicrophoneSelection` /
+  `MicrophoneChoice` in `Models/` (`MicrophoneReadiness.checked` now carries a
+  `MicrophoneChoice`); `CoreAudioInputDevices` / `CoreAudioPropertyListener`
+  and `MicrophoneRoute.swift` (`MicrophoneRouteBaseline`, `…Observation`,
+  `…Assessment`, `…Change`, `…Loss`) in `Capture/`; `MicrophoneRouteMonitor`
+  beside the capturer. `MicrophoneAccessProviding.currentInput()` became
+  `inputs()` plus `inputChanges()`; `AudioCaptureError` gained
+  `microphoneDisconnected`; `MeetingSetupPreferencesStoring` gained
+  `microphoneSelection`. In History: `HistoryCaptureFilter`,
+  `HistoryMatchKind.captureMode`, `HistorySession.knownCaptureMode`,
+  `TranscriptSearch.normalized` / `occurrences`, and `TranscriptFind` /
+  `TranscriptFindMatch` / `TranscriptPreviewWindow` in `History/`.
+- `ScribeKitTests/`: Swift Testing suites; counts are in the latest validation
+  below.
 
 ## Meeting ownership
 
@@ -220,14 +237,29 @@ The tap block and the configuration observer are built in nonisolated code
 calls them on its own threads and a closure formed inside the actor would carry
 an isolation it does not have.
 
-A configuration change stops the engine. The tap is invalidated at once, the
-capturer tears the session down and yields
-`.interrupted(configurationChangeDescription)`, and the runtime's existing
-`handleCaptureInterruption` closes the meeting as `interrupted` with the
-"Capture ended unexpectedly" marker. It does not restart, even when the input
-is unchanged: a restart would leave a stretch of wall time with no captured
-audio and no marker for it, and following the system to another microphone
-would put someone else's speech in the transcript unasked.
+A configuration change is a cue, not a verdict. `MicrophoneRouteMonitor`
+watches the engine's `AVAudioEngineConfigurationChange`, the bound device's
+`kAudioDevicePropertyDeviceIsAlive`, and the system's device list and default
+input, all on one serial queue. On any of them it reads the device's presence,
+the unit's current device, the device side's format, whether the engine runs
+and the default input, and `MicrophoneRouteAssessment` decides: present, bound,
+same format and running is `unaffected` (`systemDefaultChanged` or
+`unrelated`); anything else, or anything unreadable, is `lost`
+(`inputDisconnected`, `inputChanged`, `formatChanged`, `engineStopped`, in that
+precedence). A loss invalidates the tap inside the monitor's lock before the
+actor is told, then the actor tears down and yields
+`.interrupted(loss.interruptionDescription)`, which names no device; the runtime
+closes the meeting as `interrupted` exactly as before. It still never restarts:
+the Interval 30 reason — a stretch of wall time with no audio and no marker —
+holds for the same device as much as for another.
+
+The monitor's reads happen under its `Mutex`; teardown cancels the monitor
+(taking the same lock) before it stops the engine, so no read overlaps a stop.
+
+Whether a given output-only change on a given Mac leaves the engine running is
+a hardware fact. If macOS stops the engine for one, the assessment says
+`engineStopped` and the meeting ends as interrupted; it is on the manual
+checklist.
 
 No microphone audio is retained. `requestedFormat` is not what a microphone
 delivers, retention would need its own format handling, and the requirement is
@@ -260,20 +292,42 @@ System Audio Recording prompt does not appear either.
 
 ## Microphone input
 
-There is no device picker. `AVAudioEngine`'s input node follows Core Audio's
-default input device, and selecting another means setting the AUHAL unit's
-current device — workable, but it is what breaks on aggregate and Bluetooth
-devices, and it would need its own disappearance and fallback rules. Deferred
-rather than half-built. `SystemMicrophoneAccess.currentInput()` reads the
-default input's UID and name from Core Audio.
+`CoreAudioInputDevices.catalog()` lists devices from
+`kAudioHardwarePropertyDevices` (which excludes hidden devices) that have input
+streams, are alive and have `kAudioDevicePropertyDeviceCanBeDefaultDevice` in
+the input scope — what System Settings › Sound › Input shows — ordered by name
+then UID. Nothing in the file writes a Core Audio property.
 
-The UID is the microphone `CaptureSource.id`, held for one meeting and never
-persisted — not in preferences, not in `session.json`, not in the transcript,
-not in diagnostics. `MicrophoneAccessGate.expectedInput` compares it at
-`prepare` and at every `start`: a different current input refuses a start
-(`microphoneInputChanged`) and, at a resume, leaves the meeting paused with the
-reason in `pauseFailureMessage`, exactly as a quit application does for App
-Audio.
+`MicrophoneSelection` is the preference: `.systemDefault` or `.device(id:name:)`.
+`MicrophoneChoice.resolve` turns it into the input a meeting would use; an
+absent device resolves to the default with `unavailableSelection` set, which the
+readiness row reports as advisory (not blocking) and the picker shows as a
+disabled "(not connected)" row. The preference is not rewritten by the
+fallback, so a reconnected device is used again. `UserDefaultsMeetingSetupPreferences`
+stores the UID and the name under `…microphoneDeviceID` / `…microphoneDeviceName`;
+System Default removes both. The UID is persisted because Apple's header
+documents it as "persistent across boots" and "not suitable for passing between
+CPUs": fine for this Mac's preferences, wrong for `session.json`, the transcript
+or diagnostics, none of which carry it.
+
+The setup model refreshes on `inputChanges()` (Core Audio listeners on the
+device list and default input) while the Microphone section is on screen —
+`.task(id: captureMode)` — and not in App Audio mode. Permission is still read
+as a snapshot.
+
+At a start the capturer binds `engine.inputNode.audioUnit` with
+`kAudioOutputUnitProperty_CurrentDevice` (TN2091), reads it back
+(`microphoneInputChanged` on mismatch), then sets the unit's output-scope
+element-1 stream format to the device side's rate and channel count and checks
+`outputFormat(forBus: 0)` matches. The second step is load-bearing: measured on
+this Mac with a 24 kHz Bluetooth default, a node bound to the 48 kHz built-in
+microphone kept reporting 24 kHz on its output side. Binding happens for System
+Default too, so every meeting is fixed to one device.
+
+`MicrophoneAccessGate.expectedInput` now checks the meeting's UID is among the
+connected inputs, not that it is the default: a resume after the default moved
+resumes on the meeting's device, and a resume while it is unplugged is refused
+with `microphoneDisconnected` and leaves the meeting paused.
 
 ## Presentation lifetime
 
@@ -1444,8 +1498,12 @@ locale-independent. No fuzzy matching, no stemming, no embeddings, no ranking
 model, no network: a query occurs in the text or it does not, and the same query
 over the same folder always produces the same list in the same order.
 
-Searched: recognised speech, the meeting title, and the captured application
-names. Not searched: everything ScribeKit wrote about the meeting, so a query
+Searched: recognised speech, the meeting title, the captured application or
+microphone names, and — as `HistoryMatchKind.captureMode`, ranked last — the
+name of the session's known capture mode. Queries are normalised by
+`TranscriptSearch.normalized`: trimmed, internal whitespace runs collapsed to
+one space; folded ASCII maps tab, CR and LF to space byte-for-byte so offsets
+stay character offsets. Punctuation is literal. Not searched: everything ScribeKit wrote about the meeting, so a query
 for `Transcription gap`, `Captured by` or `Duration` finds nothing — otherwise
 every transcript would answer to them.
 
@@ -1490,6 +1548,49 @@ two matchers that could disagree.
 
 Nothing here is a second persistence system. Drop the index and the folder is
 still the whole truth; rebuild it and you get the same answers.
+
+## History filtering
+
+`HistoryCaptureFilter` (all, applications, microphone) is applied inside
+`TranscriptSearch.results` before a document's text is examined, so a filter
+halves the matching work on a mixed folder rather than post-filtering results.
+It is independent of the query in `HistoryModel`; each keeps its value when the
+other changes, and across a reload.
+
+`HistorySession.knownCaptureMode` is the one place a mode is decided: the
+record's mode when stated; `.applications` for a record without one (written
+before Interval 30, when application audio was all ScribeKit could capture —
+every v0.1.0 record); `nil` for a session with no record, which only All lists.
+Reading a mode out of a transcript's `Sources` header was rejected as a guess.
+
+No date filter: newest-first order plus search already find a recent or a
+particular meeting, and a date control would be a second query language.
+
+## Transcript find
+
+`TranscriptFind` is a value: the normalised query, every `TranscriptFindMatch`
+(span index, character offset, length) in transcript order, and a current
+index; `next`/`previous` wrap. Matches come from
+`TranscriptSearchIndex.occurrences(of:inDocument:)`, which reuses the folded
+spans a load already built and the same matcher search uses, so find and
+search cannot disagree. `HistoryModel` holds `findQuery`, `find` and
+`revealedSpanIndex`; the query survives a selection change and is re-run on the
+new meeting, the reveal does not.
+
+The preview is `TranscriptPreviewWindow.range`: 50 spans, the first page unless
+there is an anchor (the revealed span, else the current match), in which case
+it is the page around the anchor with ten spans of lead. That keeps layout
+bounded for multi-hour meetings — the reason the preview was capped in the
+first place — while every span is reachable. Highlights are `AttributedString`
+attributes over the verbatim span text (current: system find highlight, black
+text, strongly emphasised; others: accent tint); the find bar is pinned in a
+`safeAreaInset` so it stays visible while the pane scrolls.
+
+Marker navigation is limited to what is structured already: Review candidates
+carry a span index, so **Show in Transcript** reveals one and moves VoiceOver
+focus to it. Gaps, pauses and interruption notices are not parsed into
+positions — the parser consumes them as structure — and making them targets
+would mean a second, structural reading of the Markdown; deferred.
 
 ## History sandbox behaviour
 
@@ -1542,16 +1643,17 @@ meeting and one folder of past meetings, and both tabs read the same runtime, so
 nothing about the choice can affect ownership. The window's minimum size grew to
 620 x 560 to fit History's two columns.
 
-History itself is a `NavigationSplitView`. The sidebar holds a search field, the
-list of meetings and a footer with the count and Refresh; the detail pane shows
+History itself is a `NavigationSplitView`. The sidebar holds a search field, a
+segmented source filter, the list of meetings and a footer with the count and
+Refresh; the detail pane shows
 the selected meeting. Each row states the title, the status as a word rather
 than a colour, the date, and — when the query matched speech — the excerpt with
 its match emphasised and the transcript timestamp it came from.
 
 The detail pane states status, start, end, duration, applications, language,
 transcript size, audio state and the session folder, then Show Transcript in
-Finder, Open Transcript and Show Audio in Finder, then a preview of the first 50
-spans. Nothing claims a capability ScribeKit lacks: there is no editor, a
+Finder, Open Transcript and Show Audio in Finder, then a 50-span preview window
+under a pinned find bar (see Transcript find). Nothing claims a capability ScribeKit lacks: there is no editor, a
 session with no recording offers no audio action, and a session whose record
 named a recording that is not in the folder says exactly that rather than being
 shown as one that kept none.
@@ -1856,6 +1958,31 @@ atomically, and reports a failure rather than presenting a partial file as a
 success. Nothing is uploaded and no entitlement was added.
 
 ## Validation status
+
+### Interval 31 validation
+
+On an M1 MacBook Air (MacBookAir10,1), macOS 26.6.2, Xcode 27.0 (27A266a).
+
+- `xcodebuild … test` (Debug): **897 tests in 90 suites, all passed**, 0
+  failures (baseline on `main` before the interval: 824 in 76). One compiler
+  warning, pre-existing on `main`: `TranscriptionAudioInputTests.swift:143`,
+  `iterator` never mutated.
+- Release build (`-configuration Release clean build`): **succeeded**, no
+  warnings.
+- `mkdocs build --strict`: **passes**, no warnings or errors.
+- Performance: measured against a budget fixed before measuring; recorded in
+  `docs/PERFORMANCE.md` (worst keystroke 20 ms vs 100 ms; find 0.19 ms vs
+  16 ms, optimised).
+- Hardware, without starting capture: the catalog listed this Mac's three real
+  inputs (built-in, Bluetooth headset, USB) with the right default; each was
+  bound, read back and format-matched; the Mac's default input and output were
+  unchanged afterwards. This found the output-format mismatch described under
+  Microphone input.
+- **Not performed:** the live UI, listening with a selected microphone, device
+  disconnect and output changes during a meeting, and the VoiceOver/keyboard
+  pass. A ScribeKit build of the maintainer's own was running during the
+  interval, and a second instance was not started against their save folder.
+  The consolidated checklist is in `docs/development/testing.md`.
 
 ### Interval 30 validation
 

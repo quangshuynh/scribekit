@@ -15,6 +15,8 @@ offers, and they read the same running meeting.
 | Meeting screen | View | ⌘1 |
 | History screen | View | ⌘2 |
 | Search History | Edit | ⌘F |
+| Next Match in a transcript | — (History detail) | ⌘G, or Return in the find field |
+| Previous Match in a transcript | — (History detail) | ⇧⌘G |
 | Pause Meeting | Meeting | ⌃⌘P |
 | Resume Meeting | Meeting | ⌃⌘R |
 | Stop Meeting | Meeting | — |
@@ -36,9 +38,22 @@ and the menus cannot disagree about what is currently possible.
 - **⌘1** and **⌘2** move between the Meeting and History screens. The tab bar
   itself is a click target; the View menu is how the same move is made from the
   keyboard.
-- **⌘F** on the History screen puts the keyboard in the search field.
+- **⌘F** on the History screen puts the keyboard in the search field. The
+  **All / App Audio / Microphone** filter below it is a segmented control:
+  VoiceOver reports which segment is selected, and with Keyboard navigation on
+  it is reached with Tab and changed with the arrow keys.
 - The History list is a standard list: arrow keys move the selection, and the
   detail follows it.
+- In a meeting's details, the find field at the top keeps the keyboard
+  while you step through matches: Return and ⌘G go to the next match, ⇧⌘G to
+  the previous one, Escape clears the field. Each step is announced — "Match 3
+  of 12 for deployment, at 10:14:05 AM" — so the preview moving is not
+  something only a sighted user learns about.
+- **Show in Transcript** on a flagged review passage moves the preview to it
+  and moves VoiceOver to that passage.
+- On the Meeting screen, the Microphone section's **Input** is a standard
+  pop-up button. It is disabled while a meeting runs, and the running
+  meeting's microphone is read out instead.
 - **Return** starts a meeting when the Start Meeting button is available, since
   it is the window's default button.
 - Text fields, pop-up buttons, checkboxes and the notes editor behave as any
@@ -59,8 +74,16 @@ shows:
   been marked reviewed, the recognised words, why it was flagged, and whether
   there is audio to play. Its Play Audio and Mark Reviewed buttons stay
   separate, because they are separate actions.
-- **A History row** reads as the meeting's title, status, date and the matching
-  excerpt together.
+- **A History row** reads as the meeting's title, status, date, capture mode
+  when it is known, and — for a match in speech — the match's time, the excerpt
+  verbatim and how many matches the transcript has. The emphasis and the
+  ellipses drawn around the excerpt are not read out.
+- **A transcript preview passage** reads as its time and words, and says when
+  it holds find matches and when it holds the current one. The highlight itself
+  is drawing, not content.
+- **The find field's count** reads as "Match 3 of 12 for deployment" or "No
+  matches for …"; the Previous and Next buttons are named as such rather than by
+  their chevrons.
 
 Nothing in ScribeKit signals a state with colour alone. Every status that has
 an icon has the same status in words beside it, and the app uses macOS's own
@@ -93,6 +116,9 @@ pushing controls out of reach.
   carries its status and date, Pause was announced, and Start reads as *dimmed*
   while blocked and loses that once a source is chosen. Flows outside that path
   remain unheard, and ScribeKit claims no conformance to any accessibility
-  standard. See [Limitations](../reference/limitations.md).
+  standard. The microphone picker, the History filter and transcript find added
+  since then have automated checks of what they tell VoiceOver, and are on the
+  manual checklist, but have not yet been heard by hand. See
+  [Limitations](../reference/limitations.md).
 - **The tab bar is not itself in the Tab-key order.** ⌘1 and ⌘2 are the
   keyboard route between screens.

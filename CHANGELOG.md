@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **Audio changes that do not touch the input no longer end a Microphone
+  meeting.** Every audio-configuration change used to be treated as fatal.
+  ScribeKit now reads what Core Audio and the audio engine report — whether the
+  meeting's device is present, still bound, in its format and running — so
+  connecting headphones or switching the Mac's default input leaves the meeting
+  listening, while a real loss of its microphone still ends it.
+
 - **A sustained transcription gap is one marker, not hundreds.** Recognition
   falling behind capture loses audio repeatedly for as long as it stays behind,
   and each loss was previously written into `transcript.md` as its own
@@ -33,8 +40,8 @@ All notable changes to this project are documented in this file.
   transcript — stating the start and refusing to invent the end or the total,
   neither of which had been measured. The field is additive and the record's
   schema version is unchanged.
-- **Microphone transcription.** A meeting can now transcribe the Mac's current
-  microphone input instead of selected applications — chosen with **Transcribe
+- **Microphone transcription.** A meeting can now transcribe a microphone
+  instead of selected applications — chosen with **Transcribe
   from: App Audio / Microphone** at the top of the setup screen, one source per
   meeting. It uses the same on-device recognition, append-only
   `transcript.md`, pause and resume, gap incidents, session record, recovery
@@ -47,10 +54,36 @@ All notable changes to this project are documented in this file.
   refused or restricted permission is shown with where to change it. App Audio
   meetings never read or request it, and Microphone meetings never trigger the
   Screen & System Audio Recording prompt.
-- **The input is never switched behind your back.** A Microphone meeting
-  listens to the input it started with; if that input changes or disappears,
-  the meeting ends as interrupted with its transcript kept, and a resume onto a
-  different input is refused.
+- **Choose the microphone.** The setup screen's **Input** lists the Mac's sound
+  inputs — built-in, AirPods, USB, webcam — with **System Default** first,
+  naming the device it stands for. A chosen device is used whatever the Mac's
+  default is, and choosing it never changes the Mac's own input setting: the
+  meeting's own audio unit is bound to it. The choice is remembered on this Mac
+  by the device's Core Audio UID; a remembered device that is not connected is
+  shown as such, the next meeting uses System Default and says so beforehand,
+  and the device is used again once it is back. The UID is never written into a
+  transcript, a session record or a diagnostic report.
+- **The input is never switched behind your back.** A Microphone meeting keeps
+  the microphone it started with — System Default is resolved at the start —
+  until it ends. If that microphone is disconnected, the unit moves to another
+  one, its format changes or macOS stops the input, the meeting ends as
+  interrupted with its transcript kept; a resume while it is unplugged is
+  refused and leaves the meeting paused.
+- **History filters by source.** **All / App Audio / Microphone** narrows the
+  list and composes with search; clearing the search keeps the filter. v0.1.0
+  meetings, whose records predate capture modes, are App Audio; a transcript
+  with no record appears under All only.
+- **Search covers the capture mode**, so `microphone` or `app audio` finds
+  meetings of that kind, and a query's whitespace is normalised: surrounding
+  and repeated spaces are ignored and a phrase wrapped onto two lines in the
+  file still matches. Rows state the mode beside the date, and VoiceOver reads
+  a row's title, status, date, mode and verbatim snippet.
+- **Find within a transcript.** A meeting's details have a pinned find field
+  with a match count, next and previous (Return, ⌘G, ⇧⌘G) that wrap, the
+  current match highlighted over the verbatim words, and a preview that moves
+  to it — including past the first 50 passages. Each step is announced to
+  VoiceOver. Review's flagged passages gain **Show in Transcript**. Nothing is
+  read from or written to `transcript.md`.
 - **The session record states its capture mode.** `session.json` gains an
   optional `captureMode` (`applications` or `microphone`); records written by
   v0.1.0 decode unchanged, and the schema version is unchanged. Diagnostic
