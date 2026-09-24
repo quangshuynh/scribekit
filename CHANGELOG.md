@@ -2,92 +2,104 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.2.0 — 2026-09-24
 
-### Changed
+ScribeKit v0.2.0 expands ScribeKit from selected-app transcription into a
+broader on-device macOS transcription workflow, adding microphone
+transcription, explicit input selection, stronger transcript navigation, and
+continued reliability improvements. Like v0.1.0 it is published as source:
+there is no signed or notarized application, and it is built with Xcode.
 
-- **Audio changes that do not touch the input no longer end a Microphone
-  meeting.** Every audio-configuration change used to be treated as fatal.
-  ScribeKit now reads what Core Audio and the audio engine report — whether the
-  meeting's device is present, still bound, in its format and running — so
-  connecting headphones or switching the Mac's default input leaves the meeting
-  listening, while a real loss of its microphone still ends it.
+### Microphone transcription
 
-- **A sustained transcription gap is one marker, not hundreds.** Recognition
-  falling behind capture loses audio repeatedly for as long as it stays behind,
-  and each loss was previously written into `transcript.md` as its own
-  blockquote — roughly one every half second, for as long as the condition
-  lasted. Those observations are now accumulated into a single incident and
-  written once, when the incident ends.
-- **A gap marker distinguishes the range from the loss.** An incident a second
-  or more wide is written as `approximately N seconds of audio was not
-  transcribed between <start> and <end>`, stating how long the meeting was in
-  trouble and, separately, how much audio that cost. The total is a sum over
-  distinct discarded audio and is never derived from the range; a shorter
-  incident keeps the existing wording naming the moment it fell at, and a gap
-  with no known position still states its length alone. No loss is dropped and
-  no failure reporting is weakened.
-
-### Added
-
-- **Incidents are separated by evidence rather than by a delay.** A new
-  incident begins once the bounded backlog has demonstrably caught up, and a
-  pause, a recogniser restart, capture ending by itself, a stop or a
-  persistence failure each close the incident that was open, so two separate
-  spells of trouble stay two markers.
-- **An unfinished incident survives a ScribeKit that does not.** The session
-  record notes when an open incident began, and recovery says so in the
-  transcript — stating the start and refusing to invent the end or the total,
-  neither of which had been measured. The field is additive and the record's
-  schema version is unchanged.
-- **Microphone transcription.** A meeting can now transcribe a microphone
-  instead of selected applications — chosen with **Transcribe
-  from: App Audio / Microphone** at the top of the setup screen, one source per
-  meeting. It uses the same on-device recognition, append-only
-  `transcript.md`, pause and resume, gap incidents, session record, recovery
-  and History as App Audio, and keeps running while ScribeKit is in the
-  background, hidden, minimised or windowless, because the meeting is owned by
-  the application rather than by any window. No microphone audio is written to
-  disk and nothing leaves the Mac.
-- **Microphone permission, asked for only when needed.** macOS is asked the
-  first time a Microphone meeting starts, before anything is created; a
-  refused or restricted permission is shown with where to change it. App Audio
-  meetings never read or request it, and Microphone meetings never trigger the
+- **Transcribe a microphone instead of selected applications.** Choose
+  **Transcribe from: App Audio / Microphone** at the top of the setup screen.
+  A meeting uses exactly one source; App Audio and the microphone are never
+  captured together. A Microphone meeting uses the same on-device recognition,
+  append-only `transcript.md`, pause and resume, transcription-gap markers,
+  session record, recovery and History as App Audio.
+- **Keeps listening while you work elsewhere.** The meeting belongs to the
+  application rather than to its window, so it continues while another app is
+  in front, and while ScribeKit is hidden, minimised or its window is closed.
+- **No microphone audio is kept.** Audio is transcribed on the Mac and
+  released; audio retention applies to App Audio meetings only. Nothing leaves
+  the Mac.
+- **Permission is asked for only when needed.** macOS asks for microphone
+  access the first time a Microphone meeting starts, before anything is
+  written; a refused or restricted permission is shown with where to change it.
+  App Audio meetings never request it, and Microphone meetings never trigger the
   Screen & System Audio Recording prompt.
-- **Choose the microphone.** The setup screen's **Input** lists the Mac's sound
-  inputs — built-in, AirPods, USB, webcam — with **System Default** first,
-  naming the device it stands for. A chosen device is used whatever the Mac's
-  default is, and choosing it never changes the Mac's own input setting: the
-  meeting's own audio unit is bound to it. The choice is remembered on this Mac
-  by the device's Core Audio UID; a remembered device that is not connected is
-  shown as such, the next meeting uses System Default and says so beforehand,
-  and the device is used again once it is back. The UID is never written into a
+
+### Input selection and device changes
+
+- **Choose the microphone.** **Input** lists the Mac's sound inputs — built-in,
+  AirPods, USB, webcam — with **System Default** first, naming the device it
+  stands for. A chosen device is used whatever the Mac's default is, and
+  choosing it never changes the Mac's own input setting.
+- **The choice is remembered, safely.** It is kept on this Mac by the device's
+  Core Audio identifier. If the device is not connected, the setup screen says
+  so before you start and the next meeting uses System Default; the device is
+  used again once it is back. The identifier is never written into a
   transcript, a session record or a diagnostic report.
-- **The input is never switched behind your back.** A Microphone meeting keeps
-  the microphone it started with — System Default is resolved at the start —
-  until it ends. If that microphone is disconnected, the unit moves to another
-  one, its format changes or macOS stops the input, the meeting ends as
-  interrupted with its transcript kept; a resume while it is unplugged is
-  refused and leaves the meeting paused.
-- **History filters by source.** **All / App Audio / Microphone** narrows the
-  list and composes with search; clearing the search keeps the filter. v0.1.0
-  meetings, whose records predate capture modes, are App Audio; a transcript
-  with no record appears under All only.
-- **Search covers the capture mode**, so `microphone` or `app audio` finds
-  meetings of that kind, and a query's whitespace is normalised: surrounding
-  and repeated spaces are ignored and a phrase wrapped onto two lines in the
-  file still matches. Rows state the mode beside the date, and VoiceOver reads
-  a row's title, status, date, mode and verbatim snippet.
-- **Find within a transcript.** A meeting's details have a pinned find field
-  with a match count, next and previous (Return, ⌘G, ⇧⌘G) that wrap, the
-  current match highlighted over the verbatim words, and a preview that moves
-  to it — including past the first 50 passages. Each step is announced to
-  VoiceOver. Review's flagged passages gain **Show in Transcript**. Nothing is
-  read from or written to `transcript.md`.
-- **The session record states its capture mode.** `session.json` gains an
-  optional `captureMode` (`applications` or `microphone`); records written by
-  v0.1.0 decode unchanged, and the schema version is unchanged. Diagnostic
-  reports carry the mode, never the microphone's name.
+- **A meeting never switches microphones.** It keeps the microphone it started
+  with until it ends. Connecting headphones, switching output devices or
+  changing the Mac's default input leaves it listening; if its own microphone
+  is disconnected, rerouted, changes format or is stopped by macOS, the meeting
+  ends as interrupted with everything transcribed kept. Resuming while the
+  microphone is unplugged is refused and the meeting stays paused.
+
+### Transcript reliability
+
+- **A sustained transcription gap is one marker, not hundreds.** When
+  recognition falls behind capture, the audio lost is accumulated into a single
+  incident and written once, instead of one blockquote roughly every half
+  second.
+- **A gap marker states the range and the loss separately** —
+  `approximately N seconds of audio was not transcribed between <start> and
+  <end>` — and the total is measured from discarded audio, never derived from
+  the range. Incidents are separated by evidence that the backlog caught up,
+  and pausing, a recogniser restart, capture ending, stopping or a persistence
+  failure each close the open incident.
+- **An unfinished incident survives a crash.** The session record notes when an
+  open incident began, and recovery writes that start into the transcript
+  without inventing an end or a total.
+
+### History and navigation
+
+- **Filter by source.** **All / App Audio / Microphone** narrows History and
+  combines with search; clearing the search keeps the filter. v0.1.0 meetings
+  are listed as App Audio.
+- **Better search.** The capture mode is searchable, spaces in a query are
+  normalised — a phrase wrapped onto two lines in the file still matches — and
+  each row states its mode beside the date.
+- **Find within a transcript.** A meeting's details have a find field with a
+  match count, next and previous (Return, ⌘G, ⇧⌘G) that wrap, the current match
+  highlighted over the transcript's own words, and a preview that scrolls to it
+  anywhere in the meeting. Flagged review passages gain **Show in Transcript**.
+  Finding reads nothing from and writes nothing to `transcript.md`.
+- **Measured, not guessed.** Over a synthetic folder of 200 one-hour meetings,
+  the slowest search took 20 ms per keystroke in an optimised build, and
+  finding within a three-hour transcript under a millisecond. No on-disk index
+  was needed.
+
+### Accessibility
+
+- VoiceOver reads a History row as its title, status, date, capture mode and
+  verbatim snippet; the source filter reports its selected segment; the find
+  field's position is read as "Match 3 of 12 for …" and each step is announced;
+  a flagged passage shown in the transcript receives VoiceOver focus. The
+  microphone picker, the filter and find are all usable from the keyboard.
+
+### Compatibility
+
+- **`session.json` states its capture mode** in a new optional `captureMode`
+  field. Records written by v0.1.0 decode unchanged, no schema version changed,
+  and transcripts written by v0.1.0 are read as before. Diagnostic reports
+  carry the mode, never the microphone's name.
+- The minimum system is still macOS 26.5, the bundle identifier is still
+  `quang.ScribeKit`, and ScribeKit has still been validated on Apple Silicon
+  only. The one new entitlement is audio input, for Microphone meetings; there
+  is still no network entitlement.
 
 ## 0.1.0 — 2026-09-01
 

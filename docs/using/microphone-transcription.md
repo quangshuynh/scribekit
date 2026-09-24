@@ -1,10 +1,9 @@
 # Microphone Transcription
 
-!!! note "Unreleased"
+!!! note "New in v0.2.0"
 
-    Microphone transcription is new since v0.1.0 and is not part of any
-    release yet. It exists on `main` and is built from source like everything
-    else.
+    Microphone transcription and microphone input selection were added in
+    v0.2.0, which is built from source like every ScribeKit release.
 
 ScribeKit has two ways to get the audio it transcribes, and a meeting uses
 exactly one of them:
@@ -123,10 +122,11 @@ showing. See [Background Operation](background-operation.md).
 
 The first five rows are guaranteed by the ownership design and covered by
 automated tests that drive the same runtime without a microphone, and they were
-checked by hand on an M1 Mac for the release that introduced Microphone
-meetings. The rows about devices are decided by one tested rule; how each
-kind of hardware change looks to that rule on a real Mac is part of the manual
-checklist in [Testing](../development/testing.md#microphone-transcription-on-a-real-mac).
+checked by hand on an M1 Mac. The rows about devices are decided by one
+tested rule, and the manual checklist in
+[Testing](../development/testing.md#transcription-workflow-and-history-on-a-real-mac)
+was run on an M1 Mac before v0.2.0 — one Mac and the devices it had, not every
+kind of hardware.
 
 What macOS does to a listening audio engine across sleep and wake, a locked
 screen, or a permission revoked in System Settings has not been observed. If

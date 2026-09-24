@@ -1,10 +1,32 @@
 # Releases
 
-ScribeKit's first release, **v0.1.0**, is a **source release**. No signed or
-notarized application is published with it, so running ScribeKit means
+ScribeKit is published as **source releases**. No signed or notarized
+application is published with any release, so running ScribeKit means
 [building it from source](../getting-started/build-and-run.md). That is a
 distribution limitation and nothing else: a build made from this source runs
 entirely on your Mac, with no account and no network.
+
+## v0.2.0
+
+Tagged **`v0.2.0`**, 24 September 2026. It expands ScribeKit from
+selected-app transcription into a broader on-device transcription workflow:
+microphone transcription with explicit input selection and safe handling of
+device changes, transcription gaps written as one marker per incident, History
+filtering by source, and find within a transcript. The full list is in the
+changelog.
+
+Like v0.1.0 it carries the source only — the archives GitHub generates for the
+tag, and no binary attachment. It requires **macOS 26.5 or later** and has been
+**tested on Apple Silicon only**. It builds as version **0.2.0**, build **2**,
+bundle identifier **`quang.ScribeKit`**, unchanged, so existing sandbox
+containers, bookmarks and preferences carry over. Its entitlements are the App
+Sandbox, audio input (for Microphone meetings), app-scoped bookmarks and
+user-selected read/write files, with the hardened runtime enabled; there is
+still no network entitlement. Sessions written by v0.1.0 are read unchanged.
+
+There is still no Developer ID certificate or notarization, so there is still
+no signed disk image, and nothing about signing, notarization or Gatekeeper is
+claimed.
 
 ## v0.1.0
 
@@ -73,6 +95,10 @@ implemented or not — nothing is described here as working before it is.
 | 26 | Application identity, icon and macOS distribution | Done — distribution deferred |
 | 27 | v0.1.0 source-release presentation | Done |
 | 28 | v0.1.0 release verification and publication | Done |
+| 29 | Transcription-gap incident coalescing | Done |
+| 30 | Microphone transcription | Done |
+| 31 | Microphone input selection, History filtering and transcript find | Done |
+| 32 | v0.2.0 release | Done |
 
 ## Not planned for the first release
 

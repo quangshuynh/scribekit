@@ -63,7 +63,7 @@ Program membership, which this release does not have, so the archive step is
 the last step that has been exercised. What that archive proves is recorded in
 [Releases](../reference/releases.md); an Apple Development signature is not a
 substitute, and neither is ad-hoc signing, because neither passes Gatekeeper on
-another Mac. v0.1.0 therefore ships as source.
+another Mac. v0.1.0 and v0.2.0 therefore ship as source.
 
 ## The application icon
 

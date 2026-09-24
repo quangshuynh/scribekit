@@ -9,7 +9,7 @@ are consequences of decisions, and several of them are deliberate.
   supported and will refuse to launch the build. Apple Silicon is the only
   architecture ScribeKit has been built and validated on; the project produces
   a universal binary, but Intel is untested.
-- **No signed or notarized application.** v0.1.0 is a source release: there is
+- **No signed or notarized application.** v0.2.0 is a source release: there is
   no disk image and no download to install, and ScribeKit must be built from
   source. Signed distribution is deferred. See
   [Releases](releases.md).
@@ -81,8 +81,7 @@ are consequences of decisions, and several of them are deliberate.
 
 ## Microphone
 
-Microphone transcription is unreleased; see
-[Microphone Transcription](../using/microphone-transcription.md).
+See [Microphone Transcription](../using/microphone-transcription.md).
 
 - **One capture mode per meeting.** A meeting transcribes the selected
   applications or the microphone, never both, and the mode cannot change while
@@ -97,8 +96,9 @@ Microphone transcription is unreleased; see
   kind of hardware.** Connecting headphones or switching the default input
   leaves a meeting listening when Core Audio and the audio engine report its
   input unchanged and still running. If macOS stops the audio engine for an
-  output change, the meeting ends as interrupted rather than restarting; which
-  output changes do that on which Macs is on the manual checklist.
+  output change, the meeting ends as interrupted rather than restarting. The
+  rule was checked by hand on one M1 Mac before v0.2.0; other Macs and other
+  devices have not been observed.
 - **Two microphones with one name look alike.** The picker lists inputs by the
   name macOS gives them; two identical USB microphones are two rows with the
   same name.

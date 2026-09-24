@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Native macOS meeting transcription.</strong><br>
-  Capture the applications you pick, transcribe on your Mac, keep a Markdown transcript you own.
+  Capture the applications you pick or a microphone, transcribe on your Mac, keep a Markdown transcript you own.
 </p>
 
 <p align="center">
@@ -17,29 +17,33 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"></a>
 </p>
 
-> ### Status: v0.1.0 — source release
+> ### Status: v0.2.0 — source release
 >
-> ScribeKit's first release is **v0.1.0**, published as source. **There is no
-> prebuilt signed or notarized download.** You
+> The current release is **v0.2.0**, published as source. It adds microphone
+> transcription, microphone input selection, History filtering and find within
+> a transcript to v0.1.0's selected-app workflow. **There is no prebuilt signed
+> or notarized download.** You
 > [build it yourself](#build-from-source). Nothing about that is a network
 > requirement: ScribeKit runs entirely on your Mac either way.
 
 <p align="center">
-  <img src="docs/images/meeting-live.png" alt="ScribeKit transcribing a meeting: capture and recognition status, and a live transcript with timestamped lines and a grey in-progress hypothesis" width="720">
+  <img src="docs/images/meeting-live.png" alt="ScribeKit transcribing a Microphone meeting: listening to the MacBook Air Microphone, transcribing on device, and a live transcript with timestamped lines and a grey in-progress hypothesis" width="720">
 </p>
 
-ScribeKit runs quietly while you work in other applications. You pick which
-applications it listens to, it recognises the speech on this Mac with Apple's
-on-device speech models, and it appends a timestamped Markdown transcript into
-a folder you chose — readable in any editor while the meeting is still running.
+ScribeKit runs quietly while you work in other applications. You pick what it
+listens to — the applications you select, or one microphone — it recognises the
+speech on this Mac with Apple's on-device speech models, and it appends a
+timestamped Markdown transcript into a folder you chose — readable in any
+editor while the meeting is still running.
 
 ## Demo
 
-Selecting an application, starting a meeting, live transcription, pause and
-resume, stopping, and reading the finished meeting back from History.
+Choosing a microphone, starting a Microphone meeting, live transcription,
+stopping, then finding the meeting in History with the source filter and
+search, and stepping through matches with find.
 
 <p align="center">
-  <img src="docs/images/scribekit-demo.gif" alt="A 45-second recording of ScribeKit: starting a meeting on a selected application, a transcript filling in line by line, a pause and resume, stopping, and the finished meeting in History with its review passages and notes" width="620">
+  <img src="docs/images/scribekit-demo.gif" alt="A 44-second recording of ScribeKit: choosing the MacBook Air Microphone as the input, starting a Microphone meeting, a transcript filling in line by line, stopping, then filtering History to Microphone meetings, searching for deployment, and stepping through the matches in the transcript with find" width="620">
 </p>
 
 ## What it does
@@ -48,8 +52,8 @@ resume, stopping, and reading the finished meeting back from History.
   system.
   [Details](https://quangshuynh.github.io/scribekit/using/capturing-app-audio/)
 - **Or transcribes a microphone** — the Mac's default or one you choose —
-  while you work in other apps, keeping no audio. Unreleased: on `main` since
-  v0.1.0.
+  while you work in other apps, keeping no audio. One source per meeting: never
+  App Audio and a microphone together.
   [Details](https://quangshuynh.github.io/scribekit/using/microphone-transcription/)
 - **Transcribes on this Mac** with Apple's `SpeechAnalyzer` and
   `SpeechTranscriber`, against a locally installed model, with no network
@@ -71,8 +75,8 @@ resume, stopping, and reading the finished meeting back from History.
   [Details](https://quangshuynh.github.io/scribekit/using/recovery/)
 - **Reads meetings back** through a read-only history, local substring search,
   uncertainty review against retained audio, and Markdown notes kept in a
-  sidecar of their own. Filtering by source and find within a transcript are
-  unreleased, on `main`.
+  sidecar of their own, with filtering by source and find within a
+  transcript.
   [Details](https://quangshuynh.github.io/scribekit/using/history-and-search/)
 - **Retains audio only if you ask.** None by default; optionally raw `.caf` or
   compressed `.m4a`.
@@ -83,12 +87,12 @@ resume, stopping, and reading the finished meeting back from History.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/images/meeting-setup.png" alt="ScribeKit's setup screen: a Before You Start checklist for save location, screen recording permission, speech recognition and audio source, above the meeting title and the list of running applications"></td>
-<td width="50%"><img src="docs/images/history-review.png" alt="ScribeKit's History: a list of past meetings beside a finished meeting's details, the passages it flagged for a second listen with playback controls, and a Markdown notes editor"></td>
+<td width="50%"><img src="docs/images/meeting-setup.png" alt="ScribeKit's setup screen in Microphone mode: a Before You Start checklist for save location, microphone access, speech recognition and microphone input, above the meeting title and the Input picker set to MacBook Air Microphone"></td>
+<td width="50%"><img src="docs/images/history-review.png" alt="ScribeKit's History filtered to Microphone meetings and searched for deployment, beside a meeting's details with the find bar showing 1 of 2 and both matches highlighted in its transcript"></td>
 </tr>
 <tr>
-<td align="center"><em>Setup — readiness before anything is recorded</em></td>
-<td align="center"><em>History — details, uncertainty review, and notes</em></td>
+<td align="center"><em>Setup — choosing the microphone, with readiness before anything is recorded</em></td>
+<td align="center"><em>History — source filter, search, and find within a transcript</em></td>
 </tr>
 </table>
 
@@ -145,14 +149,14 @@ The build pipeline is green and the full test suite is passing.
 | **Mac** | Tested on Apple Silicon. The project builds a universal binary, but nothing has been built or validated on Intel. |
 | **Xcode** | 26 or later — needed to build ScribeKit, which is currently the only way to run it. |
 | **Speech model** | The on-device model for your recognition language must already be installed. ScribeKit does not download models and has no network fallback; a language whose model is missing is listed and disabled. |
-| **Permission** | Screen & System Audio Recording, which macOS asks for the first time ScribeKit looks for capture sources. Microphone meetings (unreleased) need Microphone permission instead. |
+| **Permission** | Screen & System Audio Recording, which macOS asks for the first time ScribeKit looks for capture sources. Microphone meetings need Microphone permission instead. |
 
 More detail in
 [Requirements](https://quangshuynh.github.io/scribekit/getting-started/requirements/).
 
 ## Build from source
 
-There is **no signed, notarized disk image for v0.1.0, and no download to
+There is **no signed, notarized disk image for v0.2.0, and no download to
 install**. Publishing a macOS application outside the App Store requires a
 Developer ID certificate and Apple notarization, neither of which is available
 for this release; that work is deferred rather than abandoned. Until then,
@@ -236,12 +240,12 @@ See
 
 ## Limitations
 
-v0.1.0 is deliberately narrow. The ones most likely to matter:
+v0.2.0 is deliberately narrow. The ones most likely to matter:
 
 - macOS 26.5 or later, tested only on Apple Silicon.
 - Source build only — no signed or notarized application is provided.
-- Audio comes from selected applications, not from a microphone. (Microphone
-  transcription is unreleased work on `main`, one source per meeting.)
+- A meeting transcribes either selected applications or one microphone, never
+  both. There is no speaker separation, and microphone audio is never kept.
 - The on-device speech model must already be installed, and accuracy is
   Apple's recogniser's.
 - An interrupted meeting is preserved but cannot be continued as the same

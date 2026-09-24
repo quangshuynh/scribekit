@@ -5,9 +5,9 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 31 — Transcription workflow and History. Unreleased: the v0.1.0 tag,
-its release notes and its changelog entry are untouched, and nothing here is
-claimed for 0.1.0.
+Interval 31 — Transcription workflow and History, released with Intervals 29
+and 30 as **v0.2.0** (version 0.2.0, build 2), a source release like v0.1.0.
+The v0.1.0 tag, release and changelog entry are untouched.
 
 Four things, built on Interval 30's two capture modes without changing the
 pipeline under them:
@@ -28,11 +28,10 @@ pipeline under them:
   bounded preview window that follows the current match, and Review passages
   that can be shown in the transcript.
 
-The maintainer reports that Interval 30 was built, tested and validated by hand
-on an M1 Mac after it merged. Interval 31 was developed on an M1 MacBook Air
-with Xcode 27: it is built and the suite has been run (see the Interval 31
-validation below); device binding was exercised against real inputs without
-starting capture; the live UI and the manual checklist have not been run.
+The maintainer reports that Interval 30 and Interval 31 were each built, tested
+and validated by hand on an M1 Mac after they merged, the latter against the
+consolidated checklist in `docs/development/testing.md`; the individual
+observations were not recorded here.
 
 ## Current implementation
 
@@ -1959,6 +1958,35 @@ success. Nothing is uploaded and no entitlement was added.
 
 ## Validation status
 
+### v0.2.0 release validation
+
+On an M1 MacBook Air, macOS 26.6.2, Xcode 27.0, from a clean clone of the
+release commit: 897 tests in 90 suites passed; the Release build, the ad-hoc
+build from `build-and-run.md` and a Release archive succeeded; `mkdocs build
+--strict` passed. The archive is universal (`x86_64 arm64`, Intel untested) and
+carries the App Sandbox, audio input, app-scoped bookmark and user-selected
+read/write entitlements, hardened runtime, and no `get-task-allow` or network
+entitlement. No Developer ID identity exists, so the release is source-only.
+
+- **Screenshots and demo, produced from the running Release build** of the
+  release candidate against synthetic meetings in `~/Desktop/ScribeKit
+  Meetings`: an App Audio meeting of a synthesised script played in QuickTime
+  Player, and Microphone meetings of synthesised speech played on the MacBook
+  Air Speakers and heard by the MacBook Air Microphone chosen in ScribeKit,
+  while the Mac's default input was a Bluetooth headset. The app was driven
+  through the Accessibility API; only its window is in frame. The transcripts
+  shown are what ScribeKit wrote; takes with misrecognised words were set aside
+  and re-recorded with plainer wording rather than edited.
+- **Observed along the way:** the explicitly chosen built-in microphone was
+  listened to while the default input stayed on the headset, and the default
+  was unchanged afterwards; session records carried `captureMode` and no device
+  identifier; History's rows and filter read to the accessibility tree as the
+  tests say they do.
+- **Approved by the maintainer** before publication. The demo shows the Input
+  menu with this Mac's device names.
+- **Assets.** `meeting-setup.png`, `meeting-live.png`, `history-review.png`
+  (1520x1800) and `scribekit-demo.gif` (560x663, 8 fps, 44 s, 1.5 MB).
+
 ### Interval 31 validation
 
 On an M1 MacBook Air (MacBookAir10,1), macOS 26.6.2, Xcode 27.0 (27A266a).
@@ -1983,6 +2011,8 @@ On an M1 MacBook Air (MacBookAir10,1), macOS 26.6.2, Xcode 27.0 (27A266a).
   pass. A ScribeKit build of the maintainer's own was running during the
   interval, and a second instance was not started against their save folder.
   The consolidated checklist is in `docs/development/testing.md`.
+- After merge, before v0.2.0: the maintainer reports the consolidated
+  checklist was completed successfully on a real M1 Mac.
 
 ### Interval 30 validation
 

@@ -1,24 +1,26 @@
 # ScribeKit
 
 ScribeKit is a native macOS app for background-first meeting transcription. It
-captures audio from the applications you select, transcribes it on your Mac,
-and writes a timestamped Markdown transcript into a folder you chose.
+captures audio from the applications you select, or listens to one microphone,
+transcribes it on your Mac, and writes a timestamped Markdown transcript into a
+folder you chose.
 
 Nothing leaves the machine. There are no accounts, no cloud database, no
 telemetry and no analytics, and the app ships without the network client
 entitlement, so the sandbox does not permit it to open a network connection at
 all.
 
-!!! note "Status: v0.1.0 — source release"
+!!! note "Status: v0.2.0 — source release"
 
-    ScribeKit's first release is **v0.1.0**. Audio capture from
-    selected applications, live on-device transcription, durable Markdown
+    The current release is **v0.2.0**. Audio capture from selected
+    applications or transcription of a chosen microphone, live on-device
+    transcription, durable Markdown
     transcripts, pause and resume, crash recovery, optional audio retention,
-    background operation with a menu bar item, transcript history and search,
-    uncertainty review with playback, local meeting notes and diagnostic export
-    all work end to end.
+    background operation with a menu bar item, transcript history with search,
+    source filtering and find within a transcript, uncertainty review with
+    playback, local meeting notes and diagnostic export all work end to end.
 
-    **There is no prebuilt signed or notarized download.** v0.1.0 is
+    **There is no prebuilt signed or notarized download.** v0.2.0 is
     published as source and is
     [built from source](getting-started/build-and-run.md). See
     [Releases](reference/releases.md) for why, and
@@ -30,9 +32,9 @@ all.
 
 - **Captures the apps you pick.** Audio comes from the applications you select
   through ScreenCaptureKit, not from the whole system. See
-  [Capturing App Audio](using/capturing-app-audio.md). Unreleased since
-  v0.1.0: a meeting can instead transcribe the microphone while you work in
-  other apps — see [Microphone Transcription](using/microphone-transcription.md).
+  [Capturing App Audio](using/capturing-app-audio.md). Or a meeting can
+  transcribe a microphone you choose while you work in other apps — see
+  [Microphone Transcription](using/microphone-transcription.md).
 
 - **Transcribes on this Mac.** Apple's `SpeechAnalyzer` and
   `SpeechTranscriber` against a language model installed locally. There is no

@@ -117,8 +117,9 @@ pushing controls out of reach.
   while blocked and loses that once a source is chosen. Flows outside that path
   remain unheard, and ScribeKit claims no conformance to any accessibility
   standard. The microphone picker, the History filter and transcript find added
-  since then have automated checks of what they tell VoiceOver, and are on the
-  manual checklist, but have not yet been heard by hand. See
+  since then have automated checks of what they tell VoiceOver and were
+  included in the keyboard and VoiceOver pass run on an M1 Mac before v0.2.0.
+  See
   [Limitations](../reference/limitations.md).
 - **The tab bar is not itself in the Tab-key order.** ⌘1 and ⌘2 are the
   keyboard route between screens.

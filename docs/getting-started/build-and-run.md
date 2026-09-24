@@ -1,6 +1,6 @@
 # Build & Run
 
-v0.1.0 publishes no signed or notarized application, so building from source is
+v0.2.0 publishes no signed or notarized application, so building from source is
 how ScribeKit is run. See [Releases](../reference/releases.md).
 
 ## Build
@@ -29,7 +29,7 @@ xcodebuild -project ScribeKit.xcodeproj -scheme ScribeKit -destination 'platform
   CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= build
 ```
 
-Both commands were run against a clean clone of the v0.1.0 source.
+Both commands were run against a clean clone of the v0.2.0 source.
 
 ## Test
 

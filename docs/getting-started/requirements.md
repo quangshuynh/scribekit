@@ -7,7 +7,7 @@
 | Xcode | 26 or later | Builds the macOS 26.5 target, and is currently the only way to get a running ScribeKit. |
 | On-device speech model | Installed for the recognition language | Recognition is local; ScribeKit does not download models, and there is no network fallback. |
 
-**v0.1.0 is a source release.** No signed or notarized application is
+**v0.2.0 is a source release.** No signed or notarized application is
 published, so [building from source](build-and-run.md) is the only way to run
 ScribeKit. See [Releases](../reference/releases.md).
 
@@ -18,8 +18,8 @@ Recording** permission, which macOS asks for the first time ScribeKit looks for
 sources. Without it, the setup screen reports the missing permission instead of
 a list or a capture.
 
-[Microphone meetings](../using/microphone-transcription.md), which are
-unreleased, need **Microphone** permission instead, which macOS asks for the
+[Microphone meetings](../using/microphone-transcription.md) need
+**Microphone** permission instead, which macOS asks for the
 first time one starts. Neither mode needs the other's permission.
 
 Transcription itself asks for no permission, because it runs against a speech
