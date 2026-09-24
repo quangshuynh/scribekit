@@ -38,8 +38,14 @@ nonisolated struct MeetingSnapshot: Equatable, Sendable {
     /// The title to show, with the placeholder substituted for an empty one.
     var title: String { session.displayTitle }
 
-    /// The applications this meeting captures.
+    /// The applications, or the microphone input, this meeting captures.
     var sources: [CaptureSource] { session.selectedSources }
+
+    /// Where this meeting's audio comes from.
+    ///
+    /// A snapshot is only ever taken of a request that was accepted, and an
+    /// accepted request has exactly one mode.
+    var captureMode: CaptureMode { CaptureMode(sources: sources) ?? .applications }
 
     /// The folder this meeting writes to.
     var destination: URL { session.destination }
@@ -50,10 +56,10 @@ nonisolated struct MeetingSnapshot: Equatable, Sendable {
     /// When the meeting started.
     var startedAt: Date { session.createdAt }
 
-    /// The selected applications named in one phrase, or `nil` when there are
-    /// none to name.
+    /// The selected applications, or the microphone, named in one phrase, or
+    /// `nil` when there are none to name.
     var sourceSummary: String? {
         guard !sources.isEmpty else { return nil }
-        return sources.map(\.displayName).formatted(.list(type: .and))
+        return sources.map(\.transcriptName).formatted(.list(type: .and))
     }
 }

@@ -23,6 +23,9 @@ nonisolated enum DiagnosticCategory: String, Codable, CaseIterable, Equatable, S
     /// The system has not granted Screen & System Audio Recording.
     case captureAccess
 
+    /// The system has not granted microphone access, or restricts it.
+    case microphoneAccess
+
     /// The list of capturable applications could not be read.
     case captureDiscovery
 
@@ -68,8 +71,12 @@ nonisolated enum DiagnosticCategory: String, Codable, CaseIterable, Equatable, S
         case let error as AudioCaptureError:
             switch error {
             case .permissionDenied: self = .captureAccess
-            case .noSourcesSelected, .sourcesUnavailable, .noCaptureDisplay: self = .captureDiscovery
-            case .alreadyCapturing, .systemFailure: self = .captureStart
+            case .microphoneAccessDenied, .microphoneAccessRestricted: self = .microphoneAccess
+            case .noSourcesSelected, .sourcesUnavailable, .noCaptureDisplay, .microphoneUnavailable,
+                 .microphoneInputChanged:
+                self = .captureDiscovery
+            case .alreadyCapturing, .systemFailure, .mixedCaptureModes, .microphoneAudioNotRetained:
+                self = .captureStart
             case .interrupted: self = .captureInterrupted
             }
         case let error as TranscriptionError:

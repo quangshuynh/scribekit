@@ -5,13 +5,17 @@
 
 import Foundation
 
-/// Starts and stops capture of audio from selected applications.
+/// Starts and stops capture of a meeting's audio.
 ///
 /// The protocol exists so that session and presentation code depends on
-/// capture as a capability rather than on ScreenCaptureKit: the production
-/// implementation owns an `SCStream`, while tests substitute a value that
-/// records calls and feeds synthetic samples. Implementations own their own
-/// lifecycle and are not shared singletons.
+/// capture as a capability rather than on a framework: one production
+/// implementation owns an `SCStream` for application audio, another an
+/// `AVAudioEngine` for the microphone, while tests substitute a value that
+/// records calls and feeds synthetic samples. Whatever the source, audio
+/// leaves an implementation as ``CapturedPCMBuffer`` values delivered to an
+/// ``AudioSampleConsuming`` on the implementation's own queue, and a stream
+/// that ends by itself is reported through ``interruptions``. Implementations
+/// own their own lifecycle and are not shared singletons.
 nonisolated protocol AudioCapturing: Sendable {
 
     /// Interruptions reported by the capture system after a successful start.
@@ -21,7 +25,21 @@ nonisolated protocol AudioCapturing: Sendable {
     /// than thrown. The sequence finishes when the implementation is released.
     var interruptions: AsyncStream<AudioCaptureError> { get }
 
-    /// Begins capturing audio from the configured applications.
+    /// Checks, before anything about a meeting has been created, that capture
+    /// could start.
+    ///
+    /// This is where a capture source asks for what it needs from the user —
+    /// the microphone's permission prompt is shown here, while nothing is on
+    /// disk yet — so a refusal leaves no half-made meeting behind. It captures
+    /// nothing. The default does nothing, because application capture's
+    /// permission flow belongs to discovery and has already run by the time a
+    /// meeting can be started.
+    ///
+    /// - Parameter configuration: What would be captured.
+    /// - Throws: ``AudioCaptureError`` describing why capture could not start.
+    func prepare(configuration: AudioCaptureConfiguration) async throws
+
+    /// Begins capturing audio from the configured source.
     ///
     /// The call returns once the capture system has accepted the stream, so a
     /// caller that returns without an error is genuinely capturing.
@@ -37,6 +55,11 @@ nonisolated protocol AudioCapturing: Sendable {
     /// Stopping when nothing is running is not an error, so teardown paths can
     /// call it unconditionally.
     func stop() async
+}
+
+nonisolated extension AudioCapturing {
+    /// Accepts every configuration: there is nothing to check ahead of a start.
+    func prepare(configuration: AudioCaptureConfiguration) async throws {}
 }
 
 /// A reason capture could not start, or could not continue.
@@ -64,6 +87,29 @@ nonisolated enum AudioCaptureError: Error, Equatable, Sendable {
 
     /// A running stream stopped on its own, for the described reason.
     case interrupted(String)
+
+    /// A meeting was asked to capture application audio and the microphone
+    /// together. A meeting has one capture mode.
+    case mixedCaptureModes
+
+    /// A Microphone meeting was asked to keep its audio. Microphone meetings
+    /// write a transcript and never a recording.
+    case microphoneAudioNotRetained
+
+    /// The user refused microphone access, or turned it off in System
+    /// Settings.
+    case microphoneAccessDenied
+
+    /// Microphone access is restricted on this Mac and cannot be granted from
+    /// ScribeKit.
+    case microphoneAccessRestricted
+
+    /// The Mac has no microphone input to listen to.
+    case microphoneUnavailable
+
+    /// The Mac's current sound input is not the microphone the meeting was
+    /// set up with, and ScribeKit does not switch microphones on its own.
+    case microphoneInputChanged
 }
 
 extension AudioCaptureError: LocalizedError {
@@ -86,6 +132,22 @@ extension AudioCaptureError: LocalizedError {
             "Capture could not start: \(description)"
         case let .interrupted(description):
             "Capture stopped: \(description)"
+        case .mixedCaptureModes:
+            "A meeting captures either application audio or the microphone, not both."
+        case .microphoneAudioNotRetained:
+            "Microphone meetings keep no audio. Only the transcript is written."
+        case .microphoneAccessDenied:
+            "ScribeKit does not have access to the microphone. Turn it on in System Settings › "
+            + "Privacy & Security › Microphone, then try again."
+        case .microphoneAccessRestricted:
+            "Microphone access is restricted on this Mac, for example by a device-management profile, "
+            + "and ScribeKit cannot ask for it."
+        case .microphoneUnavailable:
+            "This Mac has no microphone input. Connect one or choose an input in System Settings › Sound, "
+            + "then try again."
+        case .microphoneInputChanged:
+            "The Mac's sound input is no longer the microphone this meeting uses. ScribeKit does not switch "
+            + "microphones on its own: check the input in System Settings › Sound, then try again."
         }
     }
 }

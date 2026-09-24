@@ -17,7 +17,8 @@ nonisolated struct MeetingStartRequest: Equatable, Sendable {
     /// The user-entered title, which may be empty.
     let title: String
 
-    /// The applications to capture.
+    /// What to capture: the applications for an App Audio meeting, or the
+    /// one microphone input for a Microphone meeting.
     let sources: [CaptureSource]
 
     /// The folder the user chose for meeting artifacts.
@@ -30,7 +31,7 @@ nonisolated struct MeetingStartRequest: Equatable, Sendable {
     ///
     /// - Parameters:
     ///   - title: The user-entered title.
-    ///   - sources: The applications to capture.
+    ///   - sources: The applications, or the microphone input, to capture.
     ///   - destination: The folder the user chose.
     ///   - audioRetention: The session's retention choice.
     init(
@@ -43,6 +44,24 @@ nonisolated struct MeetingStartRequest: Equatable, Sendable {
         self.sources = sources
         self.destination = destination
         self.audioRetention = audioRetention
+    }
+
+    /// The capture mode the sources describe, or `nil` when they mix modes.
+    var captureMode: CaptureMode? { CaptureMode(sources: sources) }
+
+    /// Why this request cannot become a meeting, judged from the request
+    /// alone, or `nil` when nothing in it rules a start out.
+    ///
+    /// The checks are the shape of the request, not the state of the Mac:
+    /// something to capture, one capture mode, and no recording for a
+    /// Microphone meeting. Microphone meetings write a transcript and never a
+    /// recording, so a request to keep one is refused rather than quietly
+    /// changed into a request that keeps nothing.
+    var refusal: AudioCaptureError? {
+        guard !sources.isEmpty else { return .noSourcesSelected }
+        guard let captureMode else { return .mixedCaptureModes }
+        if captureMode == .microphone, audioRetention.retainsAudio { return .microphoneAudioNotRetained }
+        return nil
     }
 
     /// Builds the session metadata this request describes.

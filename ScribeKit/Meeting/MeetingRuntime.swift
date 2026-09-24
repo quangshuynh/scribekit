@@ -10,6 +10,11 @@ import OSLog
 /// capture, on-device recognition, durable transcript writing, optional audio
 /// retention, and the order between them.
 ///
+/// Capture is from the selected applications or from the microphone — one or
+/// the other, fixed when the meeting starts. The source decides which
+/// capturer runs and nothing else: every rule below holds for both, through
+/// the same code.
+///
 /// One of these exists, it is created by the application delegate and it lives
 /// as long as the process does. That is the point: a meeting is application
 /// state, not presentation state. A window that is hidden, minimised, closed
@@ -22,9 +27,14 @@ import OSLog
 ///
 /// The model drives an ``AudioCapturing``, a ``SpeechTranscribing``, a
 /// ``TranscriptPersisting`` and an ``AudioRetaining`` value and never touches
-/// ScreenCaptureKit, the Speech framework, a codec or the filesystem itself, so
-/// a whole meeting is testable without capture permission, a speech model, a
-/// save folder or a disk.
+/// ScreenCaptureKit, the audio engine, the Speech framework, a codec or the
+/// filesystem itself, so a whole meeting is testable without capture or
+/// microphone permission, a speech model, a save folder or a disk.
+///
+/// Nothing here observes the application's activation, its windows or which
+/// tab is showing. A meeting keeps capturing while ScribeKit is in the
+/// background, hidden, minimised or windowless, because none of those is an
+/// input to anything this type does.
 ///
 /// Audio does not pass through here. The capturer delivers buffers on its own
 /// queue to a fan-out consumer that feeds the activity summary, the transcriber
@@ -265,8 +275,8 @@ final class MeetingRuntime {
     ///     substitute a double so the assertion's lifetime is testable.
     ///   - now: Reads the wall clock. Tests substitute a controllable one.
     ///   - makeCapturer: Builds the capturer around the audio consumers. The
-    ///     default builds the ScreenCaptureKit implementation; tests
-    ///     substitute a fake.
+    ///     default routes App Audio meetings to ScreenCaptureKit and Microphone
+    ///     meetings to the audio engine; tests substitute a fake.
     init(
         monitor: AudioCaptureActivityMonitor = AudioCaptureActivityMonitor(),
         transcriber: any SpeechTranscribing = AppleSpeechTranscriber(),
@@ -277,7 +287,10 @@ final class MeetingRuntime {
         processActivity: (any MeetingActivityAsserting)? = nil,
         now: @escaping () -> Date = { Date() },
         makeCapturer: (AudioSampleConsuming) -> AudioCapturing = {
-            ScreenCaptureKitAudioCapturer(consumer: $0)
+            CaptureModeRouter(
+                applications: ScreenCaptureKitAudioCapturer(consumer: $0),
+                microphone: MicrophoneAudioCapturer(consumer: $0)
+            )
         }
     ) {
         self.monitor = monitor
@@ -458,7 +471,7 @@ final class MeetingRuntime {
     func canStart(_ request: MeetingStartRequest?) -> Bool {
         guard let request else { return false }
         return captureState.canStart && transcriptionState.canStart && !persistenceState.isActive
-            && !audioRetentionState.isActive && !request.sources.isEmpty && availability.canTranscribe
+            && !audioRetentionState.isActive && request.refusal == nil && availability.canTranscribe
     }
 
     /// Whether the interface should offer to stop.
@@ -493,6 +506,11 @@ final class MeetingRuntime {
     /// so a failed start never leaves a file open, a folder leased or half a
     /// pipeline running — and never records a session as completed.
     ///
+    /// Before any of that, the capturer is asked whether it could start. That
+    /// is where a Microphone meeting asks macOS for microphone access the
+    /// first time, so a refused permission leaves nothing on disk; for App
+    /// Audio it does nothing.
+    ///
     /// The settings are copied into ``meeting`` before anything is created,
     /// and everything after that reads the copy. A meeting therefore keeps the
     /// title, sources, destination, retention mode and locale it was started
@@ -501,16 +519,30 @@ final class MeetingRuntime {
     /// - Parameter request: The meeting to start.
     func start(_ request: MeetingStartRequest) async {
         guard captureState.canStart, transcriptionState.canStart, !persistenceState.isActive else { return }
-        guard !request.sources.isEmpty else {
-            captureState = .failed(
-                message: AudioCaptureError.noSourcesSelected.errorDescription ?? ""
-            )
+        if let refusal = request.refusal {
+            captureState = .failed(message: refusal.errorDescription ?? "")
             return
         }
         guard availability.canTranscribe else {
             transcriptionState = .failed(
                 message: TranscriptionError.unavailable(availability).errorDescription ?? ""
             )
+            return
+        }
+
+        let captureConfiguration = AudioCaptureConfiguration(sources: request.sources)
+        // Claimed before the capturer is asked, so a second start while a
+        // permission prompt is on screen finds a meeting preparing and is
+        // refused rather than racing this one. The previous meeting stops
+        // being described here too: what is preparing is not that meeting.
+        captureState = .preparing
+        lastCompletion = nil
+        meeting = nil
+        do {
+            try await capturer.prepare(configuration: captureConfiguration)
+        } catch {
+            log(startFailure: error, subsystem: ScribeKitLog.capture)
+            captureState = .failed(message: message(for: error, sources: request.sources))
             return
         }
 
@@ -531,7 +563,8 @@ final class MeetingRuntime {
         openGapIncident = nil
         ScribeKitLog.lifecycle.info(
             """
-            Meeting start requested: \(request.sources.count, privacy: .public) source(s), \
+            Meeting start requested: \(captureConfiguration.mode.rawValue, privacy: .public), \
+            \(request.sources.count, privacy: .public) source(s), \
             retention \(request.audioRetention.diagnosticName, privacy: .public), \
             locale \(self.localeIdentifier, privacy: .public)
             """
@@ -568,7 +601,6 @@ final class MeetingRuntime {
             return
         }
 
-        let captureConfiguration = AudioCaptureConfiguration(sources: request.sources)
         self.captureConfiguration = captureConfiguration
         do {
             let url = try audio.startSession(
@@ -1300,7 +1332,13 @@ final class MeetingRuntime {
     // MARK: - Diagnostics
 
     /// The audio format capture was asked for, once a meeting has started.
-    var requestedCaptureFormat: CapturedAudioFormat? { captureConfiguration?.requestedFormat }
+    ///
+    /// `nil` for a Microphone meeting, which asks for no format: the input
+    /// device delivers its own.
+    var requestedCaptureFormat: CapturedAudioFormat? {
+        guard let captureConfiguration, captureConfiguration.mode == .applications else { return nil }
+        return captureConfiguration.requestedFormat
+    }
 
     /// Records a failure by what it was rather than by what it said.
     ///
