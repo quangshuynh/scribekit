@@ -14,6 +14,7 @@ private nonisolated final class MemoryPreferences: MeetingSetupPreferencesStorin
     var audioRetention: AudioRetentionMode = .none
     var rememberedSourceIDs: [String] = []
     var captureMode: CaptureMode = .microphone
+    var microphoneSelection: MicrophoneSelection = .systemDefault
 }
 
 /// A save location that remembers nothing.
@@ -309,16 +310,16 @@ struct MicrophoneMeetingTests {
         #expect(harness.capturer.configurations[0] == harness.capturer.configurations[1])
     }
 
-    @Test("A resume refused because the input changed leaves the meeting paused and resumable")
-    func resumeRefusedWhenInputChanged() async {
+    @Test("A resume refused because the meeting's microphone is not connected leaves it paused and resumable")
+    func resumeRefusedWhenInputDisconnected() async {
         let meeting = await makeMeeting()
         await meeting.runtime.start(request([microphone]))
         await meeting.runtime.pause()
-        meeting.capturer.startError = .microphoneInputChanged
+        meeting.capturer.startError = .microphoneDisconnected
         await meeting.runtime.resume()
 
         #expect(meeting.runtime.status == .paused)
-        #expect(meeting.runtime.pauseFailureMessage?.contains("does not switch microphones") == true)
+        #expect(meeting.runtime.pauseFailureMessage?.contains("does not switch to another microphone") == true)
         #expect(meeting.persistence.isOpen)
 
         meeting.capturer.startError = nil
@@ -342,14 +343,14 @@ struct MicrophoneMeetingTests {
         #expect(meeting.runtime.outcome?.category == .completed)
     }
 
-    @Test("The input changing mid-meeting ends it as interrupted, keeping everything written")
-    func inputChangeInterrupts() async {
+    @Test("The microphone disconnecting mid-meeting ends it as interrupted, keeping everything written")
+    func inputLossInterrupts() async {
         let meeting = await makeMeeting()
         await meeting.runtime.start(request([microphone]))
         meeting.transcriber.emit(.final(segment("Said before the headset was unplugged.", start: 0)))
         #expect(await wait { meeting.persistence.segments.count == 1 })
 
-        meeting.capturer.interrupt(.interrupted(MicrophoneAudioCapturer.configurationChangeDescription))
+        meeting.capturer.interrupt(.interrupted(MicrophoneRouteLoss.inputDisconnected.interruptionDescription))
         #expect(await wait { meeting.persistence.outcomes == [.interrupted] })
 
         #expect(meeting.runtime.outcome?.category == .interrupted)

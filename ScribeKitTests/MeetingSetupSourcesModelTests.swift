@@ -29,6 +29,7 @@ private nonisolated final class FakePreferences: MeetingSetupPreferencesStoring,
     var audioRetention: AudioRetentionMode = .default
     var rememberedSourceIDs: [String] = []
     var captureMode: CaptureMode = .applications
+    var microphoneSelection: MicrophoneSelection = .systemDefault
 }
 
 @MainActor

@@ -73,7 +73,7 @@ nonisolated enum DiagnosticCategory: String, Codable, CaseIterable, Equatable, S
             case .permissionDenied: self = .captureAccess
             case .microphoneAccessDenied, .microphoneAccessRestricted: self = .microphoneAccess
             case .noSourcesSelected, .sourcesUnavailable, .noCaptureDisplay, .microphoneUnavailable,
-                 .microphoneInputChanged:
+                 .microphoneDisconnected, .microphoneInputChanged:
                 self = .captureDiscovery
             case .alreadyCapturing, .systemFailure, .mixedCaptureModes, .microphoneAudioNotRetained:
                 self = .captureStart

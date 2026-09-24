@@ -26,6 +26,12 @@ struct MicrophoneReadinessTests {
         )
     }
 
+    /// What the setup screen reads when the user left the input on System
+    /// Default.
+    private func defaultInput(_ authorization: MicrophoneAuthorization, _ input: MicrophoneInput?) -> MicrophoneReadiness {
+        .checked(authorization: authorization, choice: MicrophoneChoice(selection: .systemDefault, input: input))
+    }
+
     private func row(
         _ prerequisite: MeetingStartReadiness.Prerequisite,
         in readiness: MeetingStartReadiness
@@ -35,7 +41,7 @@ struct MicrophoneReadinessTests {
 
     @Test("Granted access and an input allow a start, in the same four rows App Audio uses")
     func readyToStart() {
-        let readiness = readiness(.checked(authorization: .authorized, input: input))
+        let readiness = readiness(defaultInput(.authorized, input))
         #expect(readiness.canStart)
         #expect(readiness.captureMode == .microphone)
         #expect(readiness.rows.map(\.prerequisite) == MeetingStartReadiness.Prerequisite.allCases)
@@ -48,14 +54,14 @@ struct MicrophoneReadinessTests {
 
     @Test("A Microphone meeting never asks about Screen & System Audio Recording")
     func screenRecordingIsNotAPrerequisite() {
-        let readiness = readiness(.checked(authorization: .authorized, input: input))
+        let readiness = readiness(defaultInput(.authorized, input))
         #expect(!readiness.rows.contains { $0.title == "Screen & System Audio Recording" })
         #expect(!readiness.startExplanation.contains("applications"))
     }
 
     @Test("A permission macOS has not asked about yet does not block: the start asks")
     func undeterminedIsAdvisory() {
-        let readiness = readiness(.checked(authorization: .notDetermined, input: input))
+        let readiness = readiness(defaultInput(.notDetermined, input))
         #expect(readiness.canStart)
         #expect(row(.captureAccess, in: readiness)?.status == .advisory)
         #expect(row(.captureAccess, in: readiness)?.detail.contains("asks") == true)
@@ -63,7 +69,7 @@ struct MicrophoneReadinessTests {
 
     @Test("A refusal blocks the start and names where it can be changed")
     func deniedBlocksWithRecoveryPath() {
-        let readiness = readiness(.checked(authorization: .denied, input: input))
+        let readiness = readiness(defaultInput(.denied, input))
         #expect(!readiness.canStart)
         #expect(readiness.blocker?.prerequisite == .captureAccess)
         #expect(readiness.blocker?.detail.contains("System Settings › Privacy & Security › Microphone") == true)
@@ -72,7 +78,7 @@ struct MicrophoneReadinessTests {
 
     @Test("A restricted Mac blocks the start without sending the user to a setting they cannot change")
     func restrictedBlocks() {
-        let readiness = readiness(.checked(authorization: .restricted, input: input))
+        let readiness = readiness(defaultInput(.restricted, input))
         #expect(readiness.blocker?.prerequisite == .captureAccess)
         #expect(readiness.blocker?.detail.contains("restricted") == true)
         #expect(readiness.blocker?.detail.contains("Privacy & Security") == false)
@@ -80,7 +86,7 @@ struct MicrophoneReadinessTests {
 
     @Test("No input blocks the start on the input row")
     func noInputBlocks() {
-        let readiness = readiness(.checked(authorization: .authorized, input: nil))
+        let readiness = readiness(defaultInput(.authorized, nil))
         #expect(!readiness.canStart)
         #expect(readiness.blocker?.prerequisite == .captureSource)
         #expect(readiness.blocker?.title == "Microphone input")
@@ -96,7 +102,7 @@ struct MicrophoneReadinessTests {
 
     @Test("The save location still comes first")
     func saveLocationStillFirst() {
-        let readiness = readiness(.checked(authorization: .denied, input: nil), saveLocation: .notChosen)
+        let readiness = readiness(defaultInput(.denied, nil), saveLocation: .notChosen)
         #expect(readiness.blocker?.prerequisite == .saveLocation)
     }
 
@@ -162,13 +168,16 @@ struct MicrophoneAccessGateTests {
         #expect(restricted.requests == 0)
     }
 
-    @Test("The input must be the one the meeting was set up with; no input is its own refusal")
+    @Test("The meeting's input must be connected; the Mac's default moving elsewhere does not matter")
     func expectedInput() throws {
-        let access = FakeMicrophoneAccess(authorization: .authorized)
-        let input = try MicrophoneAccessGate.expectedInput(access, matching: ["BuiltInMicrophoneDevice"])
-        #expect(input.name == "MacBook Pro Microphone")
+        let input = FakeMicrophoneAccess.builtIn
+        let studio = MicrophoneInput(id: "AppleUSBAudioEngine:1", name: "Studio Mic")
+        let access = FakeMicrophoneAccess(authorization: .authorized, devices: [input, studio], defaultInput: input)
+        #expect(try MicrophoneAccessGate.expectedInput(access, matching: ["AppleUSBAudioEngine:1"]) == studio,
+                "a connected input that is not the default is still the meeting's input")
 
-        #expect(throws: AudioCaptureError.microphoneInputChanged) {
+        access.setInputs([input], defaultInput: input)
+        #expect(throws: AudioCaptureError.microphoneDisconnected) {
             try MicrophoneAccessGate.expectedInput(access, matching: ["AppleUSBAudioEngine:1"])
         }
         access.setInput(nil)
@@ -305,10 +314,10 @@ struct CaptureModeRouterTests {
         let microphone = FakeCapturer(consumer: consumer)
         let router = CaptureModeRouter(applications: applications, microphone: microphone)
 
-        microphone.interrupt(.interrupted(MicrophoneAudioCapturer.configurationChangeDescription))
+        microphone.interrupt(.interrupted(MicrophoneRouteLoss.inputDisconnected.interruptionDescription))
         var iterator = router.interruptions.makeAsyncIterator()
         let first = await iterator.next()
-        #expect(first == .interrupted(MicrophoneAudioCapturer.configurationChangeDescription))
+        #expect(first == .interrupted(MicrophoneRouteLoss.inputDisconnected.interruptionDescription))
 
         applications.interrupt(.permissionDenied)
         let second = await iterator.next()

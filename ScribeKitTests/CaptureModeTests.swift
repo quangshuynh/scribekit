@@ -89,12 +89,16 @@ struct CaptureModeTests {
         #expect(denied.errorDescription?.contains("Privacy & Security › Microphone") == true)
         #expect(AudioCaptureError.microphoneAccessRestricted.errorDescription?.contains("restricted") == true)
         let changed = AudioCaptureError.microphoneInputChanged.errorDescription
-        #expect(changed?.contains("System Settings › Sound") == true)
+        #expect(changed?.contains("does not switch microphones on its own") == true)
+        let disconnected = AudioCaptureError.microphoneDisconnected.errorDescription
+        #expect(disconnected?.contains("not connected") == true)
+        #expect(disconnected?.contains("does not switch to another microphone") == true)
 
         #expect(DiagnosticCategory(AudioCaptureError.microphoneAccessDenied) == .microphoneAccess)
         #expect(DiagnosticCategory(AudioCaptureError.microphoneAccessRestricted) == .microphoneAccess)
         #expect(DiagnosticCategory(AudioCaptureError.microphoneUnavailable) == .captureDiscovery)
         #expect(DiagnosticCategory(AudioCaptureError.microphoneInputChanged) == .captureDiscovery)
+        #expect(DiagnosticCategory(AudioCaptureError.microphoneDisconnected) == .captureDiscovery)
         #expect(DiagnosticCategory(AudioCaptureError.mixedCaptureModes) == .captureStart)
         // Screen recording refusals keep their own category.
         #expect(DiagnosticCategory(AudioCaptureError.permissionDenied) == .captureAccess)
