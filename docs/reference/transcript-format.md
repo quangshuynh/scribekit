@@ -25,6 +25,7 @@ Today, we are learning about closures in Swift.
 | Element | Meaning |
 | --- | --- |
 | `# <title>` | The meeting title, as configured at start. |
+| `**Sources:**` | What was captured: the applications' names for App Audio, or `Microphone (<input name>)` for a [Microphone meeting](../using/microphone-transcription.md). |
 | `### <h:mm AM/PM>` | A minute heading, written when the minute bucket changes and never twice for the same minute. Gaps do not open one. |
 | `**<h:mm:ss AM/PM>**` | The wall-clock time of the finalised span that follows. |
 | Plain paragraphs | Recognised speech, exactly as it was finalised. |

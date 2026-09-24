@@ -96,6 +96,7 @@ nav:
       - Audio Retention: getting-started/audio-retention.md
   - Using ScribeKit:
       - Capturing App Audio: using/capturing-app-audio.md
+      - Microphone Transcription: using/microphone-transcription.md
       - Live Transcription: using/live-transcription.md
       - Pause & Resume: using/pause-and-resume.md
       - Background Operation: using/background-operation.md

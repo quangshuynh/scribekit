@@ -2,7 +2,9 @@
 
 ScribeKit captures audio from the applications you select, through
 ScreenCaptureKit. It is not a system-wide tap and it is not a microphone
-recorder.
+recorder. This is the **App Audio** mode; to transcribe the Mac's microphone
+instead, see [Microphone Transcription](microphone-transcription.md). A meeting
+uses one or the other.
 
 ## Discovery and selection
 

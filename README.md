@@ -45,8 +45,11 @@ resume, stopping, and reading the finished meeting back from History.
 ## What it does
 
 - **Captures the apps you pick**, through ScreenCaptureKit — not the whole
-  system, and not a microphone.
+  system.
   [Details](https://quangshuynh.github.io/scribekit/using/capturing-app-audio/)
+- **Or transcribes your microphone** while you work in other apps, keeping no
+  audio. Unreleased: on `main` since v0.1.0.
+  [Details](https://quangshuynh.github.io/scribekit/using/microphone-transcription/)
 - **Transcribes on this Mac** with Apple's `SpeechAnalyzer` and
   `SpeechTranscriber`, against a locally installed model, with no network
   fallback.
@@ -140,7 +143,7 @@ The build pipeline is green and the full test suite is passing.
 | **Mac** | Tested on Apple Silicon. The project builds a universal binary, but nothing has been built or validated on Intel. |
 | **Xcode** | 26 or later — needed to build ScribeKit, which is currently the only way to run it. |
 | **Speech model** | The on-device model for your recognition language must already be installed. ScribeKit does not download models and has no network fallback; a language whose model is missing is listed and disabled. |
-| **Permission** | Screen & System Audio Recording, which macOS asks for the first time ScribeKit looks for capture sources. |
+| **Permission** | Screen & System Audio Recording, which macOS asks for the first time ScribeKit looks for capture sources. Microphone meetings (unreleased) need Microphone permission instead. |
 
 More detail in
 [Requirements](https://quangshuynh.github.io/scribekit/getting-started/requirements/).
@@ -235,7 +238,8 @@ v0.1.0 is deliberately narrow. The ones most likely to matter:
 
 - macOS 26.5 or later, tested only on Apple Silicon.
 - Source build only — no signed or notarized application is provided.
-- Audio comes from selected applications, not from a microphone.
+- Audio comes from selected applications, not from a microphone. (Microphone
+  transcription is unreleased work on `main`, one source per meeting.)
 - The on-device speech model must already be installed, and accuracy is
   Apple's recogniser's.
 - An interrupted meeting is preserved but cannot be continued as the same

@@ -13,6 +13,11 @@ it:
 | Speech recognition | An on-device model installed for the selected language. | Install it in System Settings, then **Check Again** |
 | Audio source | At least one running application selected. | Pick one from the list, or **Refresh** |
 
+That is the list for **App Audio**. With **Transcribe from** set to
+**Microphone**, the two capture rows become **Microphone access** and
+**Microphone input** instead, and Screen & System Audio Recording is not asked
+for; see [Microphone Transcription](../using/microphone-transcription.md).
+
 **Start Meeting** is disabled only while one of these is genuinely missing, and
 the reason is shown beside the button. When several are missing you are asked
 for one at a time, in the order above, which is the order they depend on each

@@ -79,6 +79,36 @@ are consequences of decisions, and several of them are deliberate.
 - **A permission never asked for and one refused look the same.** ScribeKit
   reports that access is unavailable rather than claiming which it was.
 
+## Microphone
+
+Microphone transcription is unreleased; see
+[Microphone Transcription](../using/microphone-transcription.md).
+
+- **One capture mode per meeting.** A meeting transcribes the selected
+  applications or the microphone, never both, and the mode cannot change while
+  it runs. There is no mixing, no speaker separation and no identification.
+- **No microphone picker.** ScribeKit listens to the Mac's current sound input.
+  Choosing another means changing the input in System Settings › Sound before
+  starting.
+- **Any change to the input ends the meeting.** A device switched, disconnected
+  or changing format stops the audio engine, and the meeting is recorded as
+  interrupted rather than moved to another microphone. This may include
+  changes that did not concern the input; whether connecting headphones does
+  has not been observed.
+- **No microphone audio is kept.** Retention applies to App Audio meetings
+  only; a Microphone meeting writes a transcript and nothing else.
+- **Channels are averaged to mono.** A multi-channel interface's channels are
+  mixed evenly before recognition, so a microphone on one channel of a
+  two-channel interface reaches the recogniser at half its level.
+- **Not yet observed on hardware.** Listening in the background, hidden,
+  minimised or windowless follows from the ownership design and is covered by
+  tests without a microphone, but has not been confirmed with a real one.
+  Sleep and wake, screen lock and permission revoked mid-meeting have not been
+  observed at all.
+- **Loss inside the audio engine is not visible.** The tap hands audio to the
+  pipeline as it arrives and the recogniser's backlog reports what it drops;
+  audio the engine itself never delivered cannot be counted.
+
 ## Recognition
 
 - **An on-device language model must be installed.** Languages whose model is
