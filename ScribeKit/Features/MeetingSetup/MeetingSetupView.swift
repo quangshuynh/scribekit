@@ -9,10 +9,11 @@ import UniformTypeIdentifiers
 
 /// The screen that configures a meeting and shows the one that is running.
 ///
-/// The screen collects the settings a session needs — title, audio sources,
-/// audio retention and save location — and displays the meeting: capture,
-/// on-device recognition and a timestamped Markdown transcript written to the
-/// chosen folder while the meeting is under way.
+/// The screen collects the settings a session needs — title, where the audio
+/// comes from (the selected applications or the microphone), audio retention
+/// and save location — and displays the meeting: capture, on-device
+/// recognition and a timestamped Markdown transcript written to the chosen
+/// folder while the meeting is under way.
 ///
 /// It does not own the meeting. ``MeetingRuntime`` is handed in and belongs to
 /// the application, so this screen can be closed, hidden or built again
@@ -30,6 +31,8 @@ struct MeetingSetupView: View {
     let diagnostics: MeetingDiagnostics
 
     @State private var sources: MeetingSetupSourcesModel
+    @State private var microphone: MeetingSetupMicrophoneModel
+    @State private var captureMode: CaptureMode
     @State private var destination: MeetingSetupDestinationModel
     @State private var recovery = SessionRecoveryModel()
     @State private var title = ""
@@ -46,6 +49,9 @@ struct MeetingSetupView: View {
     ///   - sourceProvider: Discovery used to populate the application list. The
     ///     default talks to ScreenCaptureKit; previews and tests can substitute
     ///     their own.
+    ///   - microphoneAccess: The system's answers about the microphone. The
+    ///     default asks macOS, without prompting until the user starts a
+    ///     Microphone meeting or asks to allow access.
     ///   - saveLocation: Storage for the chosen save folder. The default keeps
     ///     a security-scoped bookmark in the local preference store.
     ///   - preferences: Store for the setup choices remembered between
@@ -54,6 +60,7 @@ struct MeetingSetupView: View {
         runtime: MeetingRuntime,
         diagnostics: MeetingDiagnostics,
         sourceProvider: CaptureSourceProviding = ScreenCaptureKitSourceProvider(),
+        microphoneAccess: any MicrophoneAccessProviding = SystemMicrophoneAccess(),
         saveLocation: SaveLocationPersisting = SecurityScopedSaveLocationStore(),
         preferences: MeetingSetupPreferencesStoring = UserDefaultsMeetingSetupPreferences()
     ) {
@@ -61,6 +68,12 @@ struct MeetingSetupView: View {
         self.diagnostics = diagnostics
         self.preferences = preferences
         _sources = State(initialValue: MeetingSetupSourcesModel(provider: sourceProvider, preferences: preferences))
+        _microphone = State(initialValue: MeetingSetupMicrophoneModel(access: microphoneAccess))
+        // A running meeting's mode wins over the remembered one, so a window
+        // rebuilt during a meeting shows the meeting it is watching.
+        _captureMode = State(initialValue: runtime.isRunning
+            ? runtime.meeting?.captureMode ?? preferences.captureMode
+            : preferences.captureMode)
         _destination = State(initialValue: MeetingSetupDestinationModel(persistence: saveLocation))
         _audioRetention = State(initialValue: preferences.audioRetention)
     }
@@ -68,16 +81,20 @@ struct MeetingSetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
+            captureModePicker
             Form {
                 readinessSection
                 if runtime.outcome != nil { outcomeSection }
                 if recovery.isVisible { recoverySection }
                 meetingSection
-                sourcesSection
+                switch captureMode {
+                case .applications: sourcesSection
+                case .microphone: microphoneSection
+                }
                 captureSection
                 transcriptSection
                 transcriptFileSection
-                audioRetentionSection
+                if captureMode == .applications { audioRetentionSection }
                 destinationSection
             }
             .formStyle(.grouped)
@@ -89,10 +106,14 @@ struct MeetingSetupView: View {
             destination.restore()
             await checkForUnfinishedSessions()
             await runtime.prepare()
-            await sources.refresh()
+            await refreshCaptureSource()
         }
         .onChange(of: audioRetention) { _, mode in
             preferences.audioRetention = mode
+        }
+        .onChange(of: captureMode) { _, mode in
+            preferences.captureMode = mode
+            Task { await refreshCaptureSource(onlyIfUnchecked: true) }
         }
         .onChange(of: setupDiagnostics, initial: true) { _, state in
             diagnostics.publish(state)
@@ -105,6 +126,26 @@ struct MeetingSetupView: View {
                 destination.choose(url)
                 Task { await checkForUnfinishedSessions() }
             }
+        }
+    }
+
+    /// Reads what the chosen capture mode needs: the application list for App
+    /// Audio, the microphone's permission and input for Microphone.
+    ///
+    /// Only the chosen mode is asked about. Listing applications is what makes
+    /// macOS ask for Screen & System Audio Recording, and a Microphone meeting
+    /// does not need it; reading the microphone's state never prompts at all.
+    ///
+    /// - Parameter onlyIfUnchecked: Leave a mode that has already been read
+    ///   alone, for a switch between modes rather than a screen appearing.
+    private func refreshCaptureSource(onlyIfUnchecked: Bool = false) async {
+        switch captureMode {
+        case .applications:
+            guard !onlyIfUnchecked || sources.discoveryState == .idle else { return }
+            await sources.refresh()
+        case .microphone:
+            guard !onlyIfUnchecked || microphone.readiness == .notChecked else { return }
+            microphone.refresh()
         }
     }
 
@@ -250,12 +291,22 @@ struct MeetingSetupView: View {
     /// it are three renderings of one answer rather than three checks that can
     /// disagree.
     private var readiness: MeetingStartReadiness {
-        MeetingStartReadiness(
-            saveLocation: destination.readiness,
-            captureSources: sources.readiness,
-            speech: runtime.availability,
-            meetingIsActive: runtime.isRunning
-        )
+        switch captureMode {
+        case .applications:
+            MeetingStartReadiness(
+                saveLocation: destination.readiness,
+                captureSources: sources.readiness,
+                speech: runtime.availability,
+                meetingIsActive: runtime.isRunning
+            )
+        case .microphone:
+            MeetingStartReadiness(
+                saveLocation: destination.readiness,
+                microphone: microphone.readiness,
+                speech: runtime.availability,
+                meetingIsActive: runtime.isRunning
+            )
+        }
     }
 
     /// Everything a diagnostic report needs from this screen, as one value so
@@ -294,7 +345,7 @@ struct MeetingSetupView: View {
                 HStack(spacing: 6) {
                     Label(row.status.label, systemImage: row.status.symbolName)
                         .labelStyle(.iconOnly)
-                    Text(row.prerequisite.title)
+                    Text(row.title)
                         .font(.headline)
                     Text(row.status.label)
                         .font(.caption)
@@ -329,9 +380,14 @@ struct MeetingSetupView: View {
                     .disabled(runtime.isRunning)
                     .accessibilityHint("Choose the folder meetings are saved to")
             case .captureAccess, .captureSource:
-                Button("Refresh") { Task { await sources.refresh() } }
-                    .disabled(sources.isDiscovering)
-                    .accessibilityHint("Look for applications ScribeKit can record again")
+                switch row.captureMode {
+                case .applications:
+                    Button("Refresh") { Task { await sources.refresh() } }
+                        .disabled(sources.isDiscovering)
+                        .accessibilityHint("Look for applications ScribeKit can record again")
+                case .microphone:
+                    microphoneAction(for: row.prerequisite)
+                }
             case .speechRecognition:
                 Button("Check Again") { Task { await runtime.prepare() } }
                     .disabled(runtime.isRunning)
@@ -395,6 +451,66 @@ struct MeetingSetupView: View {
                 .accessibilityLabel("Last meeting")
                 .accessibilityValue(outcome.accessibilityDescription)
             }
+        }
+    }
+
+    /// The control that resolves a microphone prerequisite.
+    ///
+    /// Asking for access is offered only while macOS has never been asked,
+    /// because that is the only time it would show a prompt. After a refusal
+    /// the answer lives in System Settings, which the row names, and Check
+    /// Again reads it back.
+    ///
+    /// - Parameter prerequisite: The microphone prerequisite being presented.
+    /// - Returns: A button.
+    @ViewBuilder
+    private func microphoneAction(for prerequisite: MeetingStartReadiness.Prerequisite) -> some View {
+        if prerequisite == .captureAccess, microphone.authorization == .notDetermined {
+            Button("Allow Microphone Access…") { Task { await microphone.requestAccess() } }
+                .disabled(runtime.isRunning || microphone.isRequestingAccess)
+                .accessibilityHint("Ask macOS to let ScribeKit use the microphone for Microphone meetings")
+        } else {
+            Button("Check Again") { microphone.refresh() }
+                .disabled(runtime.isRunning)
+                .accessibilityHint("Read microphone access and the Mac's current sound input again")
+        }
+    }
+
+    /// Where the next meeting's audio comes from.
+    ///
+    /// One choice at the top of the screen rather than a setting further
+    /// down, because it decides what the rest of the screen asks for. Fixed
+    /// while a meeting runs: the running meeting keeps the source it started
+    /// with, and a meeting never captures both.
+    private var captureModePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Transcribe from", selection: $captureMode) {
+                ForEach(CaptureMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(runtime.isRunning)
+            .accessibilityLabel("Transcribe from")
+            .accessibilityHint(
+                "Choose whether the next meeting transcribes the selected applications or the microphone"
+            )
+
+            Text(captureModeExplanation)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// What the chosen mode listens to, in one sentence.
+    private var captureModeExplanation: String {
+        switch captureMode {
+        case .applications:
+            "App Audio transcribes the sound the applications you select are playing."
+        case .microphone:
+            "Microphone transcribes what the Mac's microphone hears, while you use any other app. "
+            + "Only the transcript is saved."
         }
     }
 
@@ -504,6 +620,72 @@ struct MeetingSetupView: View {
             .foregroundStyle(.secondary)
     }
 
+    /// The microphone a Microphone meeting listens to, and whether it may.
+    ///
+    /// The input is the Mac's current one, named as System Settings names it.
+    /// There is no microphone picker: ScribeKit listens to whatever input the
+    /// system has chosen, and says so, rather than offering a choice it would
+    /// have to keep true while devices come and go.
+    private var microphoneSection: some View {
+        Section("Microphone") {
+            LabeledContent("Input") {
+                Text(microphoneInputDescription)
+                    .foregroundStyle(microphone.input == nil && !isMicrophoneMeetingRunning ? .secondary : .primary)
+            }
+            .accessibilityLabel("Microphone input")
+            .accessibilityValue(microphoneInputDescription)
+
+            LabeledContent("Access") {
+                Text(microphoneAccessDescription)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityLabel("Microphone access")
+            .accessibilityValue(microphoneAccessDescription)
+
+            Text("ScribeKit uses the Mac's current sound input. To use a different microphone, choose it in "
+                 + "System Settings › Sound before you start. ScribeKit never switches microphones during a "
+                 + "meeting: if the input changes or is disconnected, the meeting ends and its transcript is kept.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            Text("The microphone is listened to only while a Microphone meeting is running, and only to "
+                 + "transcribe it on this Mac. No audio is saved and nothing is sent anywhere.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Whether the meeting running now is a Microphone meeting.
+    private var isMicrophoneMeetingRunning: Bool {
+        runtime.isRunning && runtime.meeting?.captureMode == .microphone
+    }
+
+    /// The input a Microphone meeting uses or would use.
+    ///
+    /// A running meeting names the input it started with, not whatever the
+    /// Mac's input is now.
+    private var microphoneInputDescription: String {
+        if isMicrophoneMeetingRunning, let name = runtime.meeting?.sources.first?.displayName {
+            return name
+        }
+        switch microphone.readiness {
+        case .notChecked: return "Checking…"
+        case .checked(_, nil): return "No microphone input"
+        case let .checked(_, input?): return input.name
+        }
+    }
+
+    /// What macOS says about microphone access, in words.
+    private var microphoneAccessDescription: String {
+        switch microphone.authorization {
+        case nil: "Checking…"
+        case .notDetermined?: "Not asked yet. macOS asks when you start."
+        case .authorized?: "Allowed."
+        case .denied?: "Turned off in System Settings › Privacy & Security › Microphone."
+        case .restricted?: "Restricted on this Mac."
+        }
+    }
+
     private var captureSection: some View {
         Section("Capture & Transcription") {
             LabeledContent("Audio") {
@@ -589,14 +771,28 @@ struct MeetingSetupView: View {
     }
 
     /// What the meeting would start with, or `nil` when it could not start.
+    ///
+    /// A Microphone meeting captures the one input the screen last read and
+    /// keeps no audio, whatever the App Audio retention setting says: that
+    /// setting belongs to App Audio meetings and is not shown for this one.
     private var startRequest: MeetingStartRequest? {
         guard let url = destination.url else { return nil }
-        return MeetingStartRequest(
-            title: title,
-            sources: sources.selectedSources,
-            destination: url,
-            audioRetention: audioRetention
-        )
+        switch captureMode {
+        case .applications:
+            return MeetingStartRequest(
+                title: title,
+                sources: sources.selectedSources,
+                destination: url,
+                audioRetention: audioRetention
+            )
+        case .microphone:
+            return MeetingStartRequest(
+                title: title,
+                sources: microphone.source.map { [$0] } ?? [],
+                destination: url,
+                audioRetention: .none
+            )
+        }
     }
 
     /// A short description of what the durable transcript is doing.
@@ -653,7 +849,8 @@ struct MeetingSetupView: View {
 
     /// A short description of what capture is doing.
     private var captureStatusDescription: String {
-        switch runtime.captureState {
+        if captureMode == .microphone { return microphoneStatusDescription }
+        return switch runtime.captureState {
         case .idle: sources.selectedSources.isEmpty
             ? "Not capturing. Select at least one application."
             : "Not capturing. \(sources.selectedSources.count) application(s) selected."
@@ -662,6 +859,23 @@ struct MeetingSetupView: View {
         case .paused: "Paused. Nothing is being captured."
         case .stopping: "Stopping…"
         case .failed: "Capture failed."
+        }
+    }
+
+    /// A short description of what listening to the microphone is doing.
+    ///
+    /// "Listening" rather than "capturing" or "recording": the audio is
+    /// transcribed and released, and nothing of it is kept.
+    private var microphoneStatusDescription: String {
+        switch runtime.captureState {
+        case .idle: microphone.input == nil
+            ? "Not listening. No microphone input."
+            : "Not listening. Start a meeting to transcribe the microphone."
+        case .preparing: "Starting…"
+        case .capturing: "Listening to \(microphoneInputDescription) for transcription."
+        case .paused: "Paused. The microphone is not being listened to."
+        case .stopping: "Stopping…"
+        case .failed: "Listening stopped."
         }
     }
 
@@ -819,7 +1033,9 @@ struct MeetingSetupView: View {
                 Button("Resume") {
                     Task { await runtime.resume() }
                 }
-                .accessibilityHint("Capture the same applications again and continue this meeting")
+                .accessibilityHint(runtime.meeting?.captureMode == .microphone
+                    ? "Listen to the same microphone again and continue this meeting"
+                    : "Capture the same applications again and continue this meeting")
             } else {
                 Button("Pause") {
                     Task { await runtime.pause() }
@@ -857,8 +1073,8 @@ struct MeetingSetupView: View {
                 + "you resume or stop."
         }
         if runtime.isRunning {
-            return "Meeting in progress. It keeps running if you hide or close this window; the menu bar item "
-                + "shows it and can stop it."
+            return "Meeting in progress. It keeps running while you use other apps, and if you hide, minimise or "
+                + "close this window; the menu bar item shows it and can stop it."
         }
         return readiness.startExplanation
     }
