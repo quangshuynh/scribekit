@@ -26,6 +26,44 @@ is therefore the screen recording one. **No screen output is added to the
 stream**, so no frame is delivered and no video or screen content is ever
 processed. See [Capturing App Audio](../using/capturing-app-audio.md).
 
+App Audio meetings need this permission; Microphone meetings do not, and in
+Microphone mode ScribeKit does not look for applications, so it is not asked
+for.
+
+## Microphone
+
+A [Microphone meeting](../using/microphone-transcription.md) needs microphone
+access, and nothing else does. macOS asks the first time a Microphone meeting
+starts — or when you choose **Allow Microphone Access…** on the setup screen
+beforehand — with this explanation:
+
+> ScribeKit listens to your microphone only while a Microphone meeting is
+> running, to transcribe your speech on this Mac. The audio is not saved and
+> never leaves your Mac.
+
+The question is asked before a meeting creates anything, so refusing leaves no
+empty session behind. An App Audio meeting never reads, asks for or needs this
+permission.
+
+What the setup screen shows is macOS's own answer, read from `AVCaptureDevice`
+each time the screen appears or you press **Check Again**; ScribeKit keeps no
+permission state of its own beside it. Reading it never prompts.
+
+| macOS says | Setup screen | What to do |
+| --- | --- | --- |
+| Not asked yet | *Note* — macOS asks when you start | Start, or **Allow Microphone Access…** |
+| Allowed | *Ready* | Nothing |
+| Denied | *Action needed* | macOS will not ask again. Turn ScribeKit on in System Settings › Privacy & Security › Microphone, then **Check Again** |
+| Restricted | *Action needed* | Set by device management or parental controls; ScribeKit cannot ask for it |
+
+ScribeKit asks for the microphone only when a meeting is being started, never
+during a resume: a resume that finds access turned off is refused and the
+meeting stays paused.
+
+The app carries the sandbox's audio-input entitlement
+(`com.apple.security.device.audio-input`) and a microphone usage description,
+and nothing else was added for it.
+
 ## Speech recognition: none
 
 Transcription asks for no permission at all, because it runs against a speech

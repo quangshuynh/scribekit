@@ -67,6 +67,14 @@ that explanation rather than as the headline.
 | Recognition failure | The recogniser could not be restarted, so capture was stopped rather than record audio nothing was transcribing. |
 | Did not start | Nothing was captured or transcribed; any folder already created holds an empty transcript. |
 
+The endings are the same for a
+[Microphone meeting](../using/microphone-transcription.md). Its input changing,
+disconnecting or changing format while it listens is capture stopping by
+itself, so the meeting is **interrupted**, with its transcript closed and kept;
+ScribeKit does not carry on with a different microphone. A refused microphone
+permission, a restricted Mac or a missing input is found before the meeting
+creates anything, so that start leaves no folder at all.
+
 A start that fails and a meeting that dies an hour in are both recorded as
 *failed*, so ScribeKit also keeps whether capture ever ran: the two need
 different things said about their artifacts. The menu bar makes the same

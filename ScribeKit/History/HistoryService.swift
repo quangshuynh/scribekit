@@ -186,7 +186,8 @@ actor HistoryService {
             transcriptURL: transcriptURL,
             transcript: info,
             audioRetention: metadata.audioRetention,
-            audio: metadata.audioURL(in: directory).flatMap(audio(at:))
+            audio: metadata.audioURL(in: directory).flatMap(audio(at:)),
+            captureMode: metadata.captureMode
         )
         return TranscriptSearchDocument(
             session: session,

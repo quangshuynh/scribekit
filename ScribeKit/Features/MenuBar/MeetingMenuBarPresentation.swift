@@ -122,7 +122,18 @@ nonisolated struct MeetingMenuBarPresentation: Equatable, Sendable {
         var details: [String] = []
         if status.isActive, let meeting {
             if let sources = meeting.sourceSummary {
-                details.append(status == .paused ? "Paused; \(sources) not being captured" : "Capturing \(sources)")
+                switch meeting.captureMode {
+                case .applications:
+                    details.append(
+                        status == .paused ? "Paused; \(sources) not being captured" : "Capturing \(sources)"
+                    )
+                case .microphone:
+                    // Listening, not capturing: nothing of the microphone is
+                    // kept but the words recognised from it.
+                    details.append(
+                        status == .paused ? "Paused; not listening to \(sources)" : "Listening to \(sources)"
+                    )
+                }
             }
             details.append(Self.retentionDescription(meeting.audioRetention))
         }

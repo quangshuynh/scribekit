@@ -33,6 +33,28 @@ All notable changes to this project are documented in this file.
   transcript — stating the start and refusing to invent the end or the total,
   neither of which had been measured. The field is additive and the record's
   schema version is unchanged.
+- **Microphone transcription.** A meeting can now transcribe the Mac's current
+  microphone input instead of selected applications — chosen with **Transcribe
+  from: App Audio / Microphone** at the top of the setup screen, one source per
+  meeting. It uses the same on-device recognition, append-only
+  `transcript.md`, pause and resume, gap incidents, session record, recovery
+  and History as App Audio, and keeps running while ScribeKit is in the
+  background, hidden, minimised or windowless, because the meeting is owned by
+  the application rather than by any window. No microphone audio is written to
+  disk and nothing leaves the Mac.
+- **Microphone permission, asked for only when needed.** macOS is asked the
+  first time a Microphone meeting starts, before anything is created; a
+  refused or restricted permission is shown with where to change it. App Audio
+  meetings never read or request it, and Microphone meetings never trigger the
+  Screen & System Audio Recording prompt.
+- **The input is never switched behind your back.** A Microphone meeting
+  listens to the input it started with; if that input changes or disappears,
+  the meeting ends as interrupted with its transcript kept, and a resume onto a
+  different input is refused.
+- **The session record states its capture mode.** `session.json` gains an
+  optional `captureMode` (`applications` or `microphone`); records written by
+  v0.1.0 decode unchanged, and the schema version is unchanged. Diagnostic
+  reports carry the mode, never the microphone's name.
 
 ## 0.1.0 — 2026-09-01
 

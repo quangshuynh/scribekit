@@ -26,6 +26,14 @@ nonisolated protocol MeetingSetupPreferencesStoring: AnyObject {
     /// claim that the application is running, and it is never a process
     /// identifier, which would not survive a relaunch.
     var rememberedSourceIDs: [String] { get set }
+
+    /// Whether the user last set up an App Audio or a Microphone meeting.
+    ///
+    /// Remembered because it is a standing choice about how someone uses
+    /// ScribeKit. Which microphone is not remembered: the Mac's current input
+    /// is read each time, and a device identifier kept between launches could
+    /// name a device the system has since given another identity.
+    var captureMode: CaptureMode { get set }
 }
 
 /// Meeting-setup preferences backed by the local preference store.
@@ -33,6 +41,7 @@ nonisolated final class UserDefaultsMeetingSetupPreferences: MeetingSetupPrefere
     private enum Key {
         static let audioRetention = "com.scribekit.meetingSetup.audioRetention"
         static let rememberedSourceIDs = "com.scribekit.meetingSetup.sourceIDs"
+        static let captureMode = "com.scribekit.meetingSetup.captureMode"
     }
 
     private let defaults: UserDefaults
@@ -59,5 +68,16 @@ nonisolated final class UserDefaultsMeetingSetupPreferences: MeetingSetupPrefere
     var rememberedSourceIDs: [String] {
         get { defaults.stringArray(forKey: Key.rememberedSourceIDs) ?? [] }
         set { defaults.set(newValue, forKey: Key.rememberedSourceIDs) }
+    }
+
+    /// The remembered capture mode, falling back to App Audio — what ScribeKit
+    /// did before there was a choice — when nothing valid is stored.
+    var captureMode: CaptureMode {
+        get {
+            guard let raw = defaults.string(forKey: Key.captureMode),
+                  let mode = CaptureMode(rawValue: raw) else { return .applications }
+            return mode
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.captureMode) }
     }
 }

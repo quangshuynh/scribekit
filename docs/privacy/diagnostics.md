@@ -26,10 +26,10 @@ app ships without the network client entitlement. See
 | `application` | ScribeKit's own bundle identifier, version and build |
 | `system` | macOS version, processor architecture |
 | `runtime` | The lifecycle status, the four subsystem states, the recognition locale, whether an on-device model is available, how many locales have one |
-| `readiness` | Each of the four prerequisites and its status, whether a meeting could start, which prerequisite is blocking, and how many applications were discovered, selected and no longer running |
+| `readiness` | Each of the four prerequisites and its status, the capture mode the screen was set up for, whether a meeting could start, which prerequisite is blocking, and how many applications were discovered, selected and no longer running |
 | `storage` | Whether a save folder was chosen, whether access to it resolved, whether the choice survived relaunch, whether capture access was available |
 | `recovery` | Whether an unfinished-session scan has run, how many sessions it found unfinished, how many records it could not read and why, and the schema versions this build writes |
-| `session` | Safe metadata about the current or most recent meeting: retention mode, recognition locale, source count, start time, wall and captured durations, pauses, recogniser restarts, transcript spans, gaps, untranscribed seconds, whether a recording was opened, and the sample rate and channel count capture asked for |
+| `session` | Safe metadata about the current or most recent meeting: capture mode (`applications` or `microphone`), retention mode, recognition locale, source count, start time, wall and captured durations, pauses, recogniser restarts, transcript spans, gaps, untranscribed seconds, whether a recording was opened, and the sample rate and channel count capture asked for (absent for a Microphone meeting, which asks for none) |
 | `lastOutcome` | How the last meeting ended, the support category of the failure when there was one, and whether capture ran at all |
 
 Every timestamp is ISO 8601, keys are sorted, and the file is pretty-printed:
@@ -50,6 +50,8 @@ identifiable material in every field and search the exported bytes for it:
 - The meeting's title, which is prose you wrote and may itself be sensitive.
 - The names or bundle identifiers of the applications being captured, or any
   window title. Counts only.
+- The name or device identifier of the microphone a meeting listened to. Only
+  the fact that it was a Microphone meeting.
 - Your save folder, the session folder, any absolute path, your user name, or
   the bytes of a security-scoped bookmark.
 - The sentences the readiness rows show, which quote folders and applications.
@@ -68,7 +70,7 @@ that list is above.
 A report names a failure with one of these, and so does the log. They are
 stable across rewordings and localisations:
 
-`captureAccess`, `captureDiscovery`, `captureStart`, `captureInterrupted`,
+`captureAccess`, `microphoneAccess`, `captureDiscovery`, `captureStart`, `captureInterrupted`,
 `recognitionAvailability`, `recognitionStart`, `recognitionRestartExhausted`,
 `saveLocation`, `transcriptPersistence`, `audioPersistence`,
 `sessionMetadata`, `recoveryMetadata`.

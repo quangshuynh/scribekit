@@ -140,7 +140,7 @@ struct DiagnosticPrivacyTests {
 
         let session = try #require(object["session"] as? [String: Any])
         #expect(session.keys.sorted() == [
-            "capturedChannelCount", "capturedDurationSeconds", "capturedSampleRate",
+            "captureMode", "capturedChannelCount", "capturedDurationSeconds", "capturedSampleRate",
             "gapCount", "pauseCount", "phase", "recognitionLocaleIdentifier",
             "recognitionRestartCount", "recordingPresent", "retentionMode",
             "selectedSourceCount", "startedAt", "transcriptSpanCount",

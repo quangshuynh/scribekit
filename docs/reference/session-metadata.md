@@ -20,6 +20,15 @@ Where the session stands: its identity, its `MeetingState`, its times, the
 applications captured, and the recognition language. It holds no transcript
 text.
 
+It also records where the meeting's audio came from, as `captureMode`:
+`"applications"` for App Audio, `"microphone"` for a
+[Microphone meeting](../using/microphone-transcription.md). For a Microphone
+meeting the source name is written as `Microphone (<input name>)`; the input
+device's identifier is never written. `captureMode` is additive and optional,
+like every field added after the first release of the record: a record written
+before it existed — every v0.1.0 session — decodes with it absent and is read
+exactly as before, and the schema version is unchanged.
+
 `MeetingState` is the persisted domain lifecycle, with explicit transition
 rules. The runtime's `MeetingRuntimeStatus` — which has a `failed` case the
 persisted enum does not — is a presentation derivation and is not what is

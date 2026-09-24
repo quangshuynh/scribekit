@@ -24,7 +24,9 @@ ScribeKitTests/           Swift Testing unit tests
 
 ```mermaid
 flowchart LR
-  SCK[ScreenCaptureKit] --> CAP[AudioCapturing]
+  SCK[ScreenCaptureKit] --> ROUTE[CaptureModeRouter]
+  MIC[AVAudioEngine microphone] --> ROUTE
+  ROUTE --> CAP[AudioCapturing]
   CAP --> BC[Broadcasting consumer]
   BC --> TX[SpeechTranscribing]
   BC --> AR[AudioRetaining]
@@ -42,8 +44,16 @@ explicit transition rules, so contradictory states are unrepresentable.
 Capture, speech, persistence and session coordination are separate layers
 behind that model. Source discovery sits behind `CaptureSourceProviding`,
 capture behind `AudioCapturing`, recognition behind `SpeechTranscribing`, and
-ScreenCaptureKit and Speech types are adapted at those boundaries rather than
-reaching the UI — so behaviour stays testable without system permission.
+ScreenCaptureKit, `AVAudioEngine` and Speech types are adapted at those
+boundaries rather than reaching the UI — so behaviour stays testable without
+system permission.
+
+A meeting captures from one of two sources, chosen when it starts: the
+selected applications, or the microphone. The two capturers are the only
+source-specific code; `CaptureModeRouter` is the one `AudioCapturing` the
+runtime holds, and it sends each start to the capturer for the meeting's
+`CaptureMode`. Everything from the broadcasting consumer onward is shared. See
+[Audio Capture](audio-capture.md).
 
 Save-location storage sits behind `SaveLocationPersisting`, so security-scoped
 bookmark data never reaches the setup screen, and session directory naming is a

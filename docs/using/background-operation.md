@@ -8,6 +8,14 @@ to watch a meeting rather than something the meeting depends on.
 Presentation may be throttled or skipped while the interface is hidden.
 Capture, recognition and persistence may not.
 
+The same holds whichever capture mode the meeting uses. A
+[Microphone meeting](microphone-transcription.md) keeps listening while you
+work in another application, switch Spaces, hide or minimise ScribeKit, or
+close its window: nothing in a running meeting observes which application is
+active, whether ScribeKit is hidden, or which tab is showing. That is the
+design and it is covered by automated tests; its confirmation with a real
+microphone is on the [manual checklist](../development/testing.md#microphone-transcription-on-a-real-mac).
+
 ## The menu bar item
 
 The menu bar item is always present.
@@ -15,7 +23,7 @@ The menu bar item is always present.
 | State | What it offers |
 | --- | --- |
 | No meeting | Open ScribeKit, Quit ScribeKit. |
-| Meeting running | The meeting's name, its state and elapsed time, the applications being captured, what is being kept of the audio, and Stop Meeting, Show Transcript in Finder, Show Audio in Finder, Open ScribeKit, Quit ScribeKit. |
+| Meeting running | The meeting's name, its state and elapsed time, the applications being captured or the microphone being listened to, what is being kept of the audio, and Stop Meeting, Show Transcript in Finder, Show Audio in Finder, Open ScribeKit, Quit ScribeKit. |
 
 Stop from the menu bar is the same stop the window performs: capture ends, the
 recogniser finalises what it has, the audio file is closed, and the transcript

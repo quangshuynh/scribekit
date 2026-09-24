@@ -29,8 +29,10 @@ all.
 <div class="grid cards" markdown>
 
 - **Captures the apps you pick.** Audio comes from the applications you select
-  through ScreenCaptureKit, not from the whole system and not from a
-  microphone. See [Capturing App Audio](using/capturing-app-audio.md).
+  through ScreenCaptureKit, not from the whole system. See
+  [Capturing App Audio](using/capturing-app-audio.md). Unreleased since
+  v0.1.0: a meeting can instead transcribe the microphone while you work in
+  other apps — see [Microphone Transcription](using/microphone-transcription.md).
 
 - **Transcribes on this Mac.** Apple's `SpeechAnalyzer` and
   `SpeechTranscriber` against a language model installed locally. There is no

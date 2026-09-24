@@ -84,26 +84,41 @@ nonisolated struct MeetingStartReadiness: Equatable, Sendable {
     /// things: without a folder there is nothing to write, without capture
     /// access there is no list to select a source from, and speech readiness is
     /// a property of the Mac that the user's selection cannot change.
+    ///
+    /// The capture prerequisites mean the same thing in both capture modes —
+    /// permission to capture, and something to capture from — and differ only
+    /// in what they are about, so they are the same cases with a title for
+    /// each mode rather than a second set a report would have to reconcile.
     enum Prerequisite: Equatable, Sendable, CaseIterable {
         /// The folder the user chose for meeting artifacts.
         case saveLocation
 
-        /// Being able to see, and record, this Mac's applications.
+        /// Permission to capture: Screen & System Audio Recording for
+        /// application audio, microphone access for the microphone.
         case captureAccess
 
         /// On-device recognition for the selected language.
         case speechRecognition
 
-        /// At least one application selected to capture.
+        /// Something to capture: at least one application selected, or a
+        /// microphone input present.
         case captureSource
 
+        /// The name shown for this prerequisite in an App Audio meeting.
+        var title: String { title(in: .applications) }
+
         /// The name shown for this prerequisite.
-        var title: String {
-            switch self {
-            case .saveLocation: "Save location"
-            case .captureAccess: "Screen & System Audio Recording"
-            case .speechRecognition: "Speech recognition"
-            case .captureSource: "Audio source"
+        ///
+        /// - Parameter mode: The capture mode being set up.
+        /// - Returns: The prerequisite's name in that mode.
+        func title(in mode: CaptureMode) -> String {
+            switch (self, mode) {
+            case (.saveLocation, _): "Save location"
+            case (.captureAccess, .applications): "Screen & System Audio Recording"
+            case (.captureAccess, .microphone): "Microphone access"
+            case (.speechRecognition, _): "Speech recognition"
+            case (.captureSource, .applications): "Audio source"
+            case (.captureSource, .microphone): "Microphone input"
             }
         }
     }
@@ -163,12 +178,18 @@ nonisolated struct MeetingStartReadiness: Equatable, Sendable {
         /// What that means, and what to do when something is needed.
         let detail: String
 
+        /// The capture mode the row was derived for, which decides its title.
+        var captureMode: CaptureMode = .applications
+
         var id: Prerequisite { prerequisite }
+
+        /// The name shown for the row.
+        var title: String { prerequisite.title(in: captureMode) }
 
         /// What assistive technology hears, which is the same claim the screen
         /// makes rather than the icon alone.
         var accessibilityDescription: String {
-            "\(prerequisite.title). \(accessibilityValue)"
+            "\(title). \(accessibilityValue)"
         }
 
         /// The row's state, for a screen that has already named the
@@ -196,6 +217,9 @@ nonisolated struct MeetingStartReadiness: Equatable, Sendable {
     /// start that is not about prerequisites at all.
     let meetingIsActive: Bool
 
+    /// The capture mode being set up.
+    let captureMode: CaptureMode
+
     /// Whether Start Meeting can currently succeed.
     var canStart: Bool { blocker == nil && !meetingIsActive }
 
@@ -203,9 +227,15 @@ nonisolated struct MeetingStartReadiness: Equatable, Sendable {
     var startExplanation: String {
         if meetingIsActive { return "A meeting is already running." }
         guard let blocker else {
-            return "Capture the selected applications and write a timestamped Markdown transcript."
+            switch captureMode {
+            case .applications:
+                return "Capture the selected applications and write a timestamped Markdown transcript."
+            case .microphone:
+                return "Transcribe the microphone on this Mac and write a timestamped Markdown transcript. "
+                    + "No audio is kept."
+            }
         }
-        return "\(blocker.prerequisite.title): \(blocker.detail)"
+        return "\(blocker.title): \(blocker.detail)"
     }
 
     /// Derives readiness from what ScribeKit currently knows.
@@ -231,6 +261,106 @@ nonisolated struct MeetingStartReadiness: Equatable, Sendable {
         self.rows = rows
         self.blocker = rows.first { $0.status.preventsStart }
         self.meetingIsActive = meetingIsActive
+        self.captureMode = .applications
+    }
+
+    /// Derives readiness for a Microphone meeting.
+    ///
+    /// The same four prerequisites in the same order, with the capture pair
+    /// answered by the microphone: whether macOS lets ScribeKit use it, and
+    /// whether the Mac has an input to listen to. Screen & System Audio
+    /// Recording is not asked about, because a Microphone meeting does not
+    /// need it.
+    ///
+    /// - Parameters:
+    ///   - saveLocation: The state of the folder meetings are written to.
+    ///   - microphone: What macOS last reported about the microphone.
+    ///   - speech: What the on-device recogniser reports for the chosen
+    ///     language.
+    ///   - meetingIsActive: Whether a meeting is running, starting or stopping.
+    init(
+        saveLocation: SaveLocationReadiness,
+        microphone: MicrophoneReadiness,
+        speech: SpeechRecognitionAvailability,
+        meetingIsActive: Bool
+    ) {
+        var rows = [
+            Self.saveLocationRow(saveLocation),
+            Self.microphoneAccessRow(microphone),
+            Self.speechRow(speech),
+            Self.microphoneInputRow(microphone)
+        ]
+        for index in rows.indices { rows[index].captureMode = .microphone }
+        self.rows = rows
+        self.blocker = rows.first { $0.status.preventsStart }
+        self.meetingIsActive = meetingIsActive
+        self.captureMode = .microphone
+    }
+
+    /// Describes whether macOS lets ScribeKit use the microphone.
+    ///
+    /// Undetermined does not block. macOS asks the first time a Microphone
+    /// meeting starts, which is the moment the question makes sense to the
+    /// person being asked; refusing to start until they had answered a
+    /// question nobody had put to them would leave nothing to press.
+    private static func microphoneAccessRow(_ readiness: MicrophoneReadiness) -> Row {
+        guard case let .checked(authorization, _) = readiness else {
+            return Row(
+                prerequisite: .captureAccess,
+                status: .checking,
+                detail: "Checking whether ScribeKit may use the microphone."
+            )
+        }
+        switch authorization {
+        case .notDetermined:
+            return Row(
+                prerequisite: .captureAccess,
+                status: .advisory,
+                detail: "macOS asks for microphone access the first time you start. ScribeKit listens only "
+                    + "while a Microphone meeting runs, to transcribe it on this Mac."
+            )
+        case .authorized:
+            return Row(
+                prerequisite: .captureAccess,
+                status: .satisfied,
+                detail: "ScribeKit may use the microphone. It listens only while a Microphone meeting runs."
+            )
+        case .denied:
+            return Row(
+                prerequisite: .captureAccess,
+                status: .blocked,
+                detail: "Microphone access is turned off for ScribeKit, and macOS will not ask again. Turn it "
+                    + "on in System Settings › Privacy & Security › Microphone, then Check Again."
+            )
+        case .restricted:
+            return Row(
+                prerequisite: .captureAccess,
+                status: .blocked,
+                detail: "Microphone access is restricted on this Mac, for example by a device-management "
+                    + "profile. ScribeKit cannot ask for it, and App Audio meetings are unaffected."
+            )
+        }
+    }
+
+    /// Describes the input a Microphone meeting would listen to.
+    private static func microphoneInputRow(_ readiness: MicrophoneReadiness) -> Row {
+        guard case let .checked(_, input) = readiness else {
+            return Row(prerequisite: .captureSource, status: .checking, detail: "Looking for the Mac's sound input.")
+        }
+        guard let input else {
+            return Row(
+                prerequisite: .captureSource,
+                status: .blocked,
+                detail: "This Mac has no microphone input. Connect one or choose an input in System Settings › "
+                    + "Sound, then Check Again."
+            )
+        }
+        return Row(
+            prerequisite: .captureSource,
+            status: .satisfied,
+            detail: "\(input.name), the Mac's current sound input. To use another microphone, choose it in "
+                + "System Settings › Sound before starting."
+        )
     }
 
     /// Describes the save location.

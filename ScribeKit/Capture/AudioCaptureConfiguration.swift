@@ -21,7 +21,12 @@ nonisolated struct AudioCaptureConfiguration: Equatable, Sendable {
     /// The format that actually arrives is read back from the sample buffers.
     static let defaultChannelCount = 1
 
-    /// Bundle identifiers of the applications to capture.
+    /// Which capturer the configuration is for.
+    let mode: CaptureMode
+
+    /// What to capture: bundle identifiers of the applications for
+    /// ``CaptureMode/applications``, or the identifier of the microphone input
+    /// the meeting was set up with for ``CaptureMode/microphone``.
     let sourceIDs: Set<CaptureSource.ID>
 
     /// The requested sample rate in frames per second.
@@ -33,14 +38,18 @@ nonisolated struct AudioCaptureConfiguration: Equatable, Sendable {
     /// Creates a configuration.
     ///
     /// - Parameters:
-    ///   - sourceIDs: Bundle identifiers of the selected applications.
+    ///   - sourceIDs: Identifiers of the selected sources.
+    ///   - mode: Which capturer the configuration is for. Defaults to
+    ///     application capture.
     ///   - sampleRate: Frames per second to request.
     ///   - channelCount: Channels to request.
     init(
         sourceIDs: Set<CaptureSource.ID>,
+        mode: CaptureMode = .applications,
         sampleRate: Int = defaultSampleRate,
         channelCount: Int = defaultChannelCount
     ) {
+        self.mode = mode
         self.sourceIDs = sourceIDs
         self.sampleRate = sampleRate
         self.channelCount = channelCount
@@ -52,6 +61,11 @@ nonisolated struct AudioCaptureConfiguration: Equatable, Sendable {
     /// what was requested, and it is what a retained audio file is opened for,
     /// because a container's format is fixed when the file is created and the
     /// first buffer has not arrived by then.
+    ///
+    /// Only application capture requests a format. A microphone delivers the
+    /// input device's own rate, which is whatever the device runs at, so
+    /// nothing may be opened on the assumption that this is what arrives —
+    /// which is one reason Microphone meetings keep no recording.
     var requestedFormat: CapturedAudioFormat {
         CapturedAudioFormat(
             sampleRate: Double(sampleRate),
@@ -64,8 +78,14 @@ nonisolated struct AudioCaptureConfiguration: Equatable, Sendable {
 
     /// Creates a configuration from the sources the user selected.
     ///
-    /// - Parameter sources: The selected capture sources.
+    /// - Parameter sources: The selected capture sources. A selection that
+    ///   mixes modes is refused before a configuration is built; built from
+    ///   one anyway, it is treated as application capture, which a microphone
+    ///   identifier can never satisfy.
     init(sources: [CaptureSource]) {
-        self.init(sourceIDs: Set(sources.map(\.id)))
+        self.init(
+            sourceIDs: Set(sources.map(\.id)),
+            mode: CaptureMode(sources: sources) ?? .applications
+        )
     }
 }

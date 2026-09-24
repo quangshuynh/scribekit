@@ -67,7 +67,8 @@ nonisolated extension DiagnosticReport.Readiness {
             },
             discoveredSourceCount: counts?.discovered,
             selectedSourceCount: counts?.selected,
-            droppedSelectionCount: counts?.dropped
+            droppedSelectionCount: counts?.dropped,
+            captureMode: readiness.captureMode.rawValue
         )
     }
 }
@@ -225,8 +226,8 @@ extension DiagnosticReport.SessionSummary {
     ///
     /// The snapshot the meeting was started with is read for its counts and
     /// its locale and for nothing else: the title is prose the user wrote, the
-    /// destination is a path through their home folder, and the applications
-    /// say who they were meeting.
+    /// destination is a path through their home folder, the applications say
+    /// who they were meeting, and a microphone's name can name its owner.
     ///
     /// - Parameter runtime: The application's meeting owner.
     init?(runtime: MeetingRuntime) {
@@ -247,7 +248,8 @@ extension DiagnosticReport.SessionSummary {
             untranscribedSeconds: runtime.transcript.untranscribedSeconds,
             recordingPresent: runtime.audioRetentionState.url != nil,
             capturedSampleRate: format?.sampleRate,
-            capturedChannelCount: format?.channelCount
+            capturedChannelCount: format?.channelCount,
+            captureMode: meeting.captureMode.rawValue
         )
     }
 }

@@ -137,6 +137,12 @@ nonisolated struct DiagnosticReport: Codable, Equatable, Sendable {
         /// are deliberately not carried.
         let droppedSelectionCount: Int?
 
+        /// The capture mode the screen was set up for, which says whether the
+        /// capture prerequisites are about application capture or the
+        /// microphone. Absent from reports made before Microphone meetings
+        /// existed.
+        var captureMode: String? = nil
+
         /// One prerequisite's standing.
         struct Prerequisite: Codable, Equatable, Sendable {
             /// Which prerequisite.
@@ -241,6 +247,11 @@ nonisolated struct DiagnosticReport: Codable, Equatable, Sendable {
 
         /// The channel count capture was asked for.
         let capturedChannelCount: Int?
+
+        /// Where the meeting's audio comes from: `applications` or
+        /// `microphone`. Never which applications, and never the microphone's
+        /// name. Absent from reports made before Microphone meetings existed.
+        var captureMode: String? = nil
     }
 
     /// How the last meeting ended.

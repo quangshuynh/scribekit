@@ -28,6 +28,7 @@ private final class StubSourceProvider: CaptureSourceProviding, @unchecked Senda
 private nonisolated final class FakePreferences: MeetingSetupPreferencesStoring, @unchecked Sendable {
     var audioRetention: AudioRetentionMode = .default
     var rememberedSourceIDs: [String] = []
+    var captureMode: CaptureMode = .applications
 }
 
 @MainActor

@@ -169,8 +169,13 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
     /// When ScribeKit closed the session, when it did.
     let endedAt: Date?
 
-    /// Display names of the captured applications.
+    /// Display names of the captured applications, or of the microphone.
     let sourceNames: [String]
+
+    /// Where the meeting's audio came from, when its record says. `nil` for a
+    /// session with no record and for a record written before Microphone
+    /// meetings existed.
+    let captureMode: CaptureMode?
 
     /// The BCP-47 locale recognition ran in, when it is known.
     let localeIdentifier: String?
@@ -232,6 +237,8 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
     ///   - transcript: The transcript's size and modification date.
     ///   - audioRetention: What the meeting was asked to keep of its audio.
     ///   - audio: The retained recording, when one is in the folder.
+    ///   - captureMode: Where the meeting's audio came from, when its record
+    ///     says.
     init(
         directory: URL,
         sessionID: UUID?,
@@ -244,7 +251,8 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
         transcriptURL: URL,
         transcript: SessionFileInfo,
         audioRetention: AudioRetentionMode?,
-        audio: HistoryAudio?
+        audio: HistoryAudio?,
+        captureMode: CaptureMode? = nil
     ) {
         self.directory = directory
         self.sessionID = sessionID
@@ -253,6 +261,7 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.sourceNames = sourceNames
+        self.captureMode = captureMode
         self.localeIdentifier = localeIdentifier
         self.transcriptURL = transcriptURL
         self.transcript = transcript

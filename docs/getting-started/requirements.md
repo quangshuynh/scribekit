@@ -18,6 +18,10 @@ Recording** permission, which macOS asks for the first time ScribeKit looks for
 sources. Without it, the setup screen reports the missing permission instead of
 a list or a capture.
 
+[Microphone meetings](../using/microphone-transcription.md), which are
+unreleased, need **Microphone** permission instead, which macOS asks for the
+first time one starts. Neither mode needs the other's permission.
+
 Transcription itself asks for no permission, because it runs against a speech
 model on this Mac rather than through a service. See
 [Permissions](../privacy/permissions.md).

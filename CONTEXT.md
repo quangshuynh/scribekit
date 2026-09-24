@@ -5,34 +5,29 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 29 — transcription-gap incidents. The first work after v0.1.0, and
-unreleased: the tag, the release notes and the changelog entry for 0.1.0 are
-untouched.
+Interval 30 — Microphone transcription. Unreleased: the v0.1.0 tag, its
+release notes and its changelog entry are untouched, and nothing here is
+claimed for 0.1.0.
 
-A real meeting produced a transcript flooded with near-identical warnings —
-one `> **Transcription gap:** approximately 0.5 seconds …` blockquote roughly
-every half second, for minutes. That was truthful and unreadable. The pipeline
-was reporting *observations* of a continuing condition as if each were a
-separate gap.
+A meeting now has a **capture mode**, chosen with *Transcribe from: App Audio /
+Microphone* at the top of the Meeting tab and fixed when it starts. App Audio
+is everything ScribeKit did before. Microphone listens to the Mac's current
+sound input through `AVAudioEngine` and feeds it into the same pipeline: the
+same `MeetingRuntime`, recogniser boundary, bounded backlog, gap incidents,
+pause and resume, `transcript.md`, session record, recovery, History and
+diagnostics. A meeting is one or the other; there is no mixing.
 
-Gap observations are now accumulated into a **`TranscriptGapIncident`** and
-written as one marker when the incident ends. A marker states two quantities
-and keeps them apart: the range the incident spanned, and the audio it actually
-cost. The total is a sum over distinct discarded buffers — the bounded backlog
-hands each evicted buffer back exactly once — and is never derived from the
-range, because recognition goes on transcribing between the losses.
-
-What closes an incident is evidence, not a delay. `TranscriptionAudioInput`
-reports `closesIncident` once the backlog has accepted a full capacity of audio
-without having to evict any of it, which it could not do while still full;
-`MeetingRuntime` additionally closes one at every boundary the pipeline cannot
-see — pause, recogniser restart, capture ending, stop, persistence failure.
-
-Because a marker cannot be written until the incident ends, an open incident is
-noted in `.scribekit/session.json` as `openGapStartedAt` the moment it opens,
-and cleared once the marker is in the file. Recovery reports it, stating only
-the start: the end and the total were still being measured. The v0.1.0 release
-state and history are unchanged.
+The primary requirement — transcription continues while ScribeKit is not the
+foreground application, is hidden, minimised, windowless or on another tab —
+needed no new mechanism, because the meeting was already owned by
+`ScribeKitAppDelegate` for the process's lifetime and nothing in the runtime
+observes activation, windows or tabs. The interval added a microphone capturer
+behind the existing `AudioCapturing` boundary and tests that hold that
+ownership in place for Microphone meetings. **It has not been run on a Mac**:
+this interval was developed where no Xcode, Swift toolchain or microphone was
+available, so the build, the test suite and the manual lifecycle checklist in
+`docs/development/testing.md` are all still to be run. See the Interval 30
+validation below.
 
 ## Current implementation
 
@@ -128,7 +123,19 @@ state and history are unchanged.
   `String(describing:)`), `DiagnosticReport` with its assembly,
   `DiagnosticReportWriter`, and `MeetingDiagnostics`, the process-lifetime
   owner of the export.
-- `ScribeKitTests/`: Swift Testing suites (703 tests, 65 suites).
+- New for Interval 30: `CaptureMode` (App Audio or Microphone, derived from a
+  selection in one place), `MicrophoneAuthorization` / `MicrophoneInput` /
+  `MicrophoneReadiness` in `Models/`; `CaptureModeRouter`,
+  `MicrophoneAudioCapturer` with `MicrophoneTap`,
+  `MicrophonePCMBufferAdapter`, and `MicrophoneAccessProviding` /
+  `MicrophoneAccessGate` / `SystemMicrophoneAccess` in `Capture/`;
+  `MeetingSetupMicrophoneModel` in `Features/MeetingSetup/`.
+  `AudioCapturing` gained `prepare(configuration:)`, `AudioCaptureConfiguration`
+  a `mode`, `CaptureSource.Kind` a `microphone` case, `MeetingStartRequest` a
+  `refusal`, and `SessionRecoveryMetadata` / `HistorySession` an optional
+  `captureMode`.
+- `ScribeKitTests/`: Swift Testing suites. Interval 29 ran 753 tests; Interval
+  30 adds 70 `@Test` functions in 9 new suites, none of which has been run yet.
 
 ## Meeting ownership
 
@@ -156,6 +163,117 @@ What moved and what did not:
 
 `MeetingSetupView.onDisappear` no longer exists. Nothing in the view layer can
 stop a meeting except the Stop control.
+
+## Capture modes
+
+`CaptureMode` is `applications` or `microphone`. It is not stored beside the
+sources: `CaptureMode(sources:)` derives it — applications alone, or exactly
+one microphone source alone, and `nil` for any mixture — so a request, the
+`AudioCaptureConfiguration` built from it and the running `MeetingSnapshot`
+cannot disagree. `MeetingStartRequest.refusal` rejects an empty selection, a
+mixture (`mixedCaptureModes`) and a Microphone request that asks to keep audio
+(`microphoneAudioNotRetained`), and the runtime enforces it: the setup screen
+never builds such a request, but the owner does not depend on that.
+
+**The abstraction is the one that already existed.** Everything below
+`AudioCapturing` was already source-agnostic: `CapturedPCMBuffer`, the
+broadcasting consumer, the media clock, `TranscriptionAudioInput` and its
+converter (which resamples from whatever rate a buffer states), recognition,
+persistence and recovery. ScreenCaptureKit-specific code was confined to
+`ScreenCaptureKitAudioCapturer`, `ScreenCaptureKitSourceProvider`, the access
+probe and the discovery/readiness model. So the interval adds one capturer and
+one router rather than a second pipeline: `CaptureModeRouter` is the single
+`AudioCapturing` the runtime holds, dispatches `prepare` and `start` by the
+configuration's mode, sends `stop` to both (each is a no-op when idle, and a
+router that remembered the active capturer would hold a copy of a fact that a
+self-ended stream makes stale), and merges both `interruptions` streams.
+
+`AudioCapturing.prepare(configuration:)` is the one protocol addition: a check
+before the runtime creates any artifact. Its default does nothing, so App Audio
+is unchanged. The runtime sets `captureState = .preparing` before awaiting it,
+so a second start while a permission prompt is on screen is refused by the
+existing `canStart` guard, and clears `meeting` and `lastCompletion` so the
+menu bar does not describe the previous meeting as the one preparing.
+
+## Microphone capture
+
+`MicrophoneAudioCapturer` is an actor owning one `AVAudioEngine` per run: a tap
+on the input node at the node's own output format, and an observer for
+`AVAudioEngineConfigurationChange`. `AVAudioEngine` was chosen over
+`AVCaptureSession` because the pipeline wants PCM buffers, not sample buffers,
+and over a raw AUHAL unit because nothing here needs the lower level. The
+deployment target (macOS 26.5) needs no compatibility path.
+
+`MicrophonePCMBufferAdapter` copies each tap buffer out while the callback is
+on the stack, averages the channels to mono, and cuts it into pieces of at most
+20 ms. The cut is deliberate: `BoundedAudioQueue` counts buffers, and its
+capacity (150) and the `closesIncident` evidence are both defined in buffers,
+so delivering the engine's ~100 ms buffers would have made the backlog five
+times longer in seconds and changed when a gap incident ends. At 20 ms the
+backlog is the same three seconds for both sources and the gap-incident
+semantics are reused truthfully rather than approximately. The device's sample
+rate is kept; the recogniser's converter already resamples from any rate and
+the media clock reads each buffer's own rate.
+
+The tap block and the configuration observer are built in nonisolated code
+(`MicrophoneTap.block()`, a nonisolated static helper), because the engine
+calls them on its own threads and a closure formed inside the actor would carry
+an isolation it does not have.
+
+A configuration change stops the engine. The tap is invalidated at once, the
+capturer tears the session down and yields
+`.interrupted(configurationChangeDescription)`, and the runtime's existing
+`handleCaptureInterruption` closes the meeting as `interrupted` with the
+"Capture ended unexpectedly" marker. It does not restart, even when the input
+is unchanged: a restart would leave a stretch of wall time with no captured
+audio and no marker for it, and following the system to another microphone
+would put someone else's speech in the transcript unasked.
+
+No microphone audio is retained. `requestedFormat` is not what a microphone
+delivers, retention would need its own format handling, and the requirement is
+transcription, not recording. `requestedCaptureFormat` is `nil` for a
+Microphone meeting and diagnostics report no requested rate for one.
+
+## Microphone permission
+
+`MicrophoneAccessProviding` reads `AVCaptureDevice.authorizationStatus(for:
+.audio)` — which distinguishes `restricted` from `denied`, unlike the record
+permission API — and requests with `AVCaptureDevice.requestAccess(for:)`.
+`MicrophoneAuthorization` has exactly the OS's four cases; an unknown future
+value is treated as `notDetermined`, which makes a start ask macOS and take its
+answer, rather than inventing one.
+
+`MicrophoneAccessGate.ensureAccess(_:mayPrompt:)` is the whole decision:
+`prepare` may prompt (a start the user just asked for, before anything exists);
+`start` may not (a resume must not put a dialog in front of anyone, and access
+revoked since the start is reported). The setup screen reads the permission and
+the input without prompting and offers **Allow Microphone Access…** only while
+macOS has never been asked. Readiness treats `notDetermined` as advisory,
+because the start is where the question is asked.
+
+The entitlement is `com.apple.security.device.audio-input`, added to
+`ScribeKit.entitlements`, and the usage description is
+`INFOPLIST_KEY_NSMicrophoneUsageDescription` on the app target. Nothing else
+was added. App Audio never touches `MicrophoneAccessProviding`; in Microphone
+mode the setup screen does not run application discovery, so the Screen &
+System Audio Recording prompt does not appear either.
+
+## Microphone input
+
+There is no device picker. `AVAudioEngine`'s input node follows Core Audio's
+default input device, and selecting another means setting the AUHAL unit's
+current device — workable, but it is what breaks on aggregate and Bluetooth
+devices, and it would need its own disappearance and fallback rules. Deferred
+rather than half-built. `SystemMicrophoneAccess.currentInput()` reads the
+default input's UID and name from Core Audio.
+
+The UID is the microphone `CaptureSource.id`, held for one meeting and never
+persisted — not in preferences, not in `session.json`, not in the transcript,
+not in diagnostics. `MicrophoneAccessGate.expectedInput` compares it at
+`prepare` and at every `start`: a different current input refuses a start
+(`microphoneInputChanged`) and, at a resume, leaves the meeting paused with the
+reason in `pauseFailureMessage`, exactly as a quit application does for App
+Audio.
 
 ## Presentation lifetime
 
@@ -1738,6 +1856,25 @@ atomically, and reports a failure rather than presenting a partial file as a
 success. Nothing is uploaded and no entitlement was added.
 
 ## Validation status
+
+### Interval 30 validation
+
+**Not built and not tested.** The interval was developed in a Linux container
+with no Xcode, no Swift toolchain (download.swift.org is outside its network
+policy), no macOS frameworks and no microphone. Nothing in the Swift diff has
+been compiled. The code was reviewed by hand against the existing patterns it
+extends — the ScreenCaptureKit capturer's structure, the fakes' conventions,
+the default-`MainActor` module setting — but that is not a build.
+
+- `xcodebuild … test`: **not run.** 70 new `@Test` functions in 9 new suites
+  (plus one reviewed-fields list extended in `DiagnosticPrivacyTests`), none
+  executed.
+- Release build: **not run.**
+- `mkdocs build --strict`: **passes** (run here, Material for MkDocs from
+  `docs/requirements.txt`).
+- Manual validation with a real microphone, hidden, minimised, windowless,
+  across Spaces, sleep and wake: **not performed.** The checklist is in
+  `docs/development/testing.md`.
 
 ### Interval 27 validation
 
@@ -3506,6 +3643,24 @@ distribution story is *build it from source*, and the README, the documentation
 and the release notes have to say that plainly rather than implying a download
 that does not exist. Either way ScribeKit is not released, and nothing here is
 a tag.
+
+## Interval 30's closing note
+
+**Built, not yet proven.** A meeting can transcribe the microphone, through the
+pipeline App Audio already used, and the ownership that keeps it running while
+ScribeKit is in the background is the one the application already had.
+Everything an automated test can hold is written; none of it has been compiled
+or run.
+
+**Open, in the order it should be done.** Build and run the suite on a Mac and
+fix whatever the compiler finds. Run the manual checklist with a real
+microphone: foreground, other applications, minimised, hidden, window closed,
+Spaces, pause during speech, stop, History. Observe what connecting
+headphones (an output-only change) does to a listening engine — if it stops
+the engine, the conservative "any configuration change interrupts" rule may
+need to distinguish input changes from output ones. Observe sleep and wake,
+screen lock, and microphone access turned off mid-meeting; the documentation
+claims nothing about them yet. Explicit device selection is deferred.
 
 ## Interval 29's closing note
 

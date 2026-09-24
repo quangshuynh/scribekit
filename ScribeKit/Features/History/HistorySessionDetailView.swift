@@ -87,7 +87,13 @@ struct HistorySessionDetailView: View {
             }
 
             if !session.sourceNames.isEmpty {
-                fact("Applications", session.sourceNames.formatted(.list(type: .and)))
+                // A Microphone meeting's source is not an application. A
+                // session whose record predates the distinction captured
+                // applications, which is all ScribeKit could capture then.
+                fact(
+                    session.captureMode == .microphone ? "Source" : "Applications",
+                    session.sourceNames.formatted(.list(type: .and))
+                )
             }
             if let locale = session.localeIdentifier {
                 fact("Language", locale)
