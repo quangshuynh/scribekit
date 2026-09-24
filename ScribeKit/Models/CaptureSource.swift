@@ -15,9 +15,10 @@ nonisolated struct CaptureSource: Identifiable, Hashable, Codable, Sendable {
     /// Stable identifier used to persist and compare selections.
     ///
     /// For application sources this is the bundle identifier, so a selection
-    /// survives an application relaunch. For the microphone it is the input
-    /// device's identifier as the system reported it when the meeting was set
-    /// up; it is held for the length of one meeting and never persisted.
+    /// survives an application relaunch. For the microphone it is the Core
+    /// Audio UID of the input the meeting is bound to. A meeting holds it for
+    /// its own length and writes it nowhere: the transcript and the session
+    /// record name the device, never identify it.
     let id: String
 
     /// Name shown to the user, such as an application name.
@@ -34,7 +35,7 @@ nonisolated struct CaptureSource: Identifiable, Hashable, Codable, Sendable {
         /// The combined system audio output.
         case systemAudio
 
-        /// The Mac's current microphone input.
+        /// One microphone input.
         case microphone
     }
 
@@ -49,9 +50,9 @@ nonisolated struct CaptureSource: Identifiable, Hashable, Codable, Sendable {
         CaptureSource(id: bundleIdentifier, displayName: displayName, kind: .application)
     }
 
-    /// Creates a source describing the Mac's current microphone input.
+    /// Creates a source describing one microphone input.
     ///
-    /// - Parameter input: The input the system reported as current.
+    /// - Parameter input: The input the meeting listens to.
     /// - Returns: A capture source of kind ``Kind/microphone`` identified by the
     ///   input's device identifier, so a capturer can refuse to listen to a
     ///   different microphone than the one the meeting was set up with.

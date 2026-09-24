@@ -62,6 +62,7 @@ struct HistoryView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             searchField
+            filterPicker
             Divider()
             listContent
             Divider()
@@ -78,7 +79,7 @@ struct HistoryView: View {
                 .textFieldStyle(.plain)
                 .focused($searchFieldFocused)
                 .accessibilityLabel("Search past meetings")
-                .accessibilityHint("Searches meeting titles and the speech in their transcripts")
+                .accessibilityHint("Searches meeting titles, sources and the speech in their transcripts")
             if !model.query.isEmpty {
                 Button {
                     model.query = ""
@@ -92,6 +93,25 @@ struct HistoryView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+
+    /// Which meetings are listed, by where their audio came from.
+    ///
+    /// A segmented control: three mutually exclusive choices, each of which
+    /// assistive technology reports as selected or not. It narrows the list
+    /// the search runs over, so the two compose.
+    private var filterPicker: some View {
+        Picker("Source", selection: Bindable(model).filter) {
+            ForEach(HistoryCaptureFilter.allCases) { filter in
+                Text(filter.displayName).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+        .accessibilityLabel("Show meetings from")
+        .accessibilityHint("Lists all meetings, or only App Audio or Microphone meetings")
     }
 
     @ViewBuilder
@@ -116,9 +136,7 @@ struct HistoryView: View {
             VStack(spacing: 0) {
                 problemsList
                 centred {
-                    Text(model.sessionCount == 0
-                         ? "No meetings in the save folder yet."
-                         : "No meeting matches “\(model.query)”.")
+                    Text(emptyListDescription)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -196,7 +214,7 @@ struct HistoryView: View {
                 Spacer(minLength: 4)
                 statusLabel(result.session.status)
             }
-            Text(Self.dateDescription(for: result.session))
+            Text(Self.dateAndSourceDescription(for: result.session))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let excerpt = result.excerpt {
@@ -210,7 +228,8 @@ struct HistoryView: View {
             }
         }
         .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(result.accessibilityDescription(date: Self.dateDescription(for: result.session)))
     }
 
     /// A meeting's status as a word rather than a colour.
@@ -246,10 +265,20 @@ struct HistoryView: View {
     /// How many meetings are listed, and how many the folder holds.
     private var countDescription: String {
         guard model.unavailableMessage == nil, !model.isLoading else { return "" }
-        if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return model.sessionCount == 1 ? "1 meeting" : "\(model.sessionCount) meetings"
-        }
-        return "\(model.results.count) of \(model.sessionCount)"
+        return Self.countDescription(
+            listed: model.results.count,
+            total: model.sessionCount,
+            isNarrowed: !TranscriptSearch.normalized(model.query).isEmpty || model.filter != .all
+        )
+    }
+
+    /// What the list says when it has nothing to show.
+    private var emptyListDescription: String {
+        Self.emptyListDescription(
+            query: TranscriptSearch.normalized(model.query),
+            filter: model.filter,
+            sessionCount: model.sessionCount
+        )
     }
 
     // MARK: - Detail
@@ -304,6 +333,45 @@ struct HistoryView: View {
             return "Transcript last written \(modified.formatted(date: .abbreviated, time: .shortened))"
         }
         return "Date not recorded"
+    }
+
+    /// A row's date, followed by its capture mode when that is known.
+    ///
+    /// - Parameter session: The meeting.
+    /// - Returns: The description.
+    static func dateAndSourceDescription(for session: HistorySession) -> String {
+        let date = dateDescription(for: session)
+        guard let mode = session.knownCaptureMode else { return date }
+        return "\(date) · \(mode.displayName)"
+    }
+
+    /// The footer's count.
+    ///
+    /// - Parameters:
+    ///   - listed: How many meetings the list shows.
+    ///   - total: How many the folder holds.
+    ///   - isNarrowed: Whether a query or a filter is narrowing the list.
+    /// - Returns: `12 meetings`, or `3 of 12` while the list is narrowed.
+    static func countDescription(listed: Int, total: Int, isNarrowed: Bool) -> String {
+        guard isNarrowed else { return total == 1 ? "1 meeting" : "\(total) meetings" }
+        return "\(listed) of \(total)"
+    }
+
+    /// What an empty list says, naming whatever is narrowing it.
+    ///
+    /// - Parameters:
+    ///   - query: The normalised query.
+    ///   - filter: The capture filter.
+    ///   - sessionCount: How many meetings the folder holds.
+    /// - Returns: The sentence.
+    static func emptyListDescription(query: String, filter: HistoryCaptureFilter, sessionCount: Int) -> String {
+        if sessionCount == 0 { return "No meetings in the save folder yet." }
+        switch (query.isEmpty, filter) {
+        case (true, .all): return "No meetings in the save folder yet."
+        case (true, _): return "No \(filter.displayName) meetings in the save folder."
+        case (false, .all): return "No meeting matches “\(query)”."
+        case (false, _): return "No \(filter.displayName) meeting matches “\(query)”."
+        }
     }
 
     /// An excerpt with its matched range emphasised.

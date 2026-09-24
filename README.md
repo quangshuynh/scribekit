@@ -47,8 +47,9 @@ resume, stopping, and reading the finished meeting back from History.
 - **Captures the apps you pick**, through ScreenCaptureKit — not the whole
   system.
   [Details](https://quangshuynh.github.io/scribekit/using/capturing-app-audio/)
-- **Or transcribes your microphone** while you work in other apps, keeping no
-  audio. Unreleased: on `main` since v0.1.0.
+- **Or transcribes a microphone** — the Mac's default or one you choose —
+  while you work in other apps, keeping no audio. Unreleased: on `main` since
+  v0.1.0.
   [Details](https://quangshuynh.github.io/scribekit/using/microphone-transcription/)
 - **Transcribes on this Mac** with Apple's `SpeechAnalyzer` and
   `SpeechTranscriber`, against a locally installed model, with no network
@@ -70,7 +71,8 @@ resume, stopping, and reading the finished meeting back from History.
   [Details](https://quangshuynh.github.io/scribekit/using/recovery/)
 - **Reads meetings back** through a read-only history, local substring search,
   uncertainty review against retained audio, and Markdown notes kept in a
-  sidecar of their own.
+  sidecar of their own. Filtering by source and find within a transcript are
+  unreleased, on `main`.
   [Details](https://quangshuynh.github.io/scribekit/using/history-and-search/)
 - **Retains audio only if you ask.** None by default; optionally raw `.caf` or
   compressed `.m4a`.

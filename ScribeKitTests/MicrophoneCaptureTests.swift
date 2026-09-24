@@ -182,7 +182,7 @@ struct MicrophoneCaptureTests {
         #expect(access.inputReads == 1)
     }
 
-    @Test("Preparing is refused for a refusal, a restriction, no input or a different input")
+    @Test("Preparing is refused for a refusal, a restriction, no input or an input that is not connected")
     func prepareRefusals() async {
         let refused = FakeMicrophoneAccess(authorization: .notDetermined, answer: false)
         await #expect(throws: AudioCaptureError.microphoneAccessDenied) {
@@ -199,14 +199,14 @@ struct MicrophoneCaptureTests {
             try await MicrophoneAudioCapturer(consumer: RecordingConsumer(), access: silent)
                 .prepare(configuration: configuration())
         }
-        let switched = FakeMicrophoneAccess(authorization: .authorized)
-        await #expect(throws: AudioCaptureError.microphoneInputChanged) {
-            try await MicrophoneAudioCapturer(consumer: RecordingConsumer(), access: switched)
+        let unplugged = FakeMicrophoneAccess(authorization: .authorized)
+        await #expect(throws: AudioCaptureError.microphoneDisconnected) {
+            try await MicrophoneAudioCapturer(consumer: RecordingConsumer(), access: unplugged)
                 .prepare(configuration: configuration("AppleUSBAudioEngine:1"))
         }
     }
 
-    @Test("A start never prompts, and refuses before building an engine when access or the input is wrong")
+    @Test("A start never prompts, and refuses before building an engine when access or the input is missing")
     func startRefusesWithoutPrompting() async {
         let undetermined = FakeMicrophoneAccess(authorization: .notDetermined)
         await #expect(throws: AudioCaptureError.microphoneAccessDenied) {
@@ -221,9 +221,9 @@ struct MicrophoneCaptureTests {
                 .start(configuration: configuration())
         }
 
-        let switched = FakeMicrophoneAccess(authorization: .authorized)
-        await #expect(throws: AudioCaptureError.microphoneInputChanged) {
-            try await MicrophoneAudioCapturer(consumer: RecordingConsumer(), access: switched)
+        let unplugged = FakeMicrophoneAccess(authorization: .authorized)
+        await #expect(throws: AudioCaptureError.microphoneDisconnected) {
+            try await MicrophoneAudioCapturer(consumer: RecordingConsumer(), access: unplugged)
                 .start(configuration: configuration("AppleUSBAudioEngine:1"))
         }
     }

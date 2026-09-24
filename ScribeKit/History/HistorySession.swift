@@ -199,6 +199,20 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
     /// Whether the session has no ScribeKit record.
     var isLegacy: Bool { status == .unrecorded }
 
+    /// Where the meeting's audio came from, as far as its artifacts establish
+    /// it.
+    ///
+    /// A record that states a mode is taken at its word. A record that states
+    /// none was written before Microphone meetings existed — by v0.1.0 or
+    /// earlier — when application audio was the only thing ScribeKit could
+    /// capture, so it is App Audio. A session with no record at all is not
+    /// known: its transcript's header names sources, and reading a mode back
+    /// out of those names would be a guess.
+    var knownCaptureMode: CaptureMode? {
+        if let captureMode { return captureMode }
+        return isLegacy ? nil : .applications
+    }
+
     /// How long the meeting ran, when both ends of it were recorded.
     var duration: TimeInterval? {
         guard let startedAt, let endedAt else { return nil }

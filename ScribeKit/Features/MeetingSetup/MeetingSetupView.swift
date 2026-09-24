@@ -68,7 +68,7 @@ struct MeetingSetupView: View {
         self.diagnostics = diagnostics
         self.preferences = preferences
         _sources = State(initialValue: MeetingSetupSourcesModel(provider: sourceProvider, preferences: preferences))
-        _microphone = State(initialValue: MeetingSetupMicrophoneModel(access: microphoneAccess))
+        _microphone = State(initialValue: MeetingSetupMicrophoneModel(access: microphoneAccess, preferences: preferences))
         // A running meeting's mode wins over the remembered one, so a window
         // rebuilt during a meeting shows the meeting it is watching.
         _captureMode = State(initialValue: runtime.isRunning
@@ -107,6 +107,12 @@ struct MeetingSetupView: View {
             await checkForUnfinishedSessions()
             await runtime.prepare()
             await refreshCaptureSource()
+        }
+        .task(id: captureMode) {
+            // Core Audio is listened to only while the Microphone section is
+            // on screen, and the task ends with the screen.
+            guard captureMode == .microphone else { return }
+            await microphone.observeInputChanges()
         }
         .onChange(of: audioRetention) { _, mode in
             preferences.audioRetention = mode
@@ -472,7 +478,7 @@ struct MeetingSetupView: View {
         } else {
             Button("Check Again") { microphone.refresh() }
                 .disabled(runtime.isRunning)
-                .accessibilityHint("Read microphone access and the Mac's current sound input again")
+                .accessibilityHint("Read microphone access and the Mac's sound inputs again")
         }
     }
 
@@ -622,29 +628,37 @@ struct MeetingSetupView: View {
 
     /// The microphone a Microphone meeting listens to, and whether it may.
     ///
-    /// The input is the Mac's current one, named as System Settings names it.
-    /// There is no microphone picker: ScribeKit listens to whatever input the
-    /// system has chosen, and says so, rather than offering a choice it would
-    /// have to keep true while devices come and go.
+    /// The picker lists the inputs the Mac offers now, with System Default
+    /// first and named for the device it stands for. A remembered device that
+    /// is not connected stays in the list, marked as such and not selectable
+    /// again, so the fallback to System Default is visible rather than silent.
+    /// While a Microphone meeting runs the section names the input that
+    /// meeting is bound to instead: it cannot be changed mid-meeting.
     private var microphoneSection: some View {
         Section("Microphone") {
-            LabeledContent("Input") {
-                Text(microphoneInputDescription)
-                    .foregroundStyle(microphone.input == nil && !isMicrophoneMeetingRunning ? .secondary : .primary)
+            if isMicrophoneMeetingRunning {
+                LabeledContent("Input") {
+                    Text(microphoneInputDescription)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Microphone input")
+                .accessibilityValue("\(microphoneInputDescription), in use by the running meeting")
+            } else {
+                microphonePicker
             }
-            .accessibilityLabel("Microphone input")
-            .accessibilityValue(microphoneInputDescription)
 
             LabeledContent("Access") {
                 Text(microphoneAccessDescription)
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Microphone access")
             .accessibilityValue(microphoneAccessDescription)
 
-            Text("ScribeKit uses the Mac's current sound input. To use a different microphone, choose it in "
-                 + "System Settings › Sound before you start. ScribeKit never switches microphones during a "
-                 + "meeting: if the input changes or is disconnected, the meeting ends and its transcript is kept.")
+            Text("ScribeKit listens to the input chosen here and leaves the Mac's own input setting alone. "
+                 + "System Default means the Mac's input when the meeting starts. A meeting keeps its "
+                 + "microphone until it ends: ScribeKit never switches microphones during a meeting, and if "
+                 + "that microphone is disconnected, the meeting ends and its transcript is kept.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -655,24 +669,65 @@ struct MeetingSetupView: View {
         }
     }
 
+    /// The choice of input for the next Microphone meeting.
+    @ViewBuilder
+    private var microphonePicker: some View {
+        if microphone.readiness == .notChecked {
+            LabeledContent("Input") {
+                Text("Checking…")
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Picker("Input", selection: Binding(
+                get: { microphone.selection.pickerID },
+                set: { id in
+                    if let option = microphoneOptions.first(where: { $0.selection.pickerID == id }) {
+                        microphone.select(option.selection)
+                    }
+                }
+            )) {
+                ForEach(microphoneOptions, id: \.selection.pickerID) { option in
+                    Text(option.label)
+                        .tag(option.selection.pickerID)
+                        .selectionDisabled(!option.isAvailable)
+                }
+            }
+            .disabled(runtime.isRunning)
+            .accessibilityLabel("Microphone input")
+            .accessibilityHint("Choose the microphone the next meeting listens to. The Mac's own setting is unchanged.")
+        }
+    }
+
+    /// The rows the microphone picker offers.
+    ///
+    /// System Default, each connected input, and — only when the remembered
+    /// choice is not connected — that choice, so the picker still shows what
+    /// was selected.
+    private var microphoneOptions: [(selection: MicrophoneSelection, label: String, isAvailable: Bool)] {
+        let defaultName = microphone.catalog.defaultInput?.name
+        var options: [(selection: MicrophoneSelection, label: String, isAvailable: Bool)] = [(
+            .systemDefault,
+            defaultName.map { "System Default — \($0)" } ?? "System Default (no input)",
+            true
+        )]
+        options += microphone.catalog.devices.map { (.device($0), $0.name, true) }
+        if let missing = microphone.choice?.unavailableSelection {
+            options.append((.device(missing), "\(missing.name) (not connected)", false))
+        }
+        return options
+    }
+
     /// Whether the meeting running now is a Microphone meeting.
     private var isMicrophoneMeetingRunning: Bool {
         runtime.isRunning && runtime.meeting?.captureMode == .microphone
     }
 
-    /// The input a Microphone meeting uses or would use.
+    /// The input the running Microphone meeting is bound to.
     ///
     /// A running meeting names the input it started with, not whatever the
-    /// Mac's input is now.
+    /// setup screen would choose now.
     private var microphoneInputDescription: String {
-        if isMicrophoneMeetingRunning, let name = runtime.meeting?.sources.first?.displayName {
-            return name
-        }
-        switch microphone.readiness {
-        case .notChecked: return "Checking…"
-        case .checked(_, nil): return "No microphone input"
-        case let .checked(_, input?): return input.name
-        }
+        runtime.meeting?.sources.first?.displayName ?? "Microphone"
     }
 
     /// What macOS says about microphone access, in words.

@@ -8,13 +8,13 @@ import CoreAudio
 import Foundation
 
 /// Answers the questions about the microphone that only macOS can answer:
-/// whether ScribeKit may use it, and which input is current.
+/// whether ScribeKit may use it, and which inputs the Mac offers.
 ///
 /// The protocol exists so those answers can be stated in a test, and so the
 /// one place that asks the system is a value rather than calls scattered
 /// through capture and the setup screen. Reading is never prompting:
-/// ``authorization()`` and ``currentInput()`` ask nothing of the user, and the
-/// only call that can put a permission prompt on screen is
+/// ``authorization()``, ``inputs()`` and ``inputChanges()`` ask nothing of the
+/// user, and the only call that can put a permission prompt on screen is
 /// ``requestAccess()``, which is made when a Microphone meeting starts or the
 /// user asks for it — never because a screen appeared, and never for an App
 /// Audio meeting.
@@ -28,8 +28,15 @@ nonisolated protocol MicrophoneAccessProviding: Sendable {
     /// - Returns: Whether access is granted.
     func requestAccess() async -> Bool
 
-    /// The Mac's current sound input, or `nil` when it has none.
-    func currentInput() -> MicrophoneInput?
+    /// The Mac's usable sound inputs and which of them is the default.
+    func inputs() -> MicrophoneInputCatalog
+
+    /// Yields each time an input is connected or disconnected, or the Mac's
+    /// default input changes, until the consumer stops iterating.
+    ///
+    /// Event-driven, so a setup screen can keep its list of inputs current
+    /// without polling. What changed is read again with ``inputs()``.
+    func inputChanges() -> AsyncStream<Void>
 }
 
 /// Decides whether a Microphone meeting may listen, asking macOS when it has
@@ -67,23 +74,28 @@ nonisolated enum MicrophoneAccessGate {
         }
     }
 
-    /// Returns the current input when it is the one a meeting was set up with.
+    /// Returns the input a meeting was set up with, when it is connected.
+    ///
+    /// The meeting's input is fixed when it starts — System Default is
+    /// resolved to a device then — so what is checked here is that device,
+    /// not whichever input the Mac's default has become since. A default that
+    /// moved to another microphone neither refuses a resume nor switches it.
     ///
     /// - Parameters:
     ///   - access: The system's answers.
-    ///   - expected: Identifiers of the input the meeting was set up with.
-    /// - Returns: The current input.
+    ///   - expected: The UID of the input the meeting was set up with.
+    /// - Returns: The input.
     /// - Throws: ``AudioCaptureError/microphoneUnavailable`` when the Mac has
-    ///   no input, or ``AudioCaptureError/microphoneInputChanged`` when the
-    ///   current input is a different device. ScribeKit does not follow the
-    ///   system to another microphone on its own.
+    ///   no input at all, or ``AudioCaptureError/microphoneDisconnected`` when
+    ///   the meeting's input is not among the ones it has. ScribeKit does not
+    ///   listen to another microphone in its place.
     static func expectedInput(
         _ access: any MicrophoneAccessProviding,
         matching expected: Set<CaptureSource.ID>
     ) throws -> MicrophoneInput {
-        guard let input = access.currentInput() else { throw AudioCaptureError.microphoneUnavailable }
-        guard expected.contains(input.id) else { throw AudioCaptureError.microphoneInputChanged }
-        return input
+        let catalog = access.inputs()
+        if let input = catalog.devices.first(where: { expected.contains($0.id) }) { return input }
+        throw catalog.devices.isEmpty ? AudioCaptureError.microphoneUnavailable : .microphoneDisconnected
     }
 }
 
@@ -92,9 +104,9 @@ nonisolated enum MicrophoneAccessGate {
 /// Authorization is read from `AVCaptureDevice`, which reports the same
 /// Privacy & Security › Microphone setting every audio-input API on the Mac is
 /// governed by, and which — unlike the record-permission API — distinguishes a
-/// restricted Mac from a refusal. The current input is read from Core Audio,
-/// because it is Core Audio's default input device that `AVAudioEngine`'s input
-/// node listens to; reading it asks for no permission.
+/// restricted Mac from a refusal. The inputs are read from Core Audio, because
+/// Core Audio's device is what a meeting's audio unit is bound to; reading
+/// them asks for no permission.
 nonisolated struct SystemMicrophoneAccess: MicrophoneAccessProviding {
 
     /// Creates the system's answers.
@@ -118,54 +130,20 @@ nonisolated struct SystemMicrophoneAccess: MicrophoneAccessProviding {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
-    func currentInput() -> MicrophoneInput? {
-        guard let device = Self.defaultInputDevice(),
-              let identifier = Self.string(kAudioDevicePropertyDeviceUID, of: device)
-        else { return nil }
-        let name = Self.string(kAudioObjectPropertyName, of: device) ?? "Microphone"
-        return MicrophoneInput(id: identifier, name: name)
+    func inputs() -> MicrophoneInputCatalog {
+        CoreAudioInputDevices.catalog()
     }
 
-    /// The system's default input device, when there is one.
-    private static func defaultInputDevice() -> AudioObjectID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var device = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            0,
-            nil,
-            &size,
-            &device
-        )
-        guard status == noErr, device != AudioObjectID(kAudioObjectUnknown) else { return nil }
-        return device
-    }
-
-    /// Reads one string property of an audio device.
-    ///
-    /// - Parameters:
-    ///   - selector: The property to read.
-    ///   - device: The device to read it from.
-    /// - Returns: The value, or `nil` when the device did not supply one.
-    private static func string(_ selector: AudioObjectPropertySelector, of device: AudioObjectID) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var value: Unmanaged<CFString>?
-        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        let status = withUnsafeMutablePointer(to: &value) { pointer in
-            AudioObjectGetPropertyData(device, &address, 0, nil, &size, pointer)
+    func inputChanges() -> AsyncStream<Void> {
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            let queue = DispatchQueue(label: "com.scribekit.microphone.inputs")
+            let listeners = [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice]
+                .compactMap { selector in
+                    CoreAudioPropertyListener.listen(to: selector, on: queue) { continuation.yield() }
+                }
+            continuation.onTermination = { _ in
+                for listener in listeners { listener.cancel() }
+            }
         }
-        guard status == noErr, let value else { return nil }
-        let string = value.takeRetainedValue() as String
-        return string.isEmpty ? nil : string
     }
 }

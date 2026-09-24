@@ -8,8 +8,8 @@ import Foundation
 /// Where a meeting's audio comes from.
 ///
 /// A meeting has exactly one. App Audio captures the applications the user
-/// selected through ScreenCaptureKit; Microphone listens to the Mac's current
-/// sound input. The two are never mixed in one meeting: a request that names
+/// selected through ScreenCaptureKit; Microphone listens to one sound input —
+/// the Mac's default when the meeting starts, or one the user chose. The two are never mixed in one meeting: a request that names
 /// both is refused rather than quietly narrowed to one of them.
 ///
 /// Everything downstream of capture — recognition, the transcript, gap
@@ -20,7 +20,7 @@ nonisolated enum CaptureMode: String, Codable, CaseIterable, Identifiable, Senda
     /// Audio produced by the applications the user selected.
     case applications
 
-    /// The Mac's current microphone input.
+    /// One microphone input.
     case microphone
 
     var id: String { rawValue }

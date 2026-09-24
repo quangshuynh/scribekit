@@ -559,6 +559,45 @@ pulled. The reopened phase reads a little higher than the visible phase in
 run 1 because the transcript is longer by then, which is the same cost, not a
 new one.
 
+## Interval 31: History search and transcript find
+
+Search gained a capture-mode filter and a transcript gained Find, so the
+keystroke path was measured again. **The budget was set before measuring**,
+from the threshold Interval 10 recorded for when an on-disk index would be
+justified: a keystroke's search completes within **100 ms** over **200
+one-hour meetings**, and finding within one **three-hour** transcript
+completes within one 60 Hz frame, **16 ms**. Both are optimised-build budgets.
+
+Same machine as above, with Xcode 27.0 (27A266a); the build was Release with
+`ENABLE_TESTABILITY=YES`, run through `HistorySearchPerformanceTests`. The
+corpus is synthetic and deterministic — generated from a fixed seed, in
+memory — with Interval 10's shape: 200 meetings of 240 spans, alternating App
+Audio and Microphone, 48,000 spans and 6.9 MB of recognised text. It measures
+matching over the loaded index; loading from disk is unchanged since Interval
+10 and was not re-measured. Each figure is the slowest of five runs after a
+warm-up.
+
+| Path | Optimised |
+|---|---|
+| Index built from 200 loaded meetings (once per load) | 32.6 ms |
+| Phrase in one meeting, All | 10.3 ms |
+| Phrase in one meeting, Microphone filter | 5.5 ms |
+| Common word, All | 20.0 ms |
+| Common word, App Audio filter | 9.4 ms |
+| Title fragment, All | 13.1 ms |
+| No match, All | 11.0 ms |
+| No query, Microphone filter | 0.06 ms |
+| Find in one 720-span transcript, 183 matches, with next and previous | 0.19 ms |
+
+The worst keystroke is 20 ms against a 100 ms budget, and find is two orders
+of magnitude inside a frame. A filter halves the work, because meetings it
+excludes are skipped before their text is looked at. Nothing was optimised,
+and no persistent index was added: nothing measured calls for one.
+
+For comparison only, the same test in a debug build took 52–136 ms per
+keystroke and 2 ms for find; Interval 10's debug figure at this size was
+100–160 ms.
+
 ## What this does not show
 
 - **Most of what the interface costs is unattributed.** The measurement exists

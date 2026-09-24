@@ -107,8 +107,12 @@ nonisolated enum AudioCaptureError: Error, Equatable, Sendable {
     /// The Mac has no microphone input to listen to.
     case microphoneUnavailable
 
-    /// The Mac's current sound input is not the microphone the meeting was
-    /// set up with, and ScribeKit does not switch microphones on its own.
+    /// The microphone the meeting uses is not connected, and ScribeKit does
+    /// not listen to another one in its place.
+    case microphoneDisconnected
+
+    /// The audio input is not listening to the microphone the meeting was set
+    /// up with, and ScribeKit does not switch microphones on its own.
     case microphoneInputChanged
 }
 
@@ -143,11 +147,13 @@ extension AudioCaptureError: LocalizedError {
             "Microphone access is restricted on this Mac, for example by a device-management profile, "
             + "and ScribeKit cannot ask for it."
         case .microphoneUnavailable:
-            "This Mac has no microphone input. Connect one or choose an input in System Settings › Sound, "
-            + "then try again."
+            "This Mac has no microphone input. Connect one, then try again."
+        case .microphoneDisconnected:
+            "The microphone this meeting uses is not connected. ScribeKit does not switch to another "
+            + "microphone on its own: reconnect it, or stop and start a meeting with another input."
         case .microphoneInputChanged:
-            "The Mac's sound input is no longer the microphone this meeting uses. ScribeKit does not switch "
-            + "microphones on its own: check the input in System Settings › Sound, then try again."
+            "The audio input is no longer listening to the microphone this meeting uses. ScribeKit does not "
+            + "switch microphones on its own, so it stopped listening."
         }
     }
 }

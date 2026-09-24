@@ -343,23 +343,41 @@ nonisolated struct MeetingStartReadiness: Equatable, Sendable {
     }
 
     /// Describes the input a Microphone meeting would listen to.
+    ///
+    /// A chosen device that is not connected does not block: the next meeting
+    /// uses System Default instead, and this row says so before Start is
+    /// pressed rather than after.
     private static func microphoneInputRow(_ readiness: MicrophoneReadiness) -> Row {
-        guard case let .checked(_, input) = readiness else {
-            return Row(prerequisite: .captureSource, status: .checking, detail: "Looking for the Mac's sound input.")
+        guard case let .checked(_, choice) = readiness else {
+            return Row(prerequisite: .captureSource, status: .checking, detail: "Looking for the Mac's sound inputs.")
         }
-        guard let input else {
+        guard let input = choice.input else {
+            let missing = choice.unavailableSelection.map { "\($0.name) is not connected, and this" } ?? "This"
             return Row(
                 prerequisite: .captureSource,
                 status: .blocked,
-                detail: "This Mac has no microphone input. Connect one or choose an input in System Settings › "
-                    + "Sound, then Check Again."
+                detail: "\(missing) Mac has no other microphone input. Connect one, then Check Again."
+            )
+        }
+        if let missing = choice.unavailableSelection {
+            return Row(
+                prerequisite: .captureSource,
+                status: .advisory,
+                detail: "\(missing.name) is not connected, so the next meeting uses System Default: \(input.name). "
+                    + "ScribeKit uses \(missing.name) again once it is connected."
+            )
+        }
+        if choice.selection == .systemDefault {
+            return Row(
+                prerequisite: .captureSource,
+                status: .satisfied,
+                detail: "\(input.name), the Mac's default input. A meeting keeps the input it starts with."
             )
         }
         return Row(
             prerequisite: .captureSource,
             status: .satisfied,
-            detail: "\(input.name), the Mac's current sound input. To use another microphone, choose it in "
-                + "System Settings › Sound before starting."
+            detail: "\(input.name), chosen in ScribeKit. The Mac's own input setting is unchanged."
         )
     }
 

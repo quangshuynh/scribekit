@@ -30,10 +30,19 @@ nonisolated protocol MeetingSetupPreferencesStoring: AnyObject {
     /// Whether the user last set up an App Audio or a Microphone meeting.
     ///
     /// Remembered because it is a standing choice about how someone uses
-    /// ScribeKit. Which microphone is not remembered: the Mac's current input
-    /// is read each time, and a device identifier kept between launches could
-    /// name a device the system has since given another identity.
+    /// ScribeKit.
     var captureMode: CaptureMode { get set }
+
+    /// Which microphone the user last chose for Microphone meetings.
+    ///
+    /// A device is remembered by its Core Audio UID, which Apple documents as
+    /// persistent across boots on one Mac, together with the name it had so a
+    /// device that is not connected can still be named. It is a preference and
+    /// makes no claim that the device is there: a remembered device that is
+    /// absent is resolved to System Default for the next meeting, visibly,
+    /// and remembered still. Nothing about the device is written anywhere
+    /// else.
+    var microphoneSelection: MicrophoneSelection { get set }
 }
 
 /// Meeting-setup preferences backed by the local preference store.
@@ -42,6 +51,8 @@ nonisolated final class UserDefaultsMeetingSetupPreferences: MeetingSetupPrefere
         static let audioRetention = "com.scribekit.meetingSetup.audioRetention"
         static let rememberedSourceIDs = "com.scribekit.meetingSetup.sourceIDs"
         static let captureMode = "com.scribekit.meetingSetup.captureMode"
+        static let microphoneDeviceID = "com.scribekit.meetingSetup.microphoneDeviceID"
+        static let microphoneDeviceName = "com.scribekit.meetingSetup.microphoneDeviceName"
     }
 
     private let defaults: UserDefaults
@@ -79,5 +90,24 @@ nonisolated final class UserDefaultsMeetingSetupPreferences: MeetingSetupPrefere
             return mode
         }
         set { defaults.set(newValue.rawValue, forKey: Key.captureMode) }
+    }
+
+    /// The remembered microphone, falling back to System Default — what
+    /// ScribeKit did before there was a choice — when no device is stored.
+    var microphoneSelection: MicrophoneSelection {
+        get {
+            guard let id = defaults.string(forKey: Key.microphoneDeviceID), !id.isEmpty else { return .systemDefault }
+            return .device(id: id, name: defaults.string(forKey: Key.microphoneDeviceName) ?? "Microphone")
+        }
+        set {
+            switch newValue {
+            case .systemDefault:
+                defaults.removeObject(forKey: Key.microphoneDeviceID)
+                defaults.removeObject(forKey: Key.microphoneDeviceName)
+            case let .device(id, name):
+                defaults.set(id, forKey: Key.microphoneDeviceID)
+                defaults.set(name, forKey: Key.microphoneDeviceName)
+            }
+        }
     }
 }
