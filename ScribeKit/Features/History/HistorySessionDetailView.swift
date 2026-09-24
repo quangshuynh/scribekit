@@ -60,6 +60,19 @@ struct HistorySessionDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                // Pinned above the scrolling content, so the field and its
+                // count stay in view while the preview scrolls to a match.
+                if !document.spans.isEmpty {
+                    VStack(spacing: 0) {
+                        findBar
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 8)
+                        Divider()
+                    }
+                    .background(.bar)
+                }
+            }
             .onChange(of: model.previewAnchor) { _, anchor in
                 guard let anchor else { return }
                 // On the next turn, once the preview window has moved and the
@@ -437,8 +450,6 @@ struct HistorySessionDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                findBar
-
                 let window = TranscriptPreviewWindow.range(
                     count: document.spans.count,
                     anchor: model.previewAnchor,
@@ -459,7 +470,7 @@ struct HistorySessionDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Finding a phrase within this transcript.
+    /// Finding a phrase within this transcript, pinned above the details.
     ///
     /// Return in the field and ⌘G move to the next match, ⇧⌘G to the
     /// previous one, and both wrap; Escape clears the field. The field keeps
