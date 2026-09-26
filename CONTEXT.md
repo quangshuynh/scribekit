@@ -5,8 +5,9 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 32 — UI visual system, on branch `interval/32-ui-visual-system`,
-unreleased. A presentation-only redesign on top of v0.2.0; capture,
+Interval 32 — UI visual system, merged to `main` (pull request 36) and
+unreleased; the real-app pass that followed — its fixes and the new
+screenshots — is on `interval/32-real-app-pass`. A presentation-only redesign on top of v0.2.0; capture,
 recognition, persistence, History search and review semantics are unchanged.
 See **Visual system** below and `docs/development/visual-design.md`.
 
