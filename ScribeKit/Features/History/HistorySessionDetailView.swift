@@ -143,13 +143,24 @@ struct HistorySessionDetailView: View {
         return parts.joined(separator: " · ")
     }
 
+    /// The file actions, titled when the pane is wide enough and reduced to
+    /// their symbols — with the same names as tooltips and for VoiceOver —
+    /// when it is not, so no title is ever cut short.
     private var actions: some View {
+        ViewThatFits(in: .horizontal) {
+            actionButtons.labelStyle(.titleAndIcon)
+            actionButtons.labelStyle(.iconOnly)
+        }
+    }
+
+    private var actionButtons: some View {
         HStack(spacing: Spacing.small) {
             Button {
                 model.openTranscript(session.transcriptURL)
             } label: {
                 Label("Open Transcript", systemImage: "doc.text")
             }
+            .help("Open Transcript")
             .accessibilityHint("Open the transcript in your Markdown application. ScribeKit does not edit it.")
 
             Button {
@@ -157,6 +168,7 @@ struct HistorySessionDetailView: View {
             } label: {
                 Label("Show in Finder", systemImage: "folder")
             }
+            .help("Show Transcript in Finder")
             .accessibilityLabel("Show Transcript in Finder")
             .accessibilityHint("Reveal this meeting's transcript in the Finder")
 
@@ -166,9 +178,11 @@ struct HistorySessionDetailView: View {
                 } label: {
                     Label("Show Audio in Finder", systemImage: "waveform")
                 }
+                .help("Show Audio in Finder")
                 .accessibilityHint("Reveal this meeting's audio file in the Finder")
             }
         }
+        .fixedSize()
     }
 
     // MARK: - Facts

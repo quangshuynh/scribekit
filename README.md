@@ -27,7 +27,7 @@
 > requirement: ScribeKit runs entirely on your Mac either way.
 
 <p align="center">
-  <img src="docs/images/meeting-live.png" alt="ScribeKit transcribing a Microphone meeting: listening to the MacBook Air Microphone, transcribing on device, and a live transcript with timestamped lines and a grey in-progress hypothesis" width="720">
+  <img src="docs/images/meeting-live.png" alt="ScribeKit during an App Audio meeting called Quarterly Roadmap Sync: a red dot beside Capturing and the elapsed time 00:46, Pause and Stop buttons, the source QuickTime Player and English (United States), and below them ten finalised passages of recognised speech, each beside the time it began" width="720">
 </p>
 
 ScribeKit runs quietly while you work in other applications. You pick what it
@@ -35,16 +35,6 @@ listens to — the applications you select, or one microphone — it recognises 
 speech on this Mac with Apple's on-device speech models, and it appends a
 timestamped Markdown transcript into a folder you chose — readable in any
 editor while the meeting is still running.
-
-## Demo
-
-Choosing a microphone, starting a Microphone meeting, live transcription,
-stopping, then finding the meeting in History with the source filter and
-search, and stepping through matches with find.
-
-<p align="center">
-  <img src="docs/images/scribekit-demo.gif" alt="A 44-second recording of ScribeKit: choosing the MacBook Air Microphone as the input, starting a Microphone meeting, a transcript filling in line by line, stopping, then filtering History to Microphone meetings, searching for deployment, and stepping through the matches in the transcript with find" width="620">
-</p>
 
 ## What it does
 
@@ -87,12 +77,20 @@ search, and stepping through matches with find.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/images/meeting-setup.png" alt="ScribeKit's setup screen in Microphone mode: a Before You Start checklist for save location, microphone access, speech recognition and microphone input, above the meeting title and the Input picker set to MacBook Air Microphone"></td>
-<td width="50%"><img src="docs/images/history-review.png" alt="ScribeKit's History filtered to Microphone meetings and searched for deployment, beside a meeting's details with the find bar showing 1 of 2 and both matches highlighted in its transcript"></td>
+<td width="50%"><img src="docs/images/meeting-setup-app-audio.png" alt="ScribeKit's setup form in App Audio mode: the running applications listed with their icons and QuickTime Player checked, the meeting title Quarterly Roadmap Sync, the recognition language, whether to keep audio, the save folder, and Start Meeting beside a line saying what the meeting will do"></td>
+<td width="50%"><img src="docs/images/meeting-setup.png" alt="ScribeKit's setup form in Microphone mode: the Input picker set to MacBook Air Microphone, microphone access shown as Allowed, what a Microphone meeting listens to and keeps, the meeting title and the save folder"></td>
 </tr>
 <tr>
-<td align="center"><em>Setup — choosing the microphone, with readiness before anything is recorded</em></td>
-<td align="center"><em>History — source filter, search, and find within a transcript</em></td>
+<td align="center"><em>Setup — App Audio, with the applications to capture</em></td>
+<td align="center"><em>Setup — Microphone, with an explicit input</em></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/history-review.png" alt="ScribeKit's History: six meetings listed by title with their date and capture mode, one marked Interrupted, and the selected Release Readiness Review showing its details and two passages flagged for review — a High priority passage whose wording the recogniser was unsure of, and a Medium one — each with Show in Transcript, Play Audio and Mark Reviewed"></td>
+<td width="50%"><img src="docs/images/history-find.png" alt="ScribeKit's History searched for release, each result quoting the matching words highlighted in context, beside the Release Readiness Review transcript with the find field showing 3 of 5 and the current match highlighted more strongly than the others"></td>
+</tr>
+<tr>
+<td align="center"><em>History — meetings at a glance, and Review</em></td>
+<td align="center"><em>Search across meetings, and find within a transcript</em></td>
 </tr>
 </table>
 

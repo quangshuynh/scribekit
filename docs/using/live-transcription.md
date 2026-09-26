@@ -5,6 +5,8 @@ the meeting runs.
 
 ## On screen
 
+![A running App Audio meeting: Capturing with the elapsed time, Pause and Stop, and finalised passages beside the times they began.](../images/meeting-live.png)
+
 During a meeting the transcript takes the Meeting screen: each finalised
 passage beside the time it began, measured from the start of the meeting, in a
 column kept to a comfortable reading width however wide the window is. The

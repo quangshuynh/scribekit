@@ -128,5 +128,9 @@ it; see [Visual Design](../development/visual-design.md).
   included in the keyboard and VoiceOver pass run on an M1 Mac before v0.2.0.
   See
   [Limitations](../reference/limitations.md).
+  The redesigned screens were checked by reading the accessibility tree
+  VoiceOver reads — labels, values and hints on the setup form, a running
+  meeting, recovery, History and Review — but not by listening to VoiceOver
+  itself.
 - **The tab bar is not itself in the Tab-key order.** ⌘1 and ⌘2 are the
   keyboard route between screens.

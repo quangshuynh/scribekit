@@ -41,11 +41,9 @@ struct ScribeKitRootView: View {
         TabView(selection: Bindable(selection).tab) {
             MeetingSetupView(runtime: runtime, diagnostics: diagnostics)
                 .tabItem { Label(ScribeKitTab.meeting.title, systemImage: ScribeKitTab.meeting.systemImage) }
-                .accessibilityLabel(ScribeKitTab.meeting.title)
                 .tag(ScribeKitTab.meeting)
             HistoryView(runtime: runtime)
                 .tabItem { Label(ScribeKitTab.history.title, systemImage: ScribeKitTab.history.systemImage) }
-                .accessibilityLabel(ScribeKitTab.history.title)
                 .tag(ScribeKitTab.history)
         }
         .frame(minWidth: LayoutMetrics.windowMinWidth, minHeight: LayoutMetrics.windowMinHeight)

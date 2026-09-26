@@ -89,6 +89,9 @@ nonisolated enum LayoutMetrics {
     /// The space between one transcript passage and the next.
     static let transcriptPassageSpacing: CGFloat = 10
 
+    /// The width of a running meeting's Details popover.
+    static let detailsPopoverWidth: CGFloat = 460
+
     /// The height of the notes editor before the user types into it.
     static let notesEditorMinHeight: CGFloat = 110
 

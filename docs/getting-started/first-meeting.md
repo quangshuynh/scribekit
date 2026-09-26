@@ -32,6 +32,8 @@ choose a folder — so no warning outlives its cause.
 
 ## Set the meeting up
 
+![ScribeKit's setup form in Microphone mode, with the Input set to MacBook Air Microphone, access shown as Allowed, the meeting title and the save folder.](../images/meeting-setup.png)
+
 The setup screen holds the configuration for the *next* meeting, top to
 bottom in the order the choices are made:
 
