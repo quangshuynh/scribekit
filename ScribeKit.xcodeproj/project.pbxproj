@@ -29,9 +29,27 @@
 		CEF69D4C3042793700FDDE77 /* ScribeKitUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScribeKitUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		CE936CA430682EE10085412E /* Exceptions for "ScribeKit" folder in "ScribeKit" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = CEF69D343042793600FDDE77 /* ScribeKit */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		CE936C9E30682EC60085412E /* Fonts */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 		CEF69D373042793600FDDE77 /* ScribeKit */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CE936CA430682EE10085412E /* Exceptions for "ScribeKit" folder in "ScribeKit" target */,
+			);
 			path = ScribeKit;
 			sourceTree = "<group>";
 		};
@@ -45,7 +63,7 @@
 			path = ScribeKitUITests;
 			sourceTree = "<group>";
 		};
-		CEF69D6A3042793700FDDE77 /* SoakValidation */ = {
+		CEF69D6A3042793700FDDE77 /* Tools/SoakValidation/Sources */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Tools/SoakValidation/Sources;
 			sourceTree = "<group>";
@@ -80,10 +98,11 @@
 		CEF69D2C3042793600FDDE77 = {
 			isa = PBXGroup;
 			children = (
+				CE936C9E30682EC60085412E /* Fonts */,
 				CEF69D373042793600FDDE77 /* ScribeKit */,
 				CEF69D453042793700FDDE77 /* ScribeKitTests */,
 				CEF69D4F3042793700FDDE77 /* ScribeKitUITests */,
-				CEF69D6A3042793700FDDE77 /* SoakValidation */,
+				CEF69D6A3042793700FDDE77 /* Tools/SoakValidation/Sources */,
 				CEF69D363042793600FDDE77 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -137,8 +156,9 @@
 				CEF69D443042793700FDDE77 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				CE936C9E30682EC60085412E /* Fonts */,
 				CEF69D453042793700FDDE77 /* ScribeKitTests */,
-				CEF69D6A3042793700FDDE77 /* SoakValidation */,
+				CEF69D6A3042793700FDDE77 /* Tools/SoakValidation/Sources */,
 			);
 			name = ScribeKitTests;
 			packageProductDependencies = (
@@ -411,6 +431,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ScribeKit/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ScribeKit listens to your microphone only while a Microphone meeting is running, to transcribe your speech on this Mac. The audio is not saved and never leaves your Mac.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -445,6 +466,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ScribeKit/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ScribeKit listens to your microphone only while a Microphone meeting is running, to transcribe your speech on this Mac. The audio is not saved and never leaves your Mac.";
 				LD_RUNPATH_SEARCH_PATHS = (
