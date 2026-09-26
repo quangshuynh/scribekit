@@ -43,7 +43,7 @@ struct MainPresentationScene: View {
                 ScribeKitRootView(runtime: runtime, diagnostics: diagnostics)
             }
         }
-        .frame(minWidth: 620, minHeight: 560)
+        .frame(minWidth: LayoutMetrics.windowMinWidth, minHeight: LayoutMetrics.windowMinHeight)
     }
 }
 

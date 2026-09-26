@@ -33,6 +33,7 @@ struct ScribeKitApp: App {
         Window("ScribeKit", id: Self.mainWindowID) {
             MainPresentationScene(runtime: delegate.runtime, diagnostics: delegate.diagnostics)
         }
+        .defaultSize(width: LayoutMetrics.windowDefaultWidth, height: LayoutMetrics.windowDefaultHeight)
         .windowResizability(.contentMinSize)
         .commands {
             MeetingCommands(runtime: delegate.runtime, diagnostics: delegate.diagnostics)
