@@ -1990,6 +1990,20 @@ success. Nothing is uploaded and no entitlement was added.
 
 ## Validation status
 
+### Interval 32 visual pass
+
+The redesign was exercised in the real app on this Mac against a demo save
+folder, driven by UI automation with synthetic speech (live `say` into the
+microphone, QuickTime Player for App Audio): both setup modes, live, paused
+(⌃⌘P / ⌃⌘R), finished, an interrupted meeting recovered and marked, History
+search, filter, find, Review and no results, light and dark, the 680 × 560
+minimum and a 980-point window. Keyboard: Return starts, ⌘1 / ⌘2 switch tabs,
+⌘F focuses search. Accessibility was checked by reading the exposed tree, not
+by listening to VoiceOver. Observed CPU for the app process: about 0.04 % idle
+on setup, about 6 % mean during a live meeting with brief peaks of 20–30 % as
+passages finalised (`ps` sampled once a second). The documentation screenshots
+come from those meetings.
+
 ### v0.2.0 release validation
 
 On an M1 MacBook Air, macOS 26.6.2, Xcode 27.0, from a clean clone of the

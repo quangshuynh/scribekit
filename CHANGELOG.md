@@ -26,6 +26,16 @@ search or persistence has changed.
 - **One visual system.** Semantic text roles on SF Pro and SF Mono, a short
   spacing scale and status tones that always pair colour with a word and a
   symbol, in light and dark appearance. Paths are shown from `~`.
+- **VoiceOver hears Start Meeting as Start Meeting.** The window's two tabs
+  put their name on everything inside them that had no label of its own, so
+  since v0.2.0 VoiceOver announced the Start Meeting button, and the sentence
+  beside it, as "Meeting". The tabs are still named by the tab bar.
+- **Narrow windows.** History's file actions become icon buttons, with the same
+  names as tooltips and for VoiceOver, instead of truncating; the meeting's
+  Details wrap long values instead of cutting them off.
+- **New screenshots** of the redesigned interface, captured from real meetings
+  with synthetic speech. The v0.2.0 demo recording, which showed the previous
+  interface, was removed.
 - **Removed** the unused IBM Plex font files; ScribeKit uses the system faces.
 
 ## 0.2.0 — 2026-09-24

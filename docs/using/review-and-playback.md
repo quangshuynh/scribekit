@@ -13,6 +13,8 @@ passages marked reviewed sits beside the section's heading, and **Show in
 Transcript** moves the preview to the passage and marks it with a bar at its
 edge.
 
+![A meeting's details in History, with a High priority and a Medium priority passage flagged for review, each with Show in Transcript, Play Audio and Mark Reviewed.](../images/history-review.png)
+
 ## The two reasons
 
 They are different kinds of thing, and ScribeKit keeps them distinct:

@@ -14,6 +14,8 @@ application you use for Markdown.
 
 ## Search
 
+![History searched for "release": each result quotes the matching words in context, and the find field steps through the matches in one transcript.](../images/history-find.png)
+
 Search is plain, case-insensitive substring matching over meeting titles,
 recognised speech, captured application and microphone names, and the name of
 each meeting's capture mode — `App Audio` or `Microphone`. A match in speech
