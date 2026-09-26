@@ -31,18 +31,18 @@
 </p>
 
 ScribeKit runs quietly while you work in other applications. You pick what it
-listens to — the applications you select, or one microphone — it recognises the
-speech on this Mac with Apple's on-device speech models, and it appends a
-timestamped Markdown transcript into a folder you chose — readable in any
-editor while the meeting is still running.
+listens to: the applications you select, or one microphone. It recognises the
+speech on this Mac with Apple's on-device speech models and appends a
+timestamped Markdown transcript into a folder you chose, readable in any editor
+while the meeting is still running.
 
 ## What it does
 
-- **Captures the apps you pick**, through ScreenCaptureKit — not the whole
+- **Captures the apps you pick** through ScreenCaptureKit, not the whole
   system.
   [Details](https://quangshuynh.github.io/scribekit/using/capturing-app-audio/)
-- **Or transcribes a microphone** — the Mac's default or one you choose —
-  while you work in other apps, keeping no audio. One source per meeting: never
+- **Or transcribes the Mac's default microphone** or one you choose while you
+  work in other apps, keeping no audio. One source per meeting: never
   App Audio and a microphone together.
   [Details](https://quangshuynh.github.io/scribekit/using/microphone-transcription/)
 - **Transcribes on this Mac** with Apple's `SpeechAnalyzer` and
@@ -71,7 +71,7 @@ editor while the meeting is still running.
 - **Retains audio only if you ask.** None by default; optionally raw `.caf` or
   compressed `.m4a`.
   [Details](https://quangshuynh.github.io/scribekit/getting-started/audio-retention/)
-- **Exports a local diagnostic report** when something goes wrong — counts and
+- **Exports a local diagnostic report** when something goes wrong: counts and
   states only, written where you choose, uploaded nowhere.
   [Details](https://quangshuynh.github.io/scribekit/privacy/diagnostics/)
 
@@ -81,15 +81,15 @@ editor while the meeting is still running.
 <td width="50%"><img src="docs/images/meeting-setup.png" alt="ScribeKit's setup form in Microphone mode: the Input picker set to MacBook Air Microphone, microphone access shown as Allowed, what a Microphone meeting listens to and keeps, the meeting title and the save folder"></td>
 </tr>
 <tr>
-<td align="center"><em>Setup — App Audio, with the applications to capture</em></td>
-<td align="center"><em>Setup — Microphone, with an explicit input</em></td>
+<td align="center"><em>Setup: App Audio, with the applications to capture</em></td>
+<td align="center"><em>Setup: Microphone, with an explicit input</em></td>
 </tr>
 <tr>
 <td width="50%"><img src="docs/images/history-review.png" alt="ScribeKit's History: six meetings listed by title with their date and capture mode, one marked Interrupted, and the selected Release Readiness Review showing its details and two passages flagged for review — a High priority passage whose wording the recogniser was unsure of, and a Medium one — each with Show in Transcript, Play Audio and Mark Reviewed"></td>
 <td width="50%"><img src="docs/images/history-find.png" alt="ScribeKit's History searched for release, each result quoting the matching words highlighted in context, beside the Release Readiness Review transcript with the find field showing 3 of 5 and the current match highlighted more strongly than the others"></td>
 </tr>
 <tr>
-<td align="center"><em>History — meetings at a glance, and Review</em></td>
+<td align="center"><em>History: meetings at a glance, and Review</em></td>
 <td align="center"><em>Search across meetings, and find within a transcript</em></td>
 </tr>
 </table>
@@ -110,7 +110,7 @@ selected applications
 ```
 
 `transcript.md` is the transcript. It is plain Markdown, it is yours, and it
-does not depend on anything under `.scribekit/` — losing or failing to read
+does not depend on anything under `.scribekit/`. Losing or failing to read
 those sidecars never makes the transcript unusable.
 
 ```markdown
@@ -145,7 +145,7 @@ The build pipeline is green and the full test suite is passing.
 | --- | --- |
 | **macOS** | 26.5 or later. Earlier versions are not supported and macOS will refuse to launch the build. |
 | **Mac** | Tested on Apple Silicon. The project builds a universal binary, but nothing has been built or validated on Intel. |
-| **Xcode** | 26 or later — needed to build ScribeKit, which is currently the only way to run it. |
+| **Xcode** | 26 or later. Building ScribeKit is currently the only way to run it. |
 | **Speech model** | The on-device model for your recognition language must already be installed. ScribeKit does not download models and has no network fallback; a language whose model is missing is listed and disabled. |
 | **Permission** | Screen & System Audio Recording, which macOS asks for the first time ScribeKit looks for capture sources. Microphone meetings need Microphone permission instead. |
 
@@ -195,7 +195,7 @@ Unit tests use [Swift Testing](https://developer.apple.com/documentation/testing
 - **No accounts, no analytics, no telemetry, no cloud database, and no
   third-party runtime dependencies.** ScribeKit ships without the network
   client entitlement, so the sandbox does not permit it to open a network
-  connection at all — and recognition has no server-backed mode to fall back
+  connection at all. Recognition also has no server-backed mode to fall back
   to.
 - **Your transcripts live where you put them.** The save location is a folder
   you chose in a system panel; transcripts, and retained audio if you enabled
@@ -241,16 +241,16 @@ See
 v0.2.0 is deliberately narrow. The ones most likely to matter:
 
 - macOS 26.5 or later, tested only on Apple Silicon.
-- Source build only — no signed or notarized application is provided.
+- Source build only. No signed or notarized application is provided.
 - A meeting transcribes either selected applications or one microphone, never
   both. There is no speaker separation, and microphone audio is never kept.
 - The on-device speech model must already be installed, and accuracy is
   Apple's recogniser's.
 - An interrupted meeting is preserved but cannot be continued as the same
   session; you start a new one.
-- Transcripts are read-only inside History — no editing, renaming, deleting or
-  exporting — and changing a transcript's structure outside ScribeKit can stop
-  History parsing it.
+- Transcripts are read-only inside History, with no editing, renaming,
+  deleting or exporting. Changing a transcript's structure outside ScribeKit
+  can stop History parsing it.
 - Compressed audio cut short by an abrupt process death may be unreadable.
 - ScribeKit does not encrypt what it writes.
 
