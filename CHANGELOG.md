@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+A visual redesign. Nothing about capture, recognition, transcripts, History's
+search or persistence has changed.
+
+- **A Meeting screen for each job.** Setup is a focused form: the capture mode
+  and its source form one section, **Before You Start** appears only when
+  something still needs doing, and the line beside **Start Meeting** says what
+  the meeting will do. While a meeting runs, the screen shows its status,
+  elapsed time, source and Pause / Stop above a transcript that fills the
+  window; capture and recognition detail moved behind **Details**. A finished
+  meeting stays on screen with how it ended until **New Meeting**.
+- **Readable transcripts.** Speech is set larger than the times beside it, in
+  a column kept to a comfortable width, the same way live and in History. The
+  live guess is no longer left on screen after a meeting ends.
+- **History that scans.** Rows lead with the title, show the capture mode as a
+  symbol and a word, highlight search matches in context and state a status
+  only when a meeting did not end normally.
+- **Review in proportion.** Priorities are marked with a symbol, a word and a
+  colour matched to their weight, never as errors; the reviewed count sits by
+  the heading, and "no recording" is said once.
+- **One visual system.** Semantic text roles on SF Pro and SF Mono, a short
+  spacing scale and status tones that always pair colour with a word and a
+  symbol, in light and dark appearance. Paths are shown from `~`.
+- **Removed** the unused IBM Plex font files; ScribeKit uses the system faces.
+
 ## 0.2.0 — 2026-09-24
 
 ScribeKit v0.2.0 expands ScribeKit from selected-app transcription into a

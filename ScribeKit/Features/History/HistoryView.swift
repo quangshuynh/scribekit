@@ -29,15 +29,22 @@ struct HistoryView: View {
     ///   - runtime: The application's meeting owner.
     ///   - model: The History state, or `nil` to build one that reads the
     ///     real save folder. Previews and tests substitute their own.
-    init(runtime: MeetingRuntime, model: HistoryModel? = nil) {
+    ///   - initialSelection: The meeting to show first, for a preview that
+    ///     opens on one; `nil` shows none until the user chooses.
+    init(runtime: MeetingRuntime, model: HistoryModel? = nil, initialSelection: URL? = nil) {
         self.runtime = runtime
         _model = State(initialValue: model ?? HistoryModel())
+        _selection = State(initialValue: initialSelection)
     }
 
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 420)
+                .navigationSplitViewColumnWidth(
+                    min: LayoutMetrics.sidebarMinWidth,
+                    ideal: LayoutMetrics.sidebarIdealWidth,
+                    max: LayoutMetrics.sidebarMaxWidth
+                )
         } detail: {
             detail
         }
@@ -47,7 +54,7 @@ struct HistoryView: View {
             searchFieldFocused = true
         }
         .onDisappear { model.stopPlayback() }
-        .onChange(of: selection) { _, newValue in
+        .onChange(of: selection, initial: selection != nil) { _, newValue in
             model.stopPlayback()
             Task { await model.selectSession(newValue) }
         }
@@ -70,8 +77,10 @@ struct HistoryView: View {
         }
     }
 
+    /// The search field, drawn as a field so it reads as one on the sidebar's
+    /// translucent background.
     private var searchField: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Spacing.xSmall + Spacing.hairline) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -91,8 +100,12 @@ struct HistoryView: View {
                 .accessibilityLabel("Clear search")
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Spacing.small)
+        .padding(.vertical, Spacing.xSmall + Spacing.hairline)
+        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: CornerRadius.medium, style: .continuous))
+        .padding(.horizontal, Spacing.medium)
+        .padding(.top, Spacing.small)
+        .padding(.bottom, Spacing.small)
     }
 
     /// Which meetings are listed, by where their audio came from.
@@ -108,8 +121,8 @@ struct HistoryView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .padding(.horizontal, 10)
-        .padding(.bottom, 8)
+        .padding(.horizontal, Spacing.medium)
+        .padding(.bottom, Spacing.small)
         .accessibilityLabel("Show meetings from")
         .accessibilityHint("Lists all meetings, or only App Audio or Microphone meetings")
     }
@@ -121,26 +134,27 @@ struct HistoryView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Reading the save folder…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .textRole(.secondaryBody)
             }
         } else if let message = model.unavailableMessage {
-            centred {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .accessibilityLabel("History unavailable. \(message)")
+            ContentUnavailableView {
+                Label("History Unavailable", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("History unavailable. \(message)")
         } else if model.results.isEmpty {
             VStack(spacing: 0) {
                 problemsList
-                centred {
+                ContentUnavailableView {
+                    Label(isNarrowed ? "No Results" : "No Meetings",
+                          systemImage: isNarrowed ? "magnifyingglass" : "tray")
+                } description: {
                     Text(emptyListDescription)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
             VStack(spacing: 0) {
@@ -164,18 +178,18 @@ struct HistoryView: View {
     private var problemsList: some View {
         if !model.problems.isEmpty {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Could Not Be Read")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: Spacing.small) {
+                    StatusBadge(title: "Could Not Be Read", symbolName: "exclamationmark.triangle",
+                                tone: .warning, role: .metadata)
+                        .accessibilityAddTraits(.isHeader)
                     ForEach(model.problems) { problem in
                         problemRow(for: problem)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
+                .padding(Spacing.medium)
             }
-            .frame(maxHeight: 160)
+            .frame(maxHeight: LayoutMetrics.problemsListMaxHeight)
             Divider()
         }
     }
@@ -188,14 +202,13 @@ struct HistoryView: View {
     /// - Parameter problem: What was wrong, and where.
     /// - Returns: The row view.
     private func problemRow(for problem: HistoryProblem) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
             Text(problem.name)
-                .font(.subheadline.weight(.medium))
+                .textRole(.strongTechnical)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Text(problem.error.errorDescription ?? "")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .textRole(.metadata)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -203,63 +216,76 @@ struct HistoryView: View {
 
     /// One matching meeting.
     ///
+    /// The title leads; the date and capture mode sit under it in the
+    /// metadata style; a search match is quoted with the matched words marked,
+    /// and the time it was said is set as a timestamp. A status is stated only
+    /// when it is not the ordinary one, so the meetings that ended some other
+    /// way stand out in a long list instead of every row carrying a badge.
+    ///
     /// - Parameter result: The match to present.
     /// - Returns: The row view.
     private func row(for result: HistorySearchResult) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.hairline) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xSmall) {
                 Text(result.session.title)
-                    .font(.headline)
+                    .textRole(.groupTitle)
                     .lineLimit(1)
-                Spacer(minLength: 4)
-                statusLabel(result.session.status)
+                Spacer(minLength: Spacing.xSmall)
+                if result.session.status.isNoteworthy {
+                    statusLabel(result.session.status)
+                }
             }
-            Text(Self.dateAndSourceDescription(for: result.session))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xSmall) {
+                if let mode = result.session.knownCaptureMode {
+                    Image(systemName: mode.symbolName)
+                        .imageScale(.small)
+                }
+                Text(Self.dateAndSourceDescription(for: result.session))
+                    .lineLimit(1)
+            }
+            .textRole(.metadata)
             if let excerpt = result.excerpt {
                 Text(Self.highlighted(excerpt))
-                    .font(.caption)
+                    .textRole(.secondaryBody)
                     .lineLimit(3)
-                Text("at \(excerpt.timestampDescription)"
+                    .padding(.top, Spacing.xSmall)
+                Text(excerpt.timestampDescription
                      + (result.transcriptMatchCount > 1 ? " · \(result.transcriptMatchCount) matches" : ""))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .textRole(.timestamp)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Spacing.xSmall)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(result.accessibilityDescription(date: Self.dateDescription(for: result.session)))
     }
 
-    /// A meeting's status as a word rather than a colour.
+    /// A meeting's status as a word, with a symbol in its tone.
     ///
     /// - Parameter status: Where the session stands.
     /// - Returns: The label view.
     private func statusLabel(_ status: HistorySessionStatus) -> some View {
-        Text(status.displayName)
-            .font(.caption2.weight(.medium))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
-            .foregroundStyle(.secondary)
+        StatusBadge(title: status.displayName, symbolName: status.symbolName, tone: status.tone, role: .caption)
+            .fixedSize()
     }
 
     private var sidebarFooter: some View {
         HStack {
             Text(countDescription)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .textRole(.metadata)
             Spacer()
-            Button("Refresh") {
+            Button {
                 Task { await model.load() }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
             }
-            .controlSize(.small)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .help("Refresh")
             .disabled(model.isLoading)
             .accessibilityHint("Read the save folder again")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Spacing.medium)
+        .padding(.vertical, Spacing.small)
     }
 
     /// How many meetings are listed, and how many the folder holds.
@@ -268,8 +294,13 @@ struct HistoryView: View {
         return Self.countDescription(
             listed: model.results.count,
             total: model.sessionCount,
-            isNarrowed: !TranscriptSearch.normalized(model.query).isEmpty || model.filter != .all
+            isNarrowed: isNarrowed
         )
+    }
+
+    /// Whether a query or a filter is narrowing the list.
+    private var isNarrowed: Bool {
+        !TranscriptSearch.normalized(model.query).isEmpty || model.filter != .all
     }
 
     /// What the list says when it has nothing to show.
@@ -310,10 +341,10 @@ struct HistoryView: View {
     /// - Parameter content: What to centre.
     /// - Returns: The centred view.
     private func centred<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Spacing.small) {
             content()
         }
-        .padding(20)
+        .padding(Spacing.xLarge)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -389,6 +420,8 @@ struct HistoryView: View {
             let start = text.index(text.startIndex, offsetByCharacters: excerpt.matchOffset)
             let end = text.index(start, offsetByCharacters: excerpt.matchLength)
             text[start..<end].inlinePresentationIntent = .stronglyEmphasized
+            text[start..<end].foregroundColor = .primary
+            text[start..<end].backgroundColor = Color(nsColor: .findHighlightColor).opacity(TintOpacity.findMatch)
         }
         if excerpt.isTruncatedAtStart { text.insert(AttributedString("… "), at: text.startIndex) }
         if excerpt.isTruncatedAtEnd { text.append(AttributedString(" …")) }

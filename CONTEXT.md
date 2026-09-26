@@ -5,8 +5,14 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
-Interval 31 — Transcription workflow and History, released with Intervals 29
-and 30 as **v0.2.0** (version 0.2.0, build 2), a source release like v0.1.0.
+Interval 32 — UI visual system, on branch `interval/32-ui-visual-system`,
+unreleased. A presentation-only redesign on top of v0.2.0; capture,
+recognition, persistence, History search and review semantics are unchanged.
+See **Visual system** below and `docs/development/visual-design.md`.
+
+The previous milestone, Interval 31 — Transcription workflow and History, was
+released with Intervals 29 and 30 as **v0.2.0** (version 0.2.0, build 2), a
+source release like v0.1.0.
 The v0.1.0 tag, release and changelog entry are untouched.
 
 Four things, built on Interval 30's two capture modes without changing the
@@ -152,6 +158,32 @@ observations were not recorded here.
   `TranscriptFindMatch` / `TranscriptPreviewWindow` in `History/`.
 - `ScribeKitTests/`: Swift Testing suites; counts are in the latest validation
   below.
+
+## Visual system
+
+- `ScribeKit/Features/Design/`: `TextRole` / `TypeSpec` (semantic type roles
+  on SF Pro and SF Mono; views call `.textRole(_:)`, never a raw font),
+  `Spacing` / `CornerRadius` / `LayoutMetrics` / `TintOpacity` (the tokens),
+  `StatusTone` with tone, symbol and noteworthiness mappings for readiness,
+  review priority and reason, History status and capture mode,
+  `StatusBadge` / `NoticeView` / `SectionHeading` / `FactRow` /
+  `TranscriptPassageRow`, and `DisplayPath` (paths shown from `~`, using the
+  account's home rather than the sandbox container).
+- No font is bundled. IBM Plex was evaluated against the system faces on the
+  redesigned screens and not chosen; the files a previous commit added (never
+  loaded: they were a test-target resource under the iOS-only `UIAppFonts`)
+  were removed.
+- The Meeting screen shows one of two arrangements, decided by the pure
+  `MeetingScreenLayout`: the setup form, or `MeetingSessionView` while a
+  meeting runs and after it ends having captured something, until **New
+  Meeting** (`dismissOutcome`). A start failure is reported on the setup form.
+  `MeetingSessionStatus` words the session header. Before You Start lists only
+  unsatisfied prerequisites. A finished meeting's partial is not displayed.
+- History rows state a status only when `isNoteworthy` (not Completed);
+  `HistoryView` takes an optional `initialSelection` for previews.
+- Minimum window 680 × 560, default 900 × 760.
+- Tests: `DesignSystemTests` (type rules, tones, symbols exist, display paths)
+  and `MeetingScreenPresentationTests`.
 
 ## Meeting ownership
 

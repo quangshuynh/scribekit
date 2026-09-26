@@ -3,13 +3,26 @@
 Audio captured from your selected applications is transcribed on this Mac while
 the meeting runs.
 
+## On screen
+
+During a meeting the transcript takes the Meeting screen: each finalised
+passage beside the time it began, measured from the start of the meeting, in a
+column kept to a comfortable reading width however wide the window is. The
+status, elapsed time and controls sit above it, and the file being written
+below it.
+
 ## Partial and final
 
 Partial recognition is an ephemeral guess. It is displayed, replaced by the
 next one, and discarded — it is never appended to a transcript and never
 persisted. Only text the recogniser has **finalised** becomes transcript
 material, so a sentence heard word by word leaves one entry rather than one per
-word.
+word. On screen the guess is the last line, in grey italic and with no time
+beside it, and it is no longer shown once the meeting has ended.
+
+If audio goes untranscribed during the meeting, a notice above the transcript
+says how many seconds were lost, so the gap is visible before the meeting is
+over.
 
 ## Language
 

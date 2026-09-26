@@ -48,7 +48,7 @@ struct ScribeKitRootView: View {
                 .accessibilityLabel(ScribeKitTab.history.title)
                 .tag(ScribeKitTab.history)
         }
-        .frame(minWidth: 620, minHeight: 560)
+        .frame(minWidth: LayoutMetrics.windowMinWidth, minHeight: LayoutMetrics.windowMinHeight)
         .focusedSceneValue(\.scribeKitTabSelection, selection)
     }
 }

@@ -128,6 +128,7 @@ nav:
       - Building: development/building.md
       - Testing: development/testing.md
       - Architecture Boundaries: development/architecture-boundaries.md
+      - Visual Design: development/visual-design.md
       - Documentation: development/documentation.md
       - Contributing: development/contributing.md
   - Reference:

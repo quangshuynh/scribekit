@@ -5,6 +5,14 @@ listen: the recognised wording exactly as the transcript has it, the timestamp
 it was written under, a High, Medium or Low priority, and the reason it was
 flagged.
 
+Emphasis follows priority and never turns into alarm. A High priority passage
+is marked in the warning colour, Medium in blue and Low in no colour at all,
+each with its own symbol and its name in words; nothing in Review is drawn as
+an error, because a passage worth another listen is not one. The count of
+passages marked reviewed sits beside the section's heading, and **Show in
+Transcript** moves the preview to the passage and marks it with a bar at its
+edge.
+
 ## The two reasons
 
 They are different kinds of thing, and ScribeKit keeps them distinct:
@@ -28,8 +36,8 @@ direct because transcript offsets and the recording share one origin; see
 The recording is read from disk as it plays, so a multi-hour file costs what a
 short one does, and it is never modified.
 
-A meeting that kept no recording still lists its passages and says there is no
-audio to play. A recording from a meeting that was killed before it could be
+A meeting that kept no recording still lists its passages and says once, above
+them, that there is no audio to play. A recording from a meeting that was killed before it could be
 finalised is reported as one that will not open, rather than quietly skipped.
 
 ## Review never changes the transcript

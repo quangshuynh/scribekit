@@ -51,9 +51,10 @@ and the menus cannot disagree about what is currently possible.
   something only a sighted user learns about.
 - **Show in Transcript** on a flagged review passage moves the preview to it
   and moves VoiceOver to that passage.
-- On the Meeting screen, the Microphone section's **Input** is a standard
-  pop-up button. It is disabled while a meeting runs, and the running
-  meeting's microphone is read out instead.
+- On the Meeting screen, the microphone **Input** is a standard pop-up button.
+  While a meeting runs the screen shows the meeting instead of the setup form,
+  and its source — including the microphone it is bound to — is read out with
+  its status and elapsed time.
 - **Return** starts a meeting when the Start Meeting button is available, since
   it is the window's default button.
 - Text fields, pop-up buttons, checkboxes and the notes editor behave as any
@@ -68,8 +69,8 @@ fragments, so each is published as one item that states everything the screen
 shows:
 
 - **A readiness row** reads as the prerequisite, its status in words and the
-  detail — "Save location. Ready. …" or "Audio source. Action needed. …". The
-  icon beside it carries no meaning of its own.
+  detail — "Audio source. Action needed. …". The icon beside it carries no
+  meaning of its own. Only prerequisites that still need something are listed.
 - **A flagged review passage** reads as its time, its priority, whether it has
   been marked reviewed, the recognised words, why it was flagged, and whether
   there is audio to play. Its Play Audio and Mark Reviewed buttons stay
@@ -86,9 +87,11 @@ shows:
   their chevrons.
 
 Nothing in ScribeKit signals a state with colour alone. Every status that has
-an icon has the same status in words beside it, and the app uses macOS's own
-semantic colours rather than a palette of its own, so it follows the system's
-light, dark and increased-contrast settings.
+an icon has the same status in words beside it — a review passage's priority,
+a History row's Interrupted or Failed, the meeting's Listening or Paused — and
+the app uses macOS's own semantic colours rather than a palette of its own, so
+it follows the system's light, dark and increased-contrast settings. A passage
+shown from Review is marked by a bar at its edge as well as a tint.
 
 ScribeKit does not animate anything decorative, so there is nothing for Reduce
 Motion to turn off. The only movement on screen is the standard progress
@@ -97,10 +100,14 @@ indicator macOS draws while discovery or a folder scan is running.
 ## Text size and window size
 
 The window opens at a comfortable size and can be resized down to about
-620 points wide. Detail text wraps rather than truncating, the live transcript
-grows with its content up to a scrollable maximum, and long meeting titles,
-long folder paths and long error messages wrap inside the window rather than
-pushing controls out of reach.
+680 by 560 points. Detail text wraps rather than truncating, the live
+transcript fills the space the window has and scrolls, and long meeting
+titles, long folder paths and long error messages wrap or truncate in the
+middle inside the window rather than pushing controls out of reach.
+
+Every piece of text is set in one of a small number of roles built on the
+system's text styles, so the interface follows the text size macOS applies to
+it; see [Visual Design](../development/visual-design.md).
 
 ## Known gaps
 

@@ -17,6 +17,11 @@ import SwiftUI
 /// `.scribekit/derived.json` through ``DerivedSessionModel`` and reach nothing
 /// else, so the transcript, the recording, the session record and the review
 /// sidecar stay byte-identical however much is written in this pane.
+///
+/// The pane reads top to bottom in the order of attention: what the meeting
+/// was, anything in it that may need a second listen, the user's notes, then
+/// the transcript itself. Facts about the files are grouped and set quieter
+/// than the words that were said.
 struct HistorySessionDetailView: View {
 
     /// The History state, used for the file actions and their narrow
@@ -44,21 +49,18 @@ struct HistorySessionDetailView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    heading
-                    Divider()
+                VStack(alignment: .leading, spacing: Spacing.xxLarge) {
+                    VStack(alignment: .leading, spacing: Spacing.large) {
+                        heading
+                        actions
+                    }
                     facts
-                    Divider()
-                    actions
-                    Divider()
                     review
-                    Divider()
                     notes
-                    Divider()
                     preview
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
+                .readableColumn()
+                .padding(.vertical, Spacing.xLarge)
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Pinned above the scrolling content, so the field and its
@@ -66,8 +68,8 @@ struct HistorySessionDetailView: View {
                 if !document.spans.isEmpty {
                     VStack(spacing: 0) {
                         findBar
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, Spacing.large)
+                            .padding(.vertical, Spacing.small)
                         Divider()
                     }
                     .background(.bar)
@@ -93,60 +95,143 @@ struct HistorySessionDetailView: View {
         "span-\(spanIndex)"
     }
 
+    // MARK: - Heading
+
+    /// The meeting's name, when it happened and how it came to end.
+    ///
+    /// An ordinary ending is stated once, in the facts below. Any other
+    /// ending is stated here as well, in a notice, because it changes how the
+    /// transcript should be read.
     private var heading: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Spacing.xSmall) {
             Text(session.title)
-                .font(.title2.weight(.semibold))
+                .textRole(.pageTitle)
                 .textSelection(.enabled)
-            Text(session.status.explanation)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xSmall) {
+                if let mode = session.knownCaptureMode {
+                    Image(systemName: mode.symbolName)
+                        .accessibilityHidden(true)
+                }
+                Text(subtitle)
+            }
+            .textRole(.metadata)
+            .accessibilityElement(children: .combine)
+
+            if session.status.isNoteworthy {
+                NoticeView(
+                    tone: session.status.tone,
+                    symbolName: session.status.symbolName,
+                    title: session.status.displayName,
+                    message: session.status.explanation
+                )
+                .padding(.top, Spacing.small)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 
+    /// The capture mode, date and length of the meeting on one line.
+    private var subtitle: String {
+        var parts: [String] = []
+        if let mode = session.knownCaptureMode { parts.append(mode.displayName) }
+        parts.append(HistoryView.dateDescription(for: session))
+        if let duration = session.duration {
+            parts.append(TranscriptMarkdownFormatter.durationDescription(duration))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var actions: some View {
+        HStack(spacing: Spacing.small) {
+            Button {
+                model.openTranscript(session.transcriptURL)
+            } label: {
+                Label("Open Transcript", systemImage: "doc.text")
+            }
+            .accessibilityHint("Open the transcript in your Markdown application. ScribeKit does not edit it.")
+
+            Button {
+                model.showInFinder(session.transcriptURL)
+            } label: {
+                Label("Show in Finder", systemImage: "folder")
+            }
+            .accessibilityLabel("Show Transcript in Finder")
+            .accessibilityHint("Reveal this meeting's transcript in the Finder")
+
+            if let audio = session.audio {
+                Button {
+                    model.showInFinder(audio.url)
+                } label: {
+                    Label("Show Audio in Finder", systemImage: "waveform")
+                }
+                .accessibilityHint("Reveal this meeting's audio file in the Finder")
+            }
+        }
+    }
+
+    // MARK: - Facts
+
+    /// What ScribeKit knows about the meeting's files, as label and value
+    /// pairs. Identifiers — a locale, a size, a path — are set in the
+    /// monospaced face so they read as values rather than prose.
     private var facts: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            fact("Status", session.status.displayName)
+        VStack(alignment: .leading, spacing: Spacing.medium) {
+            SectionHeading("Details")
 
-            if let startedAt = session.startedAt {
-                fact("Started", startedAt.formatted(date: .abbreviated, time: .standard))
-            }
-            if let endedAt = session.endedAt {
-                fact("Ended", endedAt.formatted(date: .abbreviated, time: .standard))
-            }
-            if let duration = session.duration {
-                fact("Duration", TranscriptMarkdownFormatter.durationDescription(duration))
-            }
-            if session.startedAt == nil, let modified = session.transcript.modifiedAt {
-                fact("Transcript last written", modified.formatted(date: .abbreviated, time: .standard))
-            }
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: Spacing.medium,
+                 verticalSpacing: Spacing.small) {
+                FactRow(label: "Status", value: session.status.displayName)
 
-            if !session.sourceNames.isEmpty {
-                // A Microphone meeting's source is not an application. A
-                // session whose record predates the distinction captured
-                // applications, which is all ScribeKit could capture then.
-                fact(
-                    session.captureMode == .microphone ? "Source" : "Applications",
-                    session.sourceNames.formatted(.list(type: .and))
-                )
+                if let startedAt = session.startedAt {
+                    FactRow(label: "Started", value: startedAt.formatted(date: .abbreviated, time: .standard))
+                }
+                if let endedAt = session.endedAt {
+                    FactRow(label: "Ended", value: endedAt.formatted(date: .abbreviated, time: .standard))
+                }
+                if let duration = session.duration {
+                    FactRow(label: "Duration", value: TranscriptMarkdownFormatter.durationDescription(duration))
+                }
+                if session.startedAt == nil, let modified = session.transcript.modifiedAt {
+                    FactRow(label: "Transcript last written",
+                            value: modified.formatted(date: .abbreviated, time: .standard))
+                }
+
+                if !session.sourceNames.isEmpty {
+                    // A Microphone meeting's source is not an application. A
+                    // session whose record predates the distinction captured
+                    // applications, which is all ScribeKit could capture then.
+                    FactRow(
+                        label: session.captureMode == .microphone ? "Source" : "Applications",
+                        value: session.sourceNames.formatted(.list(type: .and))
+                    )
+                }
+                if let locale = session.localeIdentifier {
+                    FactRow(label: "Language", value: locale, isTechnical: true)
+                }
+                FactRow(label: "Transcript", value: Self.byteDescription(session.transcript.byteCount))
+                FactRow(label: "Audio", value: audioDescription)
+                FactRow(label: "Folder", value: DisplayPath.abbreviated(session.directory), isTechnical: true,
+                        truncatesMiddle: true)
             }
-            if let locale = session.localeIdentifier {
-                fact("Language", locale)
-            }
-            fact("Transcript", "\(session.transcript.byteCount) bytes")
-            fact("Audio", audioDescription)
-            fact("Folder", session.directory.path(percentEncoded: false), truncatesPath: true)
 
             if session.isLegacy {
                 Text("This meeting has no ScribeKit session record, so its start and end times, "
                      + "its identity and what it kept of its audio are not known. "
                      + "Its transcript is unaffected.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .textRole(.secondaryBody)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// A file size in the units the Finder uses.
+    ///
+    /// - Parameter count: The size in bytes.
+    /// - Returns: The description, such as `810 bytes` or `12.3 MB`.
+    private static func byteDescription(_ count: Int) -> String {
+        Int64(count).formatted(.byteCount(style: .file))
     }
 
     /// What the folder holds of the meeting's audio.
@@ -157,7 +242,7 @@ struct HistorySessionDetailView: View {
     /// difference.
     private var audioDescription: String {
         if let audio = session.audio {
-            return "\(audio.format.displayName) · \(audio.file.byteCount) bytes"
+            return "\(audio.format.displayName) · \(Self.byteDescription(audio.file.byteCount))"
         }
         if session.isMissingExpectedAudio {
             return "None in the folder, though the record says audio was being kept"
@@ -168,27 +253,6 @@ struct HistorySessionDetailView: View {
         return "None. This meeting kept only its transcript."
     }
 
-    private var actions: some View {
-        HStack {
-            Button("Show Transcript in Finder") {
-                model.showInFinder(session.transcriptURL)
-            }
-            .accessibilityHint("Reveal this meeting's transcript in the Finder")
-
-            Button("Open Transcript") {
-                model.openTranscript(session.transcriptURL)
-            }
-            .accessibilityHint("Open the transcript in your Markdown application. ScribeKit does not edit it.")
-
-            if let audio = session.audio {
-                Button("Show Audio in Finder") {
-                    model.showInFinder(audio.url)
-                }
-                .accessibilityHint("Reveal this meeting's audio file in the Finder")
-            }
-        }
-    }
-
     // MARK: - Review
 
     /// The passages this meeting flagged for a second listen.
@@ -197,41 +261,46 @@ struct HistorySessionDetailView: View {
     /// the recognised wording exactly as the transcript has it, says why the
     /// passage was flagged, and offers to play the audio around it. It never
     /// proposes a replacement, and there is no editor here or anywhere else.
+    ///
+    /// Emphasis follows priority: a high-priority passage is marked in the
+    /// warning colour, a low one carries no colour at all, and nothing here is
+    /// drawn as an error, because a passage worth another listen is not one.
     @ViewBuilder
     private var review: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Review")
-                .font(.headline)
+        let candidates = document.reviewCandidates
+        VStack(alignment: .leading, spacing: Spacing.medium) {
+            SectionHeading("Review") {
+                if !candidates.isEmpty, derived.isEditable {
+                    let indexes = candidates.map(\.candidate.spanIndex)
+                    Text("\(derived.reviewedCount(among: indexes)) of \(indexes.count) reviewed")
+                        .textRole(.metadata)
+                }
+            }
 
-            let candidates = document.reviewCandidates
             if document.review == nil {
                 Text("This meeting has no review information. ScribeKit records it while a meeting runs, "
                      + "so meetings recorded before that existed do not have any. The transcript is unaffected.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .textRole(.secondaryBody)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if candidates.isEmpty {
-                Text(noCandidatesDescription)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                StatusBadge(title: noCandidatesDescription, symbolName: "checkmark.circle", tone: .positive,
+                            role: .secondaryBody)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(reviewSummary(for: candidates.map(\.candidate.spanIndex)))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .textRole(.secondaryBody)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 ForEach(candidates, id: \.candidate.spanIndex) { pair in
                     candidateRow(pair.candidate, span: pair.span)
                 }
 
                 if let message = derived.failureMessage {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    NoticeView(tone: .warning, symbolName: "exclamationmark.triangle", message: message)
                 }
 
                 if let message = model.player.failureMessage {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    NoticeView(tone: .warning, symbolName: "exclamationmark.triangle", message: message)
                 }
             }
         }
@@ -261,27 +330,36 @@ struct HistorySessionDetailView: View {
     ///   - span: The span as the transcript wrote it.
     /// - Returns: The row view.
     private func candidateRow(_ candidate: TranscriptReviewCandidate, span: TranscriptSpan) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(candidate.priority.displayName)
-                        .font(.caption.weight(.semibold))
+        let reviewed = derived.isReviewed(spanIndex: candidate.spanIndex)
+        return VStack(alignment: .leading, spacing: Spacing.small) {
+            VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                    StatusBadge(
+                        title: "\(candidate.priority.displayName) Priority",
+                        symbolName: candidate.priority.symbolName,
+                        tone: candidate.priority.tone,
+                        role: .metadata
+                    )
                     Text(span.timestampDescription)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    Text(derived.isReviewed(spanIndex: candidate.spanIndex) ? "Reviewed" : "Needs Review")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .textRole(.timestamp)
+                    Spacer(minLength: Spacing.small)
+                    if reviewed {
+                        StatusBadge(title: "Reviewed", symbolName: "checkmark.circle.fill", tone: .positive)
+                    } else {
+                        Text("Needs Review")
+                            .textRole(.metadata)
+                    }
                 }
 
                 Text(span.text)
+                    .textRole(.body)
+                    .lineSpacing(LayoutMetrics.transcriptLineSpacing)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
 
                 ForEach(candidate.reasons, id: \.rawValue) { reason in
-                    Text(reason.explanation)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Label(reason.explanation, systemImage: reason.symbolName)
+                        .textRole(.secondaryBody)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,18 +367,23 @@ struct HistorySessionDetailView: View {
             .accessibilityAddTraits(.isStaticText)
             .accessibilityLabel(candidateDescription(candidate, span: span))
 
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.small) {
                 Button("Show in Transcript") {
                     model.reveal(spanIndex: candidate.spanIndex)
                     Task { @MainActor in focusedSpan = candidate.spanIndex }
                 }
-                .font(.caption)
                 .accessibilityHint("Move the transcript preview to this passage")
+
                 playbackControls(for: candidate)
+
+                Spacer(minLength: 0)
+
+                reviewedControl(for: candidate)
             }
-            reviewedControl(for: candidate)
+            .controlSize(.small)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Spacing.medium)
+        .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: CornerRadius.medium, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Flagged passage at \(span.timestampDescription)")
     }
@@ -320,7 +403,8 @@ struct HistorySessionDetailView: View {
         )
     }
 
-    /// How many of this meeting's flagged passages the user has dealt with.
+    /// How many passages were flagged, and — once — whether there is audio to
+    /// play for them.
     ///
     /// - Parameter spanIndexes: The span indexes the meeting has candidates
     ///   for.
@@ -329,8 +413,8 @@ struct HistorySessionDetailView: View {
         let count = spanIndexes.count
         let passages = "\(count) passage\(count == 1 ? "" : "s") worth a second listen, "
             + "in the order they were spoken."
-        guard derived.isEditable else { return passages }
-        return passages + " \(derived.reviewedCount(among: spanIndexes)) of \(count) marked reviewed."
+        guard session.audio == nil else { return passages }
+        return passages + " This meeting kept no recording, so there is no audio to play."
     }
 
     /// The control that records whether a passage has been dealt with.
@@ -348,11 +432,36 @@ struct HistorySessionDetailView: View {
             Button(reviewed ? "Mark Unreviewed" : "Mark Reviewed") {
                 Task { await derived.setReviewed(!reviewed, spanIndex: candidate.spanIndex) }
             }
-            .font(.caption)
             .disabled(derived.isSaving)
             .accessibilityHint(reviewed
                 ? "Record that this passage still needs a second listen"
                 : "Record that you have dealt with this passage")
+        }
+    }
+
+    /// The playback controls for one candidate. A meeting with no recording
+    /// has none, which the summary above says once rather than on every row.
+    ///
+    /// - Parameter candidate: The flagged span.
+    /// - Returns: The controls view.
+    @ViewBuilder
+    private func playbackControls(for candidate: TranscriptReviewCandidate) -> some View {
+        if session.audio != nil {
+            if model.player.loadedSpanIndex == candidate.spanIndex, model.player.isPlaying {
+                Button("Pause") { model.player.pause() }
+                Button("Stop") { model.stopPlayback() }
+            } else if model.player.loadedSpanIndex == candidate.spanIndex,
+                      case .paused = model.player.playback {
+                Button("Resume") { model.player.resume() }
+                Button("Stop") { model.stopPlayback() }
+            } else {
+                Button {
+                    Task { await model.play(candidate, of: session) }
+                } label: {
+                    Label("Play Audio", systemImage: "play.fill")
+                }
+                .accessibilityHint("Play the retained recording around this passage")
+            }
         }
     }
 
@@ -365,15 +474,13 @@ struct HistorySessionDetailView: View {
     /// and it never reaches `transcript.md`.
     @ViewBuilder
     private var notes: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Notes")
-                    .font(.headline)
-                Spacer()
+        VStack(alignment: .leading, spacing: Spacing.medium) {
+            SectionHeading("Notes") {
                 if derived.isEditable {
                     Button("Save") {
                         Task { await derived.saveNotes() }
                     }
+                    .controlSize(.small)
                     .disabled(derived.isSaving || !derived.hasUnsavedNotes)
                     .accessibilityHint("Write these notes beside the transcript. The transcript is unchanged.")
                 }
@@ -381,89 +488,68 @@ struct HistorySessionDetailView: View {
 
             switch derived.state {
             case let .refused(message), let .unsupported(message):
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                NoticeView(tone: .warning, symbolName: "exclamationmark.triangle", message: message)
             case .idle, .loading:
                 Text("Reading this meeting's notes…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .textRole(.secondaryBody)
             case .ready:
                 TextEditor(text: Bindable(derived).notesDraft)
-                    .font(.body.monospaced())
-                    .frame(minHeight: 120)
+                    .textRole(.editor)
+                    .scrollContentBackground(.hidden)
+                    .padding(Spacing.small)
+                    .frame(minHeight: LayoutMetrics.notesEditorMinHeight)
+                    .background(Color(nsColor: .textBackgroundColor),
+                                in: RoundedRectangle(cornerRadius: CornerRadius.medium, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: CornerRadius.medium, style: .continuous)
+                            .strokeBorder(Color(nsColor: .separatorColor))
+                    }
                     .accessibilityLabel("Notes about this meeting")
 
-                Text(derived.statusDescription)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                Text("Your notes are Markdown source, kept in this meeting's folder beside the "
-                     + "transcript and never written into it. They stay on this Mac. Unsaved text is "
-                     + "discarded if you select another meeting before saving.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                    Text(derived.statusDescription)
+                        .textRole(.metadata)
+                    Text("Your notes are Markdown source, kept in this meeting's folder beside the "
+                         + "transcript and never written into it. They stay on this Mac. Unsaved text is "
+                         + "discarded if you select another meeting before saving.")
+                        .textRole(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The playback controls for one candidate, or a sentence saying why there
-    /// are none.
-    ///
-    /// - Parameter candidate: The flagged span.
-    /// - Returns: The controls view.
-    @ViewBuilder
-    private func playbackControls(for candidate: TranscriptReviewCandidate) -> some View {
-        if session.audio == nil {
-            Text("This meeting kept no recording, so there is no audio to play.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } else {
-            HStack(spacing: 8) {
-                if model.player.loadedSpanIndex == candidate.spanIndex, model.player.isPlaying {
-                    Button("Pause") { model.player.pause() }
-                    Button("Stop") { model.stopPlayback() }
-                } else if model.player.loadedSpanIndex == candidate.spanIndex,
-                          case .paused = model.player.playback {
-                    Button("Resume") { model.player.resume() }
-                    Button("Stop") { model.stopPlayback() }
-                } else {
-                    Button("Play Audio") {
-                        Task { await model.play(candidate, of: session) }
-                    }
-                    .accessibilityHint("Play the retained recording around this passage")
-                }
-            }
-            .font(.caption)
-        }
-    }
+    // MARK: - Transcript
 
     @ViewBuilder
     private var preview: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Transcript")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: Spacing.medium) {
+            let window = TranscriptPreviewWindow.range(
+                count: document.spans.count,
+                anchor: model.previewAnchor,
+                limit: Self.previewSpanLimit
+            )
+            SectionHeading("Transcript") {
+                if window.count < document.spans.count {
+                    Text("Passages \(window.lowerBound + 1)–\(window.upperBound) of \(document.spans.count)")
+                        .textRole(.metadata)
+                }
+            }
 
             if document.spans.isEmpty {
                 Text("Nothing was transcribed in this meeting.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .textRole(.secondaryBody)
             } else {
-                let window = TranscriptPreviewWindow.range(
-                    count: document.spans.count,
-                    anchor: model.previewAnchor,
-                    limit: Self.previewSpanLimit
-                )
                 if window.count < document.spans.count {
-                    Text("Showing passages \(window.lowerBound + 1)–\(window.upperBound) of "
-                         + "\(document.spans.count). Find a phrase or open the transcript to reach the rest.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Text("Find a phrase or open the transcript to reach the rest.")
+                        .textRole(.secondaryBody)
                 }
 
-                ForEach(document.spans[window]) { span in
-                    spanRow(span)
+                LazyVStack(alignment: .leading, spacing: LayoutMetrics.transcriptPassageSpacing) {
+                    ForEach(document.spans[window]) { span in
+                        spanRow(span)
+                    }
                 }
             }
         }
@@ -478,11 +564,9 @@ struct HistorySessionDetailView: View {
     /// announced, so the preview moving is not something only a sighted user
     /// learns about.
     private var findBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "text.magnifyingglass")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            TextField("Find in transcript", text: Bindable(model).findQuery)
+        HStack(spacing: Spacing.small) {
+            TextField("Find in transcript", text: Bindable(model).findQuery,
+                      prompt: Text("Find in Transcript"))
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { step(forward: true) }
                 .onExitCommand { model.findQuery = "" }
@@ -491,30 +575,33 @@ struct HistorySessionDetailView: View {
 
             if model.find.isActive {
                 Text(model.find.positionDescription)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .textRole(.timestamp)
+                    .fixedSize()
                     .accessibilityLabel(model.find.accessibilityPosition)
             }
 
-            Button {
-                step(forward: false)
-            } label: {
-                Image(systemName: "chevron.up")
-            }
-            .keyboardShortcut("g", modifiers: [.command, .shift])
-            .help("Previous Match (⇧⌘G)")
-            .accessibilityLabel("Previous match")
-            .disabled(model.find.matches.isEmpty)
+            ControlGroup {
+                Button {
+                    step(forward: false)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .help("Previous Match (⇧⌘G)")
+                .accessibilityLabel("Previous match")
+                .disabled(model.find.matches.isEmpty)
 
-            Button {
-                step(forward: true)
-            } label: {
-                Image(systemName: "chevron.down")
+                Button {
+                    step(forward: true)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .keyboardShortcut("g", modifiers: .command)
+                .help("Next Match (⌘G)")
+                .accessibilityLabel("Next match")
+                .disabled(model.find.matches.isEmpty)
             }
-            .keyboardShortcut("g", modifiers: .command)
-            .help("Next Match (⌘G)")
-            .accessibilityLabel("Next match")
-            .disabled(model.find.matches.isEmpty)
+            .fixedSize()
         }
     }
 
@@ -533,23 +620,38 @@ struct HistorySessionDetailView: View {
 
     /// One span of the preview, with any find matches in it highlighted.
     ///
+    /// A passage revealed from Review is marked by a bar at its leading edge
+    /// as well as a tint, so it is found by shape and not only by colour, and
+    /// VoiceOver is moved to it.
+    ///
     /// - Parameter span: The span.
     /// - Returns: The row view.
     private func spanRow(_ span: TranscriptSpan) -> some View {
         let matches = model.find.matches(inSpan: span.index)
         let current = model.find.current.flatMap { $0.spanIndex == span.index ? $0 : nil }
         let isRevealed = model.revealedSpanIndex == span.index
-        return VStack(alignment: .leading, spacing: 2) {
-            Text(span.timestampDescription)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            Text(Self.highlighted(span.text, matches: matches, current: current))
-                .textSelection(.enabled)
+        return TranscriptPassageRow(
+            timestamp: span.timestampDescription,
+            text: Self.highlighted(span.text, matches: matches, current: current),
+            timestampWidth: LayoutMetrics.clockColumnWidth
+        )
+        .padding(.vertical, Spacing.xSmall)
+        .padding(.horizontal, Spacing.small)
+        .background {
+            if isRevealed {
+                RoundedRectangle(cornerRadius: CornerRadius.small, style: .continuous)
+                    .fill(Color.accentColor.opacity(TintOpacity.revealedPassage))
+            }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isRevealed ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .leading) {
+            if isRevealed {
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: 3)
+                    .padding(.vertical, Spacing.xSmall)
+            }
+        }
+        .padding(.horizontal, -Spacing.small)
         .id(Self.rowID(span.index))
         .accessibilityElement(children: .combine)
         .accessibilityValue(Self.matchAccessibilityValue(matchCount: matches.count, hasCurrent: current != nil))
@@ -596,27 +698,10 @@ struct HistorySessionDetailView: View {
                 attributed[start..<end].foregroundColor = .black
                 attributed[start..<end].inlinePresentationIntent = .stronglyEmphasized
             } else {
-                attributed[start..<end].backgroundColor = Color.accentColor.opacity(0.25)
+                attributed[start..<end].backgroundColor = Color(nsColor: .findHighlightColor)
+                    .opacity(TintOpacity.findMatch)
             }
         }
         return attributed
-    }
-
-    /// One labelled fact about the meeting.
-    ///
-    /// - Parameters:
-    ///   - label: What the value is.
-    ///   - value: The value itself.
-    ///   - truncatesPath: Whether to truncate in the middle, as a path should.
-    /// - Returns: The row view.
-    private func fact(_ label: String, _ value: String, truncatesPath: Bool = false) -> some View {
-        LabeledContent(label) {
-            Text(value)
-                .lineLimit(truncatesPath ? 1 : nil)
-                .truncationMode(truncatesPath ? .middle : .tail)
-                .textSelection(.enabled)
-        }
-        .accessibilityLabel(label)
-        .accessibilityValue(value)
     }
 }

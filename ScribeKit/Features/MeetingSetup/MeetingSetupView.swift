@@ -79,29 +79,12 @@ struct MeetingSetupView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            captureModePicker
-            Form {
-                readinessSection
-                if runtime.outcome != nil { outcomeSection }
-                if recovery.isVisible { recoverySection }
-                meetingSection
-                switch captureMode {
-                case .applications: sourcesSection
-                case .microphone: microphoneSection
-                }
-                captureSection
-                transcriptSection
-                transcriptFileSection
-                if captureMode == .applications { audioRetentionSection }
-                destinationSection
+        Group {
+            switch layout {
+            case .setup: setup
+            case .session: MeetingSessionView(runtime: runtime, diagnostics: diagnostics)
             }
-            .formStyle(.grouped)
-            footer
         }
-        .padding(20)
-        .frame(minWidth: 460, minHeight: 520)
         .task {
             destination.restore()
             await checkForUnfinishedSessions()
@@ -132,6 +115,40 @@ struct MeetingSetupView: View {
                 destination.choose(url)
                 Task { await checkForUnfinishedSessions() }
             }
+        }
+    }
+
+    /// Which arrangement the screen shows, derived from the runtime.
+    private var layout: MeetingScreenLayout {
+        MeetingScreenLayout(isRunning: runtime.isRunning, outcome: runtime.outcome?.category)
+    }
+
+
+    /// The form that configures the next meeting, in the order the choices
+    /// are made: where the audio comes from, anything that still stops a
+    /// start, the meeting itself, then where its files go.
+    private var setup: some View {
+        VStack(spacing: 0) {
+            Form {
+                lastAttemptSection
+                sourceSection
+                readinessSection
+                if recovery.isVisible { recoverySection }
+                meetingSection
+                if captureMode == .applications { audioRetentionSection }
+                destinationSection
+            }
+            .formStyle(.grouped)
+            .frame(maxWidth: LayoutMetrics.formMaxWidth)
+            .frame(maxWidth: .infinity)
+
+            Divider()
+
+            footer
+                .frame(maxWidth: LayoutMetrics.formMaxWidth - 2 * Spacing.xLarge)
+                .padding(.horizontal, Spacing.xLarge)
+                .padding(.vertical, Spacing.medium)
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -171,124 +188,298 @@ struct MeetingSetupView: View {
         }
     }
 
-    /// What ScribeKit found from a previous launch, and the two things the
-    /// user can do about it.
+    // MARK: - Last attempt
+
+    /// A start that failed, reported where it can be corrected.
     ///
-    /// Neither action resumes anything. The transcript is already on disk with
-    /// everything that reached it; recovery's job is to say so, confirm it is
-    /// readable, and close the record honestly.
+    /// A meeting that captured something is shown as a finished session with
+    /// its transcript. One that never started has nothing to show but the
+    /// reason, and the reason is usually a setting on this form, so it is
+    /// stated at the top of it. A failure the runtime reports before a meeting
+    /// is recorded at all — a capture that could not be prepared — is stated
+    /// the same way.
     @ViewBuilder
-    private var recoverySection: some View {
-        Section("Previous Meetings") {
-            if case .checking = recovery.state {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Checking the save folder…").foregroundStyle(.secondary)
+    private var lastAttemptSection: some View {
+        if let outcome = runtime.outcome, outcome.category == .startFailure {
+            Section {
+                NoticeView(
+                    tone: .critical,
+                    symbolName: "exclamationmark.triangle",
+                    title: outcome.headline,
+                    message: [outcome.meaning, outcome.nextStep, outcome.detail]
+                        .compactMap { $0 }
+                        .joined(separator: " ")
+                ) {
+                    HStack(spacing: Spacing.small) {
+                        if let layout = runtime.persistenceState.layout {
+                            Button("Show in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([layout.transcriptURL])
+                            }
+                            .accessibilityHint("Reveal this meeting's transcript in the Finder")
+                        }
+                        Button("Dismiss") { runtime.dismissOutcome() }
+                            .accessibilityHint("Hide this summary; nothing on disk changes")
+                        // Secondary, and deliberately last: the sentences above
+                        // already say what happened and what to do.
+                        Button("Export Diagnostics…") { diagnostics.export() }
+                            .accessibilityHint(
+                                "Save a technical report about this Mac and this meeting. "
+                                    + "It contains no transcript text or audio."
+                            )
+                    }
                 }
+                .accessibilityLabel("Last meeting")
+                .accessibilityValue(outcome.accessibilityDescription)
             }
-
-            if case let .unavailable(message) = recovery.state {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Unfinished meeting check failed. \(message)")
-            }
-
-            ForEach(recovery.candidates) { candidate in
-                candidateRow(for: candidate)
-            }
-
-            ForEach(recovery.problems) { problem in
-                Label(
-                    "\(problem.name): \(problem.error.errorDescription ?? "")",
-                    systemImage: "exclamationmark.triangle"
+        } else if runtime.outcome == nil, let message = runtime.status.failureMessage {
+            Section {
+                NoticeView(
+                    tone: .critical,
+                    symbolName: "exclamationmark.triangle",
+                    title: "The meeting did not start",
+                    message: message
                 )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Damaged session record. \(problem.name). "
-                                    + (problem.error.errorDescription ?? ""))
-            }
-
-            if let message = recovery.actionMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if recovery.hasFindings {
-                Text("ScribeKit does not resume a meeting it did not finish. "
-                     + "Nothing is recorded again, and no transcript is deleted or rewritten.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
     }
 
-    /// One unfinished meeting, stated in terms of what is actually known.
-    ///
-    /// The times shown are the meeting's start, which its record holds, and
-    /// when the transcript was last written, which the filesystem holds. When
-    /// ScribeKit stopped is not shown, because nothing measured it.
-    ///
-    /// - Parameter candidate: The unfinished session.
-    /// - Returns: The row view.
-    private func candidateRow(for candidate: SessionRecoveryCandidate) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("\(candidate.metadata.title) did not finish")
-                .font(.headline)
-            Text("Started \(candidate.metadata.startedAt.formatted(date: .abbreviated, time: .shortened))")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            if candidate.metadata.wasPausedWhenInterrupted, let pausedAt = candidate.metadata.pausedAt {
-                Text("This meeting was paused at "
-                     + "\(pausedAt.formatted(date: .omitted, time: .standard)) and ScribeKit stopped before it "
-                     + "was resumed or finished. Nothing was captured after the pause.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            if let modified = candidate.transcript.modifiedAt {
-                Text("Transcript last written \(modified.formatted(date: .abbreviated, time: .shortened))"
-                     + " · \(candidate.transcript.byteCount) bytes")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            if let audio = candidate.retainedAudio, let url = candidate.retainedAudioURL {
-                Text("Audio \(url.lastPathComponent) · \(audio.byteCount) bytes. "
-                     + "It was still being written, so whether it plays depends on how far it got.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Text(candidate.transcriptURL.path(percentEncoded: false))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+    // MARK: - Source
 
+    /// Where the next meeting's audio comes from, and exactly what that is.
+    ///
+    /// The mode and the source it selects are one section, so App Audio and
+    /// Microphone read as two answers to one question rather than two forms.
+    /// The mode is fixed while a meeting runs; this form is not shown then.
+    private var sourceSection: some View {
+        Section {
+            captureModePicker
+
+            switch captureMode {
+            case .applications: applicationRows
+            case .microphone: microphoneRows
+            }
+        } header: {
             HStack {
-                Button("Show in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([candidate.transcriptURL])
+                Text("Source")
+                Spacer()
+                if captureMode == .applications {
+                    Button {
+                        Task { await sources.refresh() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .controlSize(.small)
+                    .disabled(sources.isDiscovering)
+                    .accessibilityHint("Look for running applications again")
                 }
-                .accessibilityHint("Reveal this meeting's transcript in the Finder")
-
-                Button("Mark as Interrupted") {
-                    Task { await recovery.recordInterruption(for: candidate) }
-                }
-                .disabled(!runtime.allowsRecovery)
-                .accessibilityHint("Record the interruption in this meeting's transcript and session record")
-
-                Button("Dismiss") { recovery.dismiss(candidate) }
-                    .accessibilityHint("Hide this until the next launch, changing nothing on disk")
             }
+        } footer: {
+            Text(sourceExplanation)
+                .textRole(.secondaryBody)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 
-            if !runtime.allowsRecovery {
-                Text("Available once the current meeting has finished.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+    /// The choice between App Audio and Microphone.
+    private var captureModePicker: some View {
+        Picker("Transcribe from", selection: $captureMode) {
+            ForEach(CaptureMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .contain)
+        .pickerStyle(.segmented)
+        .disabled(runtime.isRunning)
+        .accessibilityLabel("Transcribe from")
+        .accessibilityHint(
+            "Choose whether the next meeting transcribes the selected applications or the microphone"
+        )
     }
+
+    /// What the chosen mode listens to, and what it keeps.
+    private var sourceExplanation: String {
+        switch captureMode {
+        case .applications:
+            "App Audio transcribes the sound the applications you select are playing."
+        case .microphone:
+            "Microphone transcribes what the Mac's microphone hears, while you use any other app. "
+            + "ScribeKit listens to the input chosen here only while a Microphone meeting runs and leaves "
+            + "the Mac's own input setting alone; System Default means the Mac's input when the meeting "
+            + "starts. A meeting keeps its microphone until it ends — if that microphone is disconnected, "
+            + "the meeting ends and its transcript is kept. No audio is saved and nothing is sent anywhere."
+        }
+    }
+
+    /// The applications App Audio can capture, each with a checkbox.
+    @ViewBuilder
+    private var applicationRows: some View {
+        switch sources.discoveryState {
+        case .idle, .loading:
+            HStack(spacing: Spacing.small) {
+                ProgressView().controlSize(.small)
+                Text("Looking for applications…")
+                    .textRole(.secondaryBody)
+            }
+        case let .loaded(discovered) where discovered.isEmpty:
+            Text("No applications are available to capture.")
+                .textRole(.secondaryBody)
+        case let .loaded(discovered):
+            ForEach(discovered) { source in
+                sourceRow(for: source)
+            }
+            selectionSummary
+        case let .accessUnavailable(message):
+            StatusBadge(title: message, symbolName: "lock", tone: .warning, role: .secondaryBody)
+                .accessibilityLabel("Screen and System Audio Recording access unavailable. \(message)")
+        case let .failed(message):
+            StatusBadge(title: message, symbolName: "exclamationmark.triangle", tone: .warning, role: .secondaryBody)
+                .accessibilityLabel("Application discovery failed. \(message)")
+        }
+
+        if !sources.unavailableSelectionNames.isEmpty {
+            StatusBadge(
+                title: "No longer running, so removed from your selection: "
+                    + sources.unavailableSelectionNames.formatted(.list(type: .and)),
+                symbolName: "info.circle",
+                tone: .attention,
+                role: .secondaryBody
+            )
+        }
+    }
+
+    /// A selectable row for one discovered application.
+    ///
+    /// A checkbox carries the selection state, so it is exposed to
+    /// accessibility and visible without relying on colour. The application's
+    /// own icon makes the list scannable the way the Dock and the Finder are.
+    ///
+    /// - Parameter source: The application to present.
+    /// - Returns: The row view.
+    private func sourceRow(for source: CaptureSource) -> some View {
+        Toggle(isOn: Binding(
+            get: { sources.isSelected(source) },
+            set: { sources.setSelection($0, for: source) }
+        )) {
+            HStack(spacing: Spacing.small) {
+                ApplicationIcon(source: source)
+                Text(source.displayName)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .disabled(runtime.isRunning)
+        .accessibilityLabel(source.displayName)
+        .accessibilityHint("Include this application as a meeting audio source")
+    }
+
+    private var selectionSummary: some View {
+        Text(sources.selectedSources.isEmpty
+             ? "No applications selected."
+             : "\(sources.selectedSources.count) selected: "
+               + sources.selectedSources.map(\.displayName).formatted(.list(type: .and)))
+            .textRole(.metadata)
+    }
+
+    /// The microphone a Microphone meeting listens to, and whether it may.
+    ///
+    /// The picker lists the inputs the Mac offers now, with System Default
+    /// first and named for the device it stands for. A remembered device that
+    /// is not connected stays in the list, marked as such and not selectable
+    /// again, so the fallback to System Default is visible rather than silent.
+    @ViewBuilder
+    private var microphoneRows: some View {
+        microphonePicker
+
+        LabeledContent("Access") {
+            StatusBadge(
+                title: microphoneAccessDescription,
+                symbolName: microphoneAccessSymbol,
+                tone: microphoneAccessTone,
+                role: .body
+            )
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Microphone access")
+        .accessibilityValue(microphoneAccessDescription)
+    }
+
+    /// The choice of input for the next Microphone meeting.
+    @ViewBuilder
+    private var microphonePicker: some View {
+        if microphone.readiness == .notChecked {
+            LabeledContent("Input") {
+                Text("Checking…")
+                    .textRole(.secondaryBody)
+            }
+        } else {
+            Picker("Input", selection: Binding(
+                get: { microphone.selection.pickerID },
+                set: { id in
+                    if let option = microphoneOptions.first(where: { $0.selection.pickerID == id }) {
+                        microphone.select(option.selection)
+                    }
+                }
+            )) {
+                ForEach(microphoneOptions, id: \.selection.pickerID) { option in
+                    Text(option.label)
+                        .tag(option.selection.pickerID)
+                        .selectionDisabled(!option.isAvailable)
+                }
+            }
+            .disabled(runtime.isRunning)
+            .accessibilityLabel("Microphone input")
+            .accessibilityHint("Choose the microphone the next meeting listens to. The Mac's own setting is unchanged.")
+        }
+    }
+
+    /// The rows the microphone picker offers.
+    ///
+    /// System Default, each connected input, and — only when the remembered
+    /// choice is not connected — that choice, so the picker still shows what
+    /// was selected.
+    private var microphoneOptions: [(selection: MicrophoneSelection, label: String, isAvailable: Bool)] {
+        let defaultName = microphone.catalog.defaultInput?.name
+        var options: [(selection: MicrophoneSelection, label: String, isAvailable: Bool)] = [(
+            .systemDefault,
+            defaultName.map { "System Default — \($0)" } ?? "System Default (no input)",
+            true
+        )]
+        options += microphone.catalog.devices.map { (.device($0), $0.name, true) }
+        if let missing = microphone.choice?.unavailableSelection {
+            options.append((.device(missing), "\(missing.name) (not connected)", false))
+        }
+        return options
+    }
+
+    /// What macOS says about microphone access, in words.
+    private var microphoneAccessDescription: String {
+        switch microphone.authorization {
+        case nil: "Checking…"
+        case .notDetermined?: "Not asked yet. macOS asks when you start."
+        case .authorized?: "Allowed"
+        case .denied?: "Turned off in System Settings › Privacy & Security › Microphone."
+        case .restricted?: "Restricted on this Mac."
+        }
+    }
+
+    /// The symbol drawn beside ``microphoneAccessDescription``.
+    private var microphoneAccessSymbol: String {
+        switch microphone.authorization {
+        case nil, .notDetermined?: "questionmark.circle"
+        case .authorized?: "checkmark.circle"
+        case .denied?, .restricted?: "exclamationmark.triangle"
+        }
+    }
+
+    /// The tone of ``microphoneAccessDescription``.
+    private var microphoneAccessTone: StatusTone {
+        switch microphone.authorization {
+        case nil, .notDetermined?: .neutral
+        case .authorized?: .positive
+        case .denied?, .restricted?: .warning
+        }
+    }
+
+    // MARK: - Readiness
 
     /// Whether a meeting can be started right now, and why not when it cannot.
     ///
@@ -326,16 +517,21 @@ struct MeetingSetupView: View {
         )
     }
 
-    /// What a first-time user needs before they can start, in one place.
+    /// The prerequisites that still need something, in one place.
     ///
-    /// Four compact rows rather than a wizard: everything below configures the
-    /// same four prerequisites in detail, and this says at a glance which of
-    /// them are satisfied. Each row states its status in words as well as an
-    /// icon, so nothing depends on colour.
+    /// Only rows that are not yet satisfied are listed: a prerequisite that is
+    /// met is stated where it is configured — the folder in Save Location, the
+    /// input in Source — and by the footer saying the meeting is ready. When
+    /// everything is met the section is not shown at all. Each row states its
+    /// status in words as well as an icon, so nothing depends on colour.
+    @ViewBuilder
     private var readinessSection: some View {
-        Section("Before You Start") {
-            ForEach(readiness.rows) { row in
-                readinessRow(row)
+        let rows = readiness.rows.filter { $0.status != .satisfied }
+        if !rows.isEmpty {
+            Section("Before You Start") {
+                ForEach(rows) { row in
+                    readinessRow(row)
+                }
             }
         }
     }
@@ -346,20 +542,19 @@ struct MeetingSetupView: View {
     /// - Returns: The row view.
     @ViewBuilder
     private func readinessRow(_ row: MeetingStartReadiness.Row) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Label(row.status.label, systemImage: row.status.symbolName)
-                        .labelStyle(.iconOnly)
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+            Image(systemName: row.status.symbolName)
+                .foregroundStyle(row.status.tone.color)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Spacing.hairline) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
                     Text(row.title)
-                        .font(.headline)
+                        .textRole(.emphasizedBody)
                     Text(row.status.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .textRole(.metadata)
                 }
                 Text(row.detail)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .textRole(.secondaryBody)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -402,64 +597,6 @@ struct MeetingSetupView: View {
         }
     }
 
-    /// What the meeting that ended means for its files, and what to do next.
-    ///
-    /// Shown inline rather than as an alert: it describes something that has
-    /// already finished, the artifacts it names are still there, and an alert
-    /// would have to be dismissed before the folder it points at could be
-    /// opened. A finished meeting and a failed one use the same panel, so
-    /// nothing has to decide which shape of announcement an ending deserves.
-    @ViewBuilder
-    private var outcomeSection: some View {
-        if let outcome = runtime.outcome {
-            Section("Last Meeting") {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(
-                        outcome.headline,
-                        systemImage: outcome.isFailure ? "exclamationmark.triangle" : "checkmark.circle"
-                    )
-                    .font(.headline)
-                    Text(outcome.meaning)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text(outcome.nextStep)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    if let detail = outcome.detail {
-                        Text(detail)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        if let layout = runtime.persistenceState.layout {
-                            Button("Show in Finder") {
-                                NSWorkspace.shared.activateFileViewerSelecting([layout.transcriptURL])
-                            }
-                            .accessibilityHint("Reveal this meeting's transcript in the Finder")
-                        }
-                        Button("Dismiss") { runtime.dismissOutcome() }
-                            .accessibilityHint("Hide this summary; nothing on disk changes")
-                        if outcome.isFailure {
-                            // Secondary, and deliberately last: the sentences
-                            // above already say what happened and what to do,
-                            // and a report is for the conversation that starts
-                            // when following them did not work.
-                            Button("Export Diagnostics…") { diagnostics.export() }
-                                .accessibilityHint(
-                                    "Save a technical report about this Mac and this meeting. "
-                                        + "It contains no transcript text or audio."
-                                )
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Last meeting")
-                .accessibilityValue(outcome.accessibilityDescription)
-            }
-        }
-    }
-
     /// The control that resolves a microphone prerequisite.
     ///
     /// Asking for access is offered only while macOS has never been asked,
@@ -482,347 +619,310 @@ struct MeetingSetupView: View {
         }
     }
 
-    /// Where the next meeting's audio comes from.
+    // MARK: - Recovery
+
+    /// What ScribeKit found from a previous launch, and the two things the
+    /// user can do about it.
     ///
-    /// One choice at the top of the screen rather than a setting further
-    /// down, because it decides what the rest of the screen asks for. Fixed
-    /// while a meeting runs: the running meeting keeps the source it started
-    /// with, and a meeting never captures both.
-    private var captureModePicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Picker("Transcribe from", selection: $captureMode) {
-                ForEach(CaptureMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
+    /// Neither action resumes anything. The transcript is already on disk with
+    /// everything that reached it; recovery's job is to say so, confirm it is
+    /// readable, and close the record honestly.
+    @ViewBuilder
+    private var recoverySection: some View {
+        Section {
+            if case .checking = recovery.state {
+                HStack(spacing: Spacing.small) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking the save folder…")
+                        .textRole(.secondaryBody)
                 }
             }
-            .pickerStyle(.segmented)
-            .disabled(runtime.isRunning)
-            .accessibilityLabel("Transcribe from")
-            .accessibilityHint(
-                "Choose whether the next meeting transcribes the selected applications or the microphone"
-            )
 
-            Text(captureModeExplanation)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if case let .unavailable(message) = recovery.state {
+                StatusBadge(title: message, symbolName: "exclamationmark.triangle", tone: .warning,
+                            role: .secondaryBody)
+                    .accessibilityLabel("Unfinished meeting check failed. \(message)")
+            }
+
+            ForEach(recovery.candidates) { candidate in
+                candidateRow(for: candidate)
+            }
+
+            ForEach(recovery.problems) { problem in
+                StatusBadge(
+                    title: "\(problem.name): \(problem.error.errorDescription ?? "")",
+                    symbolName: "exclamationmark.triangle",
+                    tone: .warning,
+                    role: .secondaryBody
+                )
+                .accessibilityLabel("Damaged session record. \(problem.name). "
+                                    + (problem.error.errorDescription ?? ""))
+            }
+
+            if let message = recovery.actionMessage {
+                Text(message)
+                    .textRole(.secondaryBody)
+            }
+        } header: {
+            Text("Previous Meetings")
+        } footer: {
+            if recovery.hasFindings {
+                Text("ScribeKit does not resume a meeting it did not finish. "
+                     + "Nothing is recorded again, and no transcript is deleted or rewritten.")
+                    .textRole(.secondaryBody)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
-    /// What the chosen mode listens to, in one sentence.
-    private var captureModeExplanation: String {
-        switch captureMode {
-        case .applications:
-            "App Audio transcribes the sound the applications you select are playing."
-        case .microphone:
-            "Microphone transcribes what the Mac's microphone hears, while you use any other app. "
-            + "Only the transcript is saved."
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("ScribeKit")
-                .font(.largeTitle.weight(.semibold))
-            Text("Local-first meeting transcription for macOS.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// The meeting being configured, and the one that is running.
+    /// One unfinished meeting, stated in terms of what is actually known.
     ///
-    /// The title field configures the *next* meeting. A running meeting keeps
-    /// the title it was started with — it is already in the transcript header
-    /// — so the field is disabled while one runs and the running meeting is
-    /// named separately, rather than letting one text field appear to be two
-    /// different things.
+    /// The times shown are the meeting's start, which its record holds, and
+    /// when the transcript was last written, which the filesystem holds. When
+    /// ScribeKit stopped is not shown, because nothing measured it.
+    ///
+    /// - Parameter candidate: The unfinished session.
+    /// - Returns: The row view.
+    private func candidateRow(for candidate: SessionRecoveryCandidate) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xSmall) {
+            StatusBadge(
+                title: "\(candidate.metadata.title) did not finish",
+                symbolName: HistorySessionStatus.interrupted.symbolName,
+                tone: .warning,
+                role: .groupTitle
+            )
+            Text("Started \(candidate.metadata.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                .textRole(.metadata)
+            if candidate.metadata.wasPausedWhenInterrupted, let pausedAt = candidate.metadata.pausedAt {
+                Text("This meeting was paused at "
+                     + "\(pausedAt.formatted(date: .omitted, time: .standard)) and ScribeKit stopped before it "
+                     + "was resumed or finished. Nothing was captured after the pause.")
+                    .textRole(.secondaryBody)
+            }
+            if let modified = candidate.transcript.modifiedAt {
+                Text("Transcript last written \(modified.formatted(date: .abbreviated, time: .shortened))"
+                     + " · \(candidate.transcript.byteCount) bytes")
+                    .textRole(.secondaryBody)
+            }
+            if let audio = candidate.retainedAudio, let url = candidate.retainedAudioURL {
+                Text("Audio \(url.lastPathComponent) · \(audio.byteCount) bytes. "
+                     + "It was still being written, so whether it plays depends on how far it got.")
+                    .textRole(.secondaryBody)
+            }
+            Text(DisplayPath.abbreviated(candidate.transcriptURL))
+                .textRole(.technical)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            HStack(spacing: Spacing.small) {
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([candidate.transcriptURL])
+                }
+                .accessibilityHint("Reveal this meeting's transcript in the Finder")
+
+                Button("Mark as Interrupted") {
+                    Task { await recovery.recordInterruption(for: candidate) }
+                }
+                .disabled(!runtime.allowsRecovery)
+                .accessibilityHint("Record the interruption in this meeting's transcript and session record")
+
+                Button("Dismiss") { recovery.dismiss(candidate) }
+                    .accessibilityHint("Hide this until the next launch, changing nothing on disk")
+            }
+            .padding(.top, Spacing.xSmall)
+
+            if !runtime.allowsRecovery {
+                Text("Available once the current meeting has finished.")
+                    .textRole(.secondaryBody)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, Spacing.xSmall)
+        .accessibilityElement(children: .contain)
+    }
+
+    // MARK: - Meeting
+
+    /// What the next meeting is called and which language it is recognised in.
+    ///
+    /// Both are copied when the meeting starts and fixed for its run, so they
+    /// configure the next meeting and never the one that is running.
     private var meetingSection: some View {
         Section("Meeting") {
             TextField("Title", text: $title, prompt: Text(MeetingSession.untitledPlaceholder))
                 .disabled(runtime.isRunning)
                 .accessibilityLabel("Meeting title")
 
-            RunningMeetingLabel(runtime: runtime)
+            localePicker
         }
     }
 
-    private var sourcesSection: some View {
-        Section {
-            switch sources.discoveryState {
-            case .idle, .loading:
-                LabeledContent("Applications") {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("Looking for applications…")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            case let .loaded(discovered) where discovered.isEmpty:
-                Text("No applications are available to capture.")
-                    .foregroundStyle(.secondary)
-            case let .loaded(discovered):
-                ForEach(discovered) { source in
-                    sourceRow(for: source)
-                }
-                selectionSummary
-            case let .accessUnavailable(message):
-                Label(message, systemImage: "lock")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Screen and System Audio Recording access unavailable. \(message)")
-            case let .failed(message):
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Application discovery failed. \(message)")
-            }
-
-            if !sources.unavailableSelectionNames.isEmpty {
-                Text("No longer running, so removed from your selection: "
-                     + sources.unavailableSelectionNames.formatted(.list(type: .and)))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("Selected applications are the ones audio capture records.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        } header: {
-            HStack {
-                Text("Audio Sources")
-                Spacer()
-                Button("Refresh") {
-                    Task { await sources.refresh() }
-                }
-                .disabled(sources.isDiscovering)
-                .accessibilityHint("Look for running applications again")
-            }
-        }
-    }
-
-    /// A selectable row for one discovered application.
+    /// The recognition language, chosen explicitly and fixed for a run.
     ///
-    /// A checkbox carries the selection state, so it is exposed to
-    /// accessibility and visible without relying on colour.
-    ///
-    /// - Parameter source: The application to present.
-    /// - Returns: The row view.
-    private func sourceRow(for source: CaptureSource) -> some View {
-        Toggle(source.displayName, isOn: Binding(
-            get: { sources.isSelected(source) },
-            set: { sources.setSelection($0, for: source) }
-        ))
-        .toggleStyle(.checkbox)
-        .disabled(runtime.isRunning)
-        .accessibilityHint("Include this application as a meeting audio source")
-    }
-
-    private var selectionSummary: some View {
-        Text(sources.selectedSources.isEmpty
-             ? "No applications selected."
-             : "\(sources.selectedSources.count) selected: "
-               + sources.selectedSources.map(\.displayName).formatted(.list(type: .and)))
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-    }
-
-    /// The microphone a Microphone meeting listens to, and whether it may.
-    ///
-    /// The picker lists the inputs the Mac offers now, with System Default
-    /// first and named for the device it stands for. A remembered device that
-    /// is not connected stays in the list, marked as such and not selectable
-    /// again, so the fallback to System Default is visible rather than silent.
-    /// While a Microphone meeting runs the section names the input that
-    /// meeting is bound to instead: it cannot be changed mid-meeting.
-    private var microphoneSection: some View {
-        Section("Microphone") {
-            if isMicrophoneMeetingRunning {
-                LabeledContent("Input") {
-                    Text(microphoneInputDescription)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Microphone input")
-                .accessibilityValue("\(microphoneInputDescription), in use by the running meeting")
-            } else {
-                microphonePicker
-            }
-
-            LabeledContent("Access") {
-                Text(microphoneAccessDescription)
-                    .foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Microphone access")
-            .accessibilityValue(microphoneAccessDescription)
-
-            Text("ScribeKit listens to the input chosen here and leaves the Mac's own input setting alone. "
-                 + "System Default means the Mac's input when the meeting starts. A meeting keeps its "
-                 + "microphone until it ends: ScribeKit never switches microphones during a meeting, and if "
-                 + "that microphone is disconnected, the meeting ends and its transcript is kept.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Text("The microphone is listened to only while a Microphone meeting is running, and only to "
-                 + "transcribe it on this Mac. No audio is saved and nothing is sent anywhere.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    /// The choice of input for the next Microphone meeting.
+    /// Only locales whose on-device model is installed can be selected;
+    /// supported but uninstalled ones are listed and disabled, so the reason a
+    /// language is unavailable is visible rather than implied by its absence.
     @ViewBuilder
-    private var microphonePicker: some View {
-        if microphone.readiness == .notChecked {
-            LabeledContent("Input") {
-                Text("Checking…")
-                    .foregroundStyle(.secondary)
+    private var localePicker: some View {
+        if runtime.availableLocales.isEmpty {
+            LabeledContent("Language") {
+                Text("No recognition languages are available.")
+                    .textRole(.secondaryBody)
             }
         } else {
-            Picker("Input", selection: Binding(
-                get: { microphone.selection.pickerID },
-                set: { id in
-                    if let option = microphoneOptions.first(where: { $0.selection.pickerID == id }) {
-                        microphone.select(option.selection)
-                    }
-                }
+            Picker("Language", selection: Binding(
+                get: { runtime.localeIdentifier },
+                set: { identifier in Task { await runtime.selectLocale(identifier) } }
             )) {
-                ForEach(microphoneOptions, id: \.selection.pickerID) { option in
-                    Text(option.label)
-                        .tag(option.selection.pickerID)
-                        .selectionDisabled(!option.isAvailable)
+                ForEach(runtime.availableLocales) { locale in
+                    Text(locale.isInstalled ? locale.displayName : "\(locale.displayName) (not installed)")
+                        .tag(locale.id)
                 }
             }
             .disabled(runtime.isRunning)
-            .accessibilityLabel("Microphone input")
-            .accessibilityHint("Choose the microphone the next meeting listens to. The Mac's own setting is unchanged.")
+            .accessibilityLabel("Recognition language")
+
+            if let message = runtime.availability.message {
+                Text(message)
+                    .textRole(.secondaryBody)
+            }
+
+            if !runtime.availability.canTranscribe {
+                Button("Check Again") { Task { await runtime.prepare() } }
+                    .disabled(runtime.isRunning)
+                    .accessibilityHint("Check which speech models are installed again")
+            }
         }
     }
 
-    /// The rows the microphone picker offers.
+    // MARK: - Audio retention
+
+    /// What an App Audio meeting keeps of its audio.
     ///
-    /// System Default, each connected input, and — only when the remembered
-    /// choice is not connected — that choice, so the picker still shows what
-    /// was selected.
-    private var microphoneOptions: [(selection: MicrophoneSelection, label: String, isAvailable: Bool)] {
-        let defaultName = microphone.catalog.defaultInput?.name
-        var options: [(selection: MicrophoneSelection, label: String, isAvailable: Bool)] = [(
-            .systemDefault,
-            defaultName.map { "System Default — \($0)" } ?? "System Default (no input)",
-            true
-        )]
-        options += microphone.catalog.devices.map { (.device($0), $0.name, true) }
-        if let missing = microphone.choice?.unavailableSelection {
-            options.append((.device(missing), "\(missing.name) (not connected)", false))
-        }
-        return options
-    }
-
-    /// Whether the meeting running now is a Microphone meeting.
-    private var isMicrophoneMeetingRunning: Bool {
-        runtime.isRunning && runtime.meeting?.captureMode == .microphone
-    }
-
-    /// The input the running Microphone meeting is bound to.
-    ///
-    /// A running meeting names the input it started with, not whatever the
-    /// setup screen would choose now.
-    private var microphoneInputDescription: String {
-        runtime.meeting?.sources.first?.displayName ?? "Microphone"
-    }
-
-    /// What macOS says about microphone access, in words.
-    private var microphoneAccessDescription: String {
-        switch microphone.authorization {
-        case nil: "Checking…"
-        case .notDetermined?: "Not asked yet. macOS asks when you start."
-        case .authorized?: "Allowed."
-        case .denied?: "Turned off in System Settings › Privacy & Security › Microphone."
-        case .restricted?: "Restricted on this Mac."
+    /// The choice is fixed for a run. A Microphone meeting keeps no audio
+    /// whatever this says, so the section is shown for App Audio only.
+    private var audioRetentionSection: some View {
+        Section {
+            Picker("Keep audio", selection: $audioRetention) {
+                ForEach(AudioRetentionMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .disabled(runtime.isRunning)
+            .accessibilityLabel("Audio retention mode")
+        } header: {
+            Text("Recording")
+        } footer: {
+            Text(audioRetentionExplanation)
+                .textRole(.secondaryBody)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var captureSection: some View {
-        Section("Capture & Transcription") {
-            LabeledContent("Audio") {
-                Text(captureStatusDescription)
-                    .foregroundStyle(runtime.captureState == .idle ? .secondary : .primary)
-            }
-            .accessibilityLabel("Capture status")
-            .accessibilityValue(captureStatusDescription)
-
-            if case let .failed(message) = runtime.captureState {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-
-            LabeledContent("Recognition") {
-                Text(recognitionStatusDescription)
-                    .foregroundStyle(runtime.transcriptionState == .idle ? .secondary : .primary)
-            }
-            .accessibilityLabel("Recognition status")
-            .accessibilityValue(recognitionStatusDescription)
-
-            if case let .failed(message) = runtime.transcriptionState {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-
-            localePicker
-
-            CaptureActivityLabel(runtime: runtime)
-
-            Text("Speech is recognised on this Mac, using an installed language model. "
-                 + "No audio leaves your machine.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+    /// What the selected mode will actually write, said in terms of the file
+    /// the user will find in the folder.
+    private var audioRetentionExplanation: String {
+        switch audioRetention {
+        case .none:
+            "Only the transcript is kept. No audio is written to disk."
+        case .raw:
+            "audio.caf is written beside the transcript as the meeting runs, in the audio exactly as it "
+            + "was captured. It is large: roughly 690 MB an hour. The file stays on this Mac."
+        case .compressed:
+            "audio.m4a is written beside the transcript as the meeting runs, encoded as AAC at "
+            + "64 kbit/s — roughly 31 MB an hour. The file stays on this Mac."
         }
     }
 
-    /// Where finalised speech is being written, and whether it still is.
-    ///
-    /// One status line, no per-segment feedback: the transcript is either
-    /// being saved to a named file or it is not, and the second case is the
-    /// only one worth an alarm.
-    private var transcriptFileSection: some View {
-        Section("Transcript File") {
-            LabeledContent("Status") {
-                Text(persistenceStatusDescription)
-                    .foregroundStyle(runtime.persistenceState == .idle ? .secondary : .primary)
-            }
-            .accessibilityLabel("Transcript file status")
-            .accessibilityValue(persistenceStatusDescription)
+    // MARK: - Save location
 
-            if let layout = runtime.persistenceState.layout {
-                LabeledContent("File") {
-                    Text(layout.transcriptURL.path(percentEncoded: false))
+    private var destinationSection: some View {
+        Section {
+            LabeledContent("Folder") {
+                VStack(alignment: .trailing, spacing: Spacing.hairline) {
+                    Text(destination.url?.lastPathComponent ?? destination.pathDescription)
+                        .foregroundStyle(destination.url == nil ? .secondary : .primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    if let url = destination.url {
+                        Text(DisplayPath.abbreviated(url.deletingLastPathComponent()))
+                            .textRole(.technical)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                 }
-                .accessibilityLabel("Transcript file")
-                .accessibilityValue(layout.transcriptURL.path(percentEncoded: false))
-
-                Button("Show in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([layout.transcriptURL])
-                }
-                .accessibilityHint("Reveal the transcript in the Finder")
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Save location")
+            .accessibilityValue(destination.statusDescription)
 
-            if let message = runtime.persistenceState.failureMessage {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            if let warning = destination.warningMessage {
+                StatusBadge(title: warning, symbolName: "exclamationmark.triangle", tone: .warning,
+                            role: .secondaryBody)
                     .accessibilityHidden(true)
             }
 
-            Text("The transcript is Markdown and is written as speech is finalised, "
-                 + "so it stays readable in any editor while the meeting runs.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            HStack(spacing: Spacing.small) {
+                Button(destination.url == nil ? "Choose Folder…" : "Change Folder…") {
+                    isChoosingDestination = true
+                }
+                .disabled(runtime.isRunning)
+                .accessibilityHint("Choose where transcripts are saved")
+
+                Button("Forget Folder") { destination.clear() }
+                    .disabled(!destination.canClear || runtime.isRunning)
+                    .accessibilityHint("Stop remembering the saved folder")
+
+                if destination.warningMessage != nil {
+                    Button("Try Again") { destination.restore() }
+                        .disabled(runtime.isRunning)
+                        .accessibilityHint("Resolve the remembered folder again, for a disk that has come back")
+                }
+            }
+        } header: {
+            Text("Save Location")
+        } footer: {
+            Text(destination.isRestored
+                 ? "Restored from your last launch. Each meeting is written to its own dated folder here."
+                 : "Each meeting is written to its own dated folder here.")
+                .textRole(.secondaryBody)
         }
+    }
+
+    // MARK: - Footer
+
+    /// Whether the meeting can start, and the button that starts it.
+    ///
+    /// Pause and Stop are not here: nothing is running while this form is on
+    /// screen, and they live with the meeting they act on.
+    private var footer: some View {
+        HStack(spacing: Spacing.medium) {
+            footerStatus
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("Start Meeting") {
+                guard let request = startRequest else { return }
+                Task { await runtime.start(request) }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+            .disabled(!readiness.canStart || !runtime.canStart(startRequest))
+            .help(readiness.startExplanation)
+            .accessibilityHint(readiness.startExplanation)
+        }
+    }
+
+    /// The sentence beside Start: what it will do, or what is in the way.
+    private var footerStatus: some View {
+        let canStart = readiness.canStart && runtime.canStart(startRequest)
+        return StatusBadge(
+            title: readiness.startExplanation,
+            symbolName: canStart ? "checkmark.circle" : "exclamationmark.circle",
+            tone: canStart ? .positive : .neutral,
+            role: .secondaryBody
+        )
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// What the meeting would start with, or `nil` when it could not start.
@@ -849,449 +949,37 @@ struct MeetingSetupView: View {
             )
         }
     }
+}
 
-    /// A short description of what the durable transcript is doing.
-    private var persistenceStatusDescription: String {
-        switch runtime.persistenceState {
-        case .idle: destination.url == nil
-            ? "No transcript. Choose a save folder first."
-            : "No transcript yet. Start a meeting to write one."
-        case .preparing: "Creating the meeting folder…"
-        case .saving: "Saving finalised speech as it is recognised."
-        case .saved: "Saved and closed."
-        case .failed: "Not being saved."
-        }
-    }
+/// An application's own icon, or a symbol for a source that is not an
+/// application.
+///
+/// The icon is looked up once per row from the application's bundle identifier
+/// and drawn at list-row size. A source whose application cannot be found is
+/// given a generic symbol rather than no image, so the list stays aligned.
+private struct ApplicationIcon: View {
 
-    /// The recognition language, chosen explicitly and fixed for a run.
-    ///
-    /// Only locales whose on-device model is installed can be selected;
-    /// supported but uninstalled ones are listed and disabled, so the reason a
-    /// language is unavailable is visible rather than implied by its absence.
-    @ViewBuilder
-    private var localePicker: some View {
-        if runtime.availableLocales.isEmpty {
-            LabeledContent("Language") {
-                Text("No recognition languages are available.")
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            Picker("Language", selection: Binding(
-                get: { runtime.localeIdentifier },
-                set: { identifier in Task { await runtime.selectLocale(identifier) } }
-            )) {
-                ForEach(runtime.availableLocales) { locale in
-                    Text(locale.isInstalled ? locale.displayName : "\(locale.displayName) (not installed)")
-                        .tag(locale.id)
-                }
-            }
-            .disabled(runtime.isRunning)
-            .accessibilityLabel("Recognition language")
+    /// The source to draw.
+    let source: CaptureSource
 
-            if let message = runtime.availability.message {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 18
 
-            if !runtime.availability.canTranscribe {
-                Button("Check Again") { Task { await runtime.prepare() } }
-                    .disabled(runtime.isRunning)
-                    .accessibilityHint("Check which speech models are installed again")
-            }
-        }
-    }
-
-    /// A short description of what capture is doing.
-    private var captureStatusDescription: String {
-        if captureMode == .microphone { return microphoneStatusDescription }
-        return switch runtime.captureState {
-        case .idle: sources.selectedSources.isEmpty
-            ? "Not capturing. Select at least one application."
-            : "Not capturing. \(sources.selectedSources.count) application(s) selected."
-        case .preparing: "Starting…"
-        case .capturing: "Capturing \(sources.selectedSources.count) application(s)."
-        case .paused: "Paused. Nothing is being captured."
-        case .stopping: "Stopping…"
-        case .failed: "Capture failed."
-        }
-    }
-
-    /// A short description of what listening to the microphone is doing.
-    ///
-    /// "Listening" rather than "capturing" or "recording": the audio is
-    /// transcribed and released, and nothing of it is kept.
-    private var microphoneStatusDescription: String {
-        switch runtime.captureState {
-        case .idle: microphone.input == nil
-            ? "Not listening. No microphone input."
-            : "Not listening. Start a meeting to transcribe the microphone."
-        case .preparing: "Starting…"
-        case .capturing: "Listening to \(microphoneInputDescription) for transcription."
-        case .paused: "Paused. The microphone is not being listened to."
-        case .stopping: "Stopping…"
-        case .failed: "Listening stopped."
-        }
-    }
-
-    /// A short description of what recognition is doing.
-    private var recognitionStatusDescription: String {
-        switch runtime.transcriptionState {
-        case .idle: runtime.availability.canTranscribe
-            ? "Ready, on this Mac."
-            : "Unavailable."
-        case .preparing: "Preparing the recogniser…"
-        case .transcribing: "Transcribing on device."
-        case .recovering: "Recognition stopped; restarting…"
-        case .stopping: "Finalising…"
-        case .failed: "Recognition failed."
-        }
-    }
-
-    /// The live transcript, in a view of its own.
-    ///
-    /// See ``LiveTranscriptSection`` for why it is not written inline here.
-    private var transcriptSection: some View {
-        LiveTranscriptSection(runtime: runtime)
-    }
-
-    /// What the meeting keeps of its audio, and — once it is keeping some —
-    /// where that file is.
-    ///
-    /// The choice is fixed for a run, so the picker is disabled while a meeting
-    /// is under way rather than accepting a change that would not take effect
-    /// until the next one.
-    private var audioRetentionSection: some View {
-        Section("Audio Retention") {
-            Picker("Keep audio", selection: $audioRetention) {
-                ForEach(AudioRetentionMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            .disabled(runtime.isRunning)
-            .accessibilityLabel("Audio retention mode")
-
-            LabeledContent("Status") {
-                Text(audioStatusDescription)
-                    .foregroundStyle(runtime.audioRetentionState == .idle ? .secondary : .primary)
-            }
-            .accessibilityLabel("Audio file status")
-            .accessibilityValue(audioStatusDescription)
-
-            if let url = runtime.audioRetentionState.url {
-                LabeledContent("File") {
-                    Text(url.path(percentEncoded: false))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .accessibilityLabel("Audio file")
-                .accessibilityValue(url.path(percentEncoded: false))
-
-                Button("Show Audio in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                }
-                .accessibilityHint("Reveal the meeting's audio file in the Finder")
-            }
-
-            if let message = runtime.audioRetentionState.failureMessage {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-
-            Text(audioRetentionExplanation)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    /// A short description of what the audio file is doing.
-    private var audioStatusDescription: String {
-        switch runtime.audioRetentionState {
-        case .idle: audioRetention.retainsAudio
-            ? "No audio file yet. Start a meeting to record one."
-            : "No audio file. Only the transcript is kept."
-        case .preparing: "Creating the audio file…"
-        case .retaining: "Recording audio as it is captured."
-        case .retained: "Saved and closed."
-        case .failed: "Not being recorded."
-        }
-    }
-
-    /// What the selected mode will actually write, said in terms of the file
-    /// the user will find in the folder.
-    private var audioRetentionExplanation: String {
-        switch audioRetention {
-        case .none:
-            "Only the transcript is kept. No audio is written to disk."
-        case .raw:
-            "audio.caf is written beside the transcript as the meeting runs, in the audio exactly as it "
-            + "was captured. It is large: roughly 690 MB an hour. The file stays on this Mac."
-        case .compressed:
-            "audio.m4a is written beside the transcript as the meeting runs, encoded as AAC at "
-            + "64 kbit/s — roughly 31 MB an hour. The file stays on this Mac."
-        }
-    }
-
-    private var destinationSection: some View {
-        Section("Save Location") {
-            LabeledContent("Folder") {
-                Text(destination.pathDescription)
-                    .foregroundStyle(destination.url == nil ? .secondary : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .accessibilityLabel("Save location")
-            .accessibilityValue(destination.statusDescription)
-
-            if let warning = destination.warningMessage {
-                Label(warning, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-            }
-
-            HStack {
-                Button(destination.url == nil ? "Choose Folder…" : "Change Folder…") {
-                    isChoosingDestination = true
-                }
-                .disabled(runtime.isRunning)
-                .accessibilityHint("Choose where transcripts are saved")
-
-                Button("Forget Folder") { destination.clear() }
-                    .disabled(!destination.canClear || runtime.isRunning)
-                    .accessibilityHint("Stop remembering the saved folder")
-
-                if destination.warningMessage != nil {
-                    Button("Try Again") { destination.restore() }
-                        .disabled(runtime.isRunning)
-                        .accessibilityHint("Resolve the remembered folder again, for a disk that has come back")
-                }
-            }
-
-            Text(destination.isRestored
-                 ? "Restored from your last launch. Each meeting is written to its own dated folder here."
-                 : "Each meeting is written to its own dated folder here.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var footer: some View {
-        HStack {
-            Text(meetingStatusDescription)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Spacer()
-            if runtime.canResume {
-                Button("Resume") {
-                    Task { await runtime.resume() }
-                }
-                .accessibilityHint(runtime.meeting?.captureMode == .microphone
-                    ? "Listen to the same microphone again and continue this meeting"
-                    : "Capture the same applications again and continue this meeting")
+    var body: some View {
+        Group {
+            if source.kind == .application,
+               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: source.id) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path(percentEncoded: false)))
+                    .resizable()
+                    .interpolation(.high)
             } else {
-                Button("Pause") {
-                    Task { await runtime.pause() }
-                }
-                .disabled(!runtime.canPause)
-                .accessibilityHint("Stop capturing without ending the meeting")
-            }
-
-            Button("Stop") {
-                Task { await runtime.stop() }
-            }
-            .disabled(!runtime.canStop)
-            .accessibilityHint("Stop capturing, finish the transcript and close it")
-
-            Button("Start Meeting") {
-                guard let request = startRequest else { return }
-                Task { await runtime.start(request) }
-            }
-            .keyboardShortcut(.defaultAction)
-            .disabled(!readiness.canStart || !runtime.canStart(startRequest))
-            .help(readiness.startExplanation)
-            .accessibilityHint(readiness.startExplanation)
-        }
-    }
-
-    /// One sentence describing the meeting as a whole, derived from the
-    /// subsystems rather than tracked separately.
-    private var meetingStatusDescription: String {
-        if !runtime.isRunning, let outcome = runtime.outcome { return outcome.headline }
-        if let message = runtime.persistenceState.failureMessage { return message }
-        if let message = runtime.audioRetentionState.failureMessage { return message }
-        if let message = runtime.pauseFailureMessage { return message }
-        if runtime.canResume {
-            return "Meeting paused. Nothing is being captured; the transcript and any recording stay open until "
-                + "you resume or stop."
-        }
-        if runtime.isRunning {
-            return "Meeting in progress. It keeps running while you use other apps, and if you hide, minimise or "
-                + "close this window; the menu bar item shows it and can stop it."
-        }
-        return readiness.startExplanation
-    }
-}
-
-/// The running meeting's name and how long it has been running.
-///
-/// A view of its own because ``MeetingElapsedClock`` advances once a second.
-/// Read inside ``MeetingSetupView``'s own body, that tick would invalidate the
-/// whole setup form — every section, the transcript list included — once a
-/// second for the length of the meeting. Read here, it invalidates one label.
-private struct RunningMeetingLabel: View {
-
-    /// The meeting being watched.
-    let runtime: MeetingRuntime
-
-    var body: some View {
-        if let meeting = runtime.meeting, runtime.status.isActive {
-            LabeledContent("Running") {
-                Text("\(meeting.title) · \(MeetingElapsedClock.description(of: runtime.elapsed.elapsed))")
-                    .monospacedDigit()
-            }
-            .accessibilityLabel("Running meeting")
-            .accessibilityValue("\(meeting.title), running for "
-                                + MeetingElapsedClock.description(of: runtime.elapsed.elapsed))
-
-            Text("Settings on this screen apply to the next meeting. This one keeps what it started with.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-/// What capture has delivered so far.
-///
-/// A view of its own for the same reason as ``RunningMeetingLabel``: the
-/// activity summary is published twice a second for the length of a meeting,
-/// and it is one line of text.
-private struct CaptureActivityLabel: View {
-
-    /// The meeting being watched.
-    let runtime: MeetingRuntime
-
-    var body: some View {
-        if let description {
-            Text(description)
-                .font(.footnote.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Captured audio: \(description)")
-        }
-    }
-
-    /// What capture has delivered so far, or `nil` before anything arrives.
-    ///
-    /// The figures are aggregates published a few times a second; no audio is
-    /// drawn, played back or retained.
-    private var description: String? {
-        let activity = runtime.activity
-        guard activity.sampleCount > 0 || activity.unreadableSampleCount > 0 else { return nil }
-        var parts = ["\(activity.sampleCount) buffers"]
-        if let seconds = activity.capturedDuration {
-            parts.append(String(format: "%.1f s", seconds))
-        }
-        if let format = activity.format {
-            parts.append(format.summary)
-        }
-        if let peak = activity.peakAmplitude {
-            parts.append(String(format: "peak %.0f%%", min(peak, 1) * 100))
-        }
-        if activity.unreadableSampleCount > 0 {
-            parts.append("\(activity.unreadableSampleCount) unreadable")
-        }
-        return parts.joined(separator: " · ")
-    }
-}
-
-/// The live transcript: finalised spans, then the hypothesis for what is being
-/// said now.
-///
-/// Finalised segments are rendered lazily, because a long meeting produces many
-/// of them, and the partial is one row that is replaced rather than appended.
-///
-/// It is a view of its own because the recogniser replaces the partial several
-/// times a second. Every one of those replacements invalidates whatever body
-/// read it, so reading it here keeps the churn inside this section instead of
-/// rebuilding the entire setup form — its pickers, its source list and its
-/// status sections — at recognition rate.
-private struct LiveTranscriptSection: View {
-
-    /// The meeting being watched.
-    let runtime: MeetingRuntime
-
-    var body: some View {
-        Section("Live Transcript") {
-            if runtime.transcript.isEmpty {
-                Text(runtime.transcriptionState == .transcribing
-                     ? "Listening…"
-                     : "Nothing transcribed yet.")
+                Image(systemName: source.kind == .systemAudio ? "speaker.wave.2" : "app.dashed")
+                    .resizable()
+                    .scaledToFit()
                     .foregroundStyle(.secondary)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(runtime.transcript.finalizedSegments) { segment in
-                            row(for: segment)
-                        }
-                        if let partial = runtime.transcript.partialSegment {
-                            Text(partial.displayText)
-                                .foregroundStyle(.secondary)
-                                .italic()
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .accessibilityLabel("In progress: \(partial.displayText)")
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .defaultScrollAnchor(.bottom)
-                .frame(minHeight: 160, maxHeight: 320)
             }
-
-            if runtime.transcript.untranscribedSeconds > 0 {
-                Label(
-                    String(
-                        format: "%.1f s of audio was not transcribed, so the transcript has gaps.",
-                        runtime.transcript.untranscribedSeconds
-                    ),
-                    systemImage: "exclamationmark.triangle"
-                )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-
-            Text("Text in grey is a live guess, is replaced as you speak and is never saved. "
-                 + "Only finalised speech is written to the transcript.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
-    }
-
-    /// One finalised span, with the time it began measured from the start of
-    /// the run.
-    ///
-    /// - Parameter segment: The span to present.
-    /// - Returns: The row view.
-    private func row(for segment: TranscriptSegment) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(Self.offset(segment.startTime))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            Text(segment.displayText)
-                .textSelection(.enabled)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-    }
-
-    /// Formats a time measured from the start of the run.
-    ///
-    /// - Parameter seconds: Seconds since the first captured frame.
-    /// - Returns: A `mm:ss` string.
-    private static func offset(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded(.down))
-        return String(format: "%02d:%02d", total / 60, total % 60)
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 
