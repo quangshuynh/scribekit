@@ -3,9 +3,12 @@
 The History screen lists the meetings in your save folder — completed, failed,
 interrupted, and the one running right now — newest first.
 
-Each entry shows its status, times, capture mode, sources, recognition
-language, transcript size, and whether a recording is beside it. Selecting one
-shows its details and a preview of its transcript, and reveals the transcript
+Each row leads with the meeting's title, with its date and capture mode below.
+A row states its status only when the meeting did not end normally —
+**Interrupted**, **Failed**, **In Progress** or **Legacy** — so those stand out
+in a long list. Selecting one shows its details — status, times, sources,
+recognition language, transcript size and whether a recording is beside it —
+with Review, notes and a preview of its transcript, and reveals the transcript
 or the recording in the Finder, or opens the transcript in whichever
 application you use for Markdown.
 
@@ -14,8 +17,8 @@ application you use for Markdown.
 Search is plain, case-insensitive substring matching over meeting titles,
 recognised speech, captured application and microphone names, and the name of
 each meeting's capture mode — `App Audio` or `Microphone`. A match in speech
-shows a short excerpt of the passage, verbatim, with the match emphasised and
-the transcript timestamp it came from.
+shows a short excerpt of the passage, verbatim, with the match highlighted and
+emphasised, and the transcript timestamp it came from.
 
 Spaces are forgiving and punctuation is literal. Leading and trailing spaces
 are ignored, several spaces match one, and a phrase that happens to be wrapped

@@ -22,8 +22,8 @@ meeting runs, and there is no way to capture both at once.
 ## Starting a Microphone meeting
 
 1. Choose **Microphone** under **Transcribe from**.
-2. In the **Microphone** section, choose the **Input** — System Default, or a
-   particular microphone — and check that macOS allows access.
+2. Under it, choose the **Input** — System Default, or a particular
+   microphone — and check that **Access** says **Allowed**.
 3. Press **Start Meeting**. The first time, macOS asks whether ScribeKit may
    use the microphone. The question is asked before anything is written, so
    refusing leaves no empty meeting behind.
@@ -51,7 +51,7 @@ microphone or a webcam — with **System Default** first:
   Choosing it changes nothing outside ScribeKit: the Mac's own input setting,
   and every other app, stay as they were.
 
-The list follows the hardware while the section is on screen: plug in a
+The list follows the hardware while the Meeting screen is open: plug in a
 microphone and it appears; unplug it and it goes.
 
 Your choice is remembered between launches. A device is remembered by the

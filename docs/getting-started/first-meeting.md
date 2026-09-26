@@ -2,9 +2,11 @@
 
 ## Before you start
 
-The top of the setup screen lists the four things a meeting needs, each with
-its state in words as well as an icon, and each with the control that resolves
-it:
+A meeting needs four things. Whenever one of them is missing or needs a look,
+the setup screen lists it under **Before You Start**, below the source, with its
+state in words as well as an icon and the control that resolves it. When all
+four are satisfied the section is not shown, and the line beside **Start
+Meeting** says what the meeting will do instead:
 
 | Prerequisite | What it means | How to resolve it |
 | --- | --- | --- |
@@ -30,19 +32,22 @@ choose a folder — so no warning outlives its cause.
 
 ## Set the meeting up
 
-The setup screen holds the configuration for the *next* meeting:
+The setup screen holds the configuration for the *next* meeting, top to
+bottom in the order the choices are made:
 
-- **Title** — becomes the transcript's heading and part of the session folder
-  name.
-- **Save location** — the folder the session directory is created in. See
-  [Save Location](save-location.md).
-- **Audio retention** — none, raw or compressed. See
-  [Audio Retention](audio-retention.md).
-- **Recognition language** — fixed for the run; it is never detected
-  automatically.
-- **Sources** — one or several running applications, discovered through
-  ScreenCaptureKit with a manual **Refresh**. See
-  [Capturing App Audio](../using/capturing-app-audio.md).
+- **Source** — **Transcribe from: App Audio / Microphone**, and under it what
+  that mode listens to: one or several running applications, each shown with
+  its icon and discovered through ScreenCaptureKit with a manual **Refresh**,
+  or the microphone input. See
+  [Capturing App Audio](../using/capturing-app-audio.md) and
+  [Microphone Transcription](../using/microphone-transcription.md).
+- **Meeting** — the **Title**, which becomes the transcript's heading and part
+  of the session folder name, and the recognition **Language**, fixed for the
+  run and never detected automatically.
+- **Recording** — for App Audio, whether audio is kept: none, raw or
+  compressed. See [Audio Retention](audio-retention.md).
+- **Save Location** — the folder the session directory is created in, shown by
+  name with its location below it. See [Save Location](save-location.md).
 
 The audio retention mode and the applications last selected are remembered
 across launches and matched against a fresh discovery each time.
@@ -54,11 +59,18 @@ that moment, creates a dated session folder in the save location, and creates
 `transcript.md` inside it before capture begins. A selected application that
 has quit produces a clear failure rather than a substitution.
 
-From that point the configuration is fixed. Editing the setup screen while a
-meeting runs configures the next meeting and cannot reach the running one; its
-controls are disabled for the duration.
+From that point the configuration is fixed, and the Meeting screen changes
+from the setup form to the meeting itself.
 
 ## While it runs
+
+The top of the screen names the meeting and says what it is doing —
+**Listening** for a Microphone meeting, **Capturing** for App Audio,
+**Paused**, **Finishing** — with the elapsed time, the source and the language,
+and the **Pause** / **Resume** and **Stop** buttons. The transcript fills the
+rest of the window. The footer names the file being written and has **Show in
+Finder**; **Details** opens the state of capture, recognition and the files,
+including the captured-audio figures, for when something needs checking.
 
 Partial recognition appears as an ephemeral guess and is replaced by the next
 one. Finalised text accumulates as transcript spans, so a sentence heard word
@@ -78,6 +90,12 @@ Stop ends capture, lets the recogniser finalise the audio it already has,
 closes the audio file if there is one, then flushes and closes the transcript,
 and only then records the session as completed. Stop from the menu bar is the
 same stop.
+
+The finished meeting stays on screen with its transcript and a summary of how
+it ended — finished, interrupted, or stopped by a failure, with what that means
+for its files. **New Meeting** returns to the setup form; nothing on disk
+changes. A meeting that could not start at all is reported at the top of the
+setup form instead, where the setting that stopped it can be corrected.
 
 ## How a meeting can end
 
