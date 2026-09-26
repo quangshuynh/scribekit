@@ -249,6 +249,7 @@ struct FactRow: View {
                 .textRole(isTechnical ? .technicalValue : .body)
                 .lineLimit(truncatesMiddle ? 1 : nil)
                 .truncationMode(truncatesMiddle ? .middle : .tail)
+                .fixedSize(horizontal: false, vertical: !truncatesMiddle)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .help(truncatesMiddle ? value : "")

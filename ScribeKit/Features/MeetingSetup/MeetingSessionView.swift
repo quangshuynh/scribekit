@@ -353,7 +353,7 @@ private struct MeetingDetailsPopover: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.large)
-        .frame(width: 420, alignment: .leading)
+        .frame(width: LayoutMetrics.detailsPopoverWidth, alignment: .leading)
     }
 
     /// A short description of what capture is doing.
