@@ -5,9 +5,13 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
+Interval 33 — speaker diarization feasibility, on
+`interval/33-speaker-diarization`, unmerged. Research only, decided
+**NO-GO** for the product: no application code, transcript format, session
+artifact or screenshot changed. See **Speaker diarization** below.
+
 Interval 32 — UI visual system, merged to `main` (pull request 36) and
-unreleased; the real-app pass that followed — its fixes and the new
-screenshots — is on `interval/32-real-app-pass`. A presentation-only redesign on top of v0.2.0; capture,
+unreleased, with its real-app pass (pull request 37). A presentation-only redesign on top of v0.2.0; capture,
 recognition, persistence, History search and review semantics are unchanged.
 See **Visual system** below and `docs/development/visual-design.md`.
 
@@ -185,6 +189,30 @@ observations were not recorded here.
 - Minimum window 680 × 560, default 900 × 760.
 - Tests: `DesignSystemTests` (type rules, tones, symbols exist, display paths)
   and `MeetingScreenPresentationTests`.
+
+## Speaker diarization
+
+Not in the product. The findings and the constraints any later attempt
+inherits are in `docs/development/speaker-diarization.md`; the evidence is
+reproducible with `Tools/SpeakerDiarizationPrototype/` (a standalone Swift
+package, not linked by the app, no dependencies).
+
+- Apple ships no diarization, speaker embedding or speaker-change API in the
+  macOS 27.0 SDK (Speech, SoundAnalysis, AVFAudio, ScreenCaptureKit, Core ML).
+  `CreateMLComponents.AudioFeaturePrint` is the only system audio embedding,
+  and it is a sound-type embedding.
+- Both Apple-native embeddings (MFCC statistics, AudioFeaturePrint) separate
+  two distinct synthetic voices, but no threshold transfers between
+  recordings, similar voices are near chance, and the abstention margin does
+  not calibrate: confidently labelled time was wrong 12–22 % of the time
+  pooled. Live clustering is no better than post-meeting.
+- A third-party local pipeline (e.g. FluidAudio with pyannote/WeSpeaker
+  weights) is the only credible route. It was **not** added: it costs the
+  no-third-party-runtime property, bundled model weights and their licences.
+  It would be evaluated in the harness, outside the app, first.
+- Recognised finals did not mix speakers' words except under overlapping
+  speech, but their ranges absorb the preceding silence, so passage start
+  times are not speaker boundaries.
 
 ## Meeting ownership
 

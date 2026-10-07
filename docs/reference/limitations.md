@@ -28,6 +28,11 @@ are consequences of decisions, and several of them are deliberate.
   session — which changes what a session directory is, what `session.json`
   names and how review playback finds the audio for an offset. See
   [Recovery](../using/recovery.md).
+- **No speaker labels.** A transcript does not say who spoke. Apple's
+  frameworks provide no speaker diarization, and the Apple-native approaches
+  that were measured could not separate more than two voices, or two similar
+  ones, reliably enough to show. ScribeKit also never identifies people by
+  voice. See [Speaker Diarization Research](../development/speaker-diarization.md).
 - **No editing, renaming, deleting or exporting.** Transcript history is
   read-only; the files are yours to manage in the Finder.
 - **No search over your notes.** History's search runs over titles,
