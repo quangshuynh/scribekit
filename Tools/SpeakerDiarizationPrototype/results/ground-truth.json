@@ -1,0 +1,1341 @@
+[
+  {
+    "duration" : 33.74925,
+    "name" : "dev-one-speaker",
+    "sampleRate" : 16000,
+    "split" : "dev",
+    "summary" : "One speaker, eight turns",
+    "turns" : [
+      {
+        "end" : 4.374125,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.4511875,
+        "speaker" : "A",
+        "start" : 4.974125
+      },
+      {
+        "end" : 13.018375,
+        "speaker" : "A",
+        "start" : 9.0511875
+      },
+      {
+        "end" : 17.18825,
+        "speaker" : "A",
+        "start" : 13.618375
+      },
+      {
+        "end" : 21.21575,
+        "speaker" : "A",
+        "start" : 17.78825
+      },
+      {
+        "end" : 25.071875,
+        "speaker" : "A",
+        "start" : 21.81575
+      },
+      {
+        "end" : 28.9756875,
+        "speaker" : "A",
+        "start" : 25.671875
+      },
+      {
+        "end" : 32.99925,
+        "speaker" : "A",
+        "start" : 29.5756875
+      }
+    ]
+  },
+  {
+    "duration" : 49.0635625,
+    "name" : "dev-two-alternating",
+    "sampleRate" : 16000,
+    "split" : "dev",
+    "summary" : "Two speakers alternating",
+    "turns" : [
+      {
+        "end" : 4.9068125,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.8250625,
+        "speaker" : "B",
+        "start" : 5.5068125
+      },
+      {
+        "end" : 12.932,
+        "speaker" : "A",
+        "start" : 9.4250625
+      },
+      {
+        "end" : 16.7211875,
+        "speaker" : "B",
+        "start" : 13.532
+      },
+      {
+        "end" : 20.442375,
+        "speaker" : "A",
+        "start" : 17.3211875
+      },
+      {
+        "end" : 24.1998125,
+        "speaker" : "B",
+        "start" : 21.042375
+      },
+      {
+        "end" : 28.2468125,
+        "speaker" : "A",
+        "start" : 24.7998125
+      },
+      {
+        "end" : 32.1620625,
+        "speaker" : "B",
+        "start" : 28.8468125
+      },
+      {
+        "end" : 35.807625,
+        "speaker" : "A",
+        "start" : 32.7620625
+      },
+      {
+        "end" : 40.106875,
+        "speaker" : "B",
+        "start" : 36.407625
+      },
+      {
+        "end" : 44.3413125,
+        "speaker" : "A",
+        "start" : 40.706875
+      },
+      {
+        "end" : 48.3135625,
+        "speaker" : "B",
+        "start" : 44.9413125
+      }
+    ]
+  },
+  {
+    "duration" : 49.8373125,
+    "name" : "dev-three-speakers",
+    "sampleRate" : 16000,
+    "split" : "dev",
+    "summary" : "Three speakers round robin",
+    "turns" : [
+      {
+        "end" : 4.2211875,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 7.978625,
+        "speaker" : "B",
+        "start" : 4.8211875
+      },
+      {
+        "end" : 12.1768125,
+        "speaker" : "C",
+        "start" : 8.578625
+      },
+      {
+        "end" : 16.334125,
+        "speaker" : "A",
+        "start" : 12.7768125
+      },
+      {
+        "end" : 20.026875,
+        "speaker" : "B",
+        "start" : 16.934125
+      },
+      {
+        "end" : 24.644375,
+        "speaker" : "C",
+        "start" : 20.626875
+      },
+      {
+        "end" : 28.8788125,
+        "speaker" : "A",
+        "start" : 25.244375
+      },
+      {
+        "end" : 32.8510625,
+        "speaker" : "B",
+        "start" : 29.4788125
+      },
+      {
+        "end" : 37.0295625,
+        "speaker" : "C",
+        "start" : 33.4510625
+      },
+      {
+        "end" : 41.1336875,
+        "speaker" : "A",
+        "start" : 37.6295625
+      },
+      {
+        "end" : 45.1799375,
+        "speaker" : "B",
+        "start" : 41.7336875
+      },
+      {
+        "end" : 49.0873125,
+        "speaker" : "C",
+        "start" : 45.7799375
+      }
+    ]
+  },
+  {
+    "duration" : 66.75625,
+    "name" : "dev-four-speakers",
+    "sampleRate" : 16000,
+    "split" : "dev",
+    "summary" : "Four speakers",
+    "turns" : [
+      {
+        "end" : 4.59575,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.18625,
+        "speaker" : "B",
+        "start" : 5.1956875
+      },
+      {
+        "end" : 12.3389375,
+        "speaker" : "C",
+        "start" : 8.7861875
+      },
+      {
+        "end" : 16.906125,
+        "speaker" : "D",
+        "start" : 12.9389375
+      },
+      {
+        "end" : 20.99625,
+        "speaker" : "A",
+        "start" : 17.506125
+      },
+      {
+        "end" : 25.028625,
+        "speaker" : "B",
+        "start" : 21.59625
+      },
+      {
+        "end" : 29.112625,
+        "speaker" : "C",
+        "start" : 25.628625
+      },
+      {
+        "end" : 33.0164375,
+        "speaker" : "D",
+        "start" : 29.712625
+      },
+      {
+        "end" : 36.911125,
+        "speaker" : "A",
+        "start" : 33.6164375
+      },
+      {
+        "end" : 40.85775,
+        "speaker" : "B",
+        "start" : 37.511125
+      },
+      {
+        "end" : 45.2818125,
+        "speaker" : "C",
+        "start" : 41.45775
+      },
+      {
+        "end" : 49.00175,
+        "speaker" : "D",
+        "start" : 45.8818125
+      },
+      {
+        "end" : 53.4923125,
+        "speaker" : "A",
+        "start" : 49.60175
+      },
+      {
+        "end" : 57.5900625,
+        "speaker" : "B",
+        "start" : 54.0923125
+      },
+      {
+        "end" : 61.8299375,
+        "speaker" : "C",
+        "start" : 58.1900625
+      },
+      {
+        "end" : 66.00625,
+        "speaker" : "D",
+        "start" : 62.4299375
+      }
+    ]
+  },
+  {
+    "duration" : 43.627125,
+    "name" : "dev-similar-voices",
+    "sampleRate" : 16000,
+    "split" : "dev",
+    "summary" : "Same voice persona, two accents",
+    "turns" : [
+      {
+        "end" : 4.9455625,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 9.2575625,
+        "speaker" : "B",
+        "start" : 5.5455625
+      },
+      {
+        "end" : 13.12925,
+        "speaker" : "A",
+        "start" : 9.8575625
+      },
+      {
+        "end" : 17.6516875,
+        "speaker" : "B",
+        "start" : 13.72925
+      },
+      {
+        "end" : 22.1325625,
+        "speaker" : "A",
+        "start" : 18.2516875
+      },
+      {
+        "end" : 26.4030625,
+        "speaker" : "B",
+        "start" : 22.7325625
+      },
+      {
+        "end" : 30.729875,
+        "speaker" : "A",
+        "start" : 27.0030625
+      },
+      {
+        "end" : 34.82825,
+        "speaker" : "B",
+        "start" : 31.329875
+      },
+      {
+        "end" : 39.1775,
+        "speaker" : "A",
+        "start" : 35.42825
+      },
+      {
+        "end" : 42.877125,
+        "speaker" : "B",
+        "start" : 39.7775
+      }
+    ]
+  },
+  {
+    "duration" : 40.665375,
+    "name" : "dev-noise",
+    "sampleRate" : 16000,
+    "split" : "dev",
+    "summary" : "Two speakers, noise at 10 dB SNR",
+    "turns" : [
+      {
+        "end" : 4.9905625,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 9.0883125,
+        "speaker" : "B",
+        "start" : 5.5905625
+      },
+      {
+        "end" : 13.1923125,
+        "speaker" : "A",
+        "start" : 9.6883125
+      },
+      {
+        "end" : 17.1101875,
+        "speaker" : "B",
+        "start" : 13.7923125
+      },
+      {
+        "end" : 21.2143125,
+        "speaker" : "A",
+        "start" : 17.7101875
+      },
+      {
+        "end" : 25.2605625,
+        "speaker" : "B",
+        "start" : 21.8143125
+      },
+      {
+        "end" : 28.7991875,
+        "speaker" : "A",
+        "start" : 25.8605625
+      },
+      {
+        "end" : 32.4660625,
+        "speaker" : "B",
+        "start" : 29.3991875
+      },
+      {
+        "end" : 36.2535625,
+        "speaker" : "A",
+        "start" : 33.0660625
+      },
+      {
+        "end" : 39.915375,
+        "speaker" : "B",
+        "start" : 36.8535625
+      }
+    ]
+  },
+  {
+    "duration" : 32.8470625,
+    "name" : "one-speaker",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "One speaker, eight turns",
+    "turns" : [
+      {
+        "end" : 4.68475,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.806,
+        "speaker" : "A",
+        "start" : 5.28475
+      },
+      {
+        "end" : 12.646625,
+        "speaker" : "A",
+        "start" : 9.4059375
+      },
+      {
+        "end" : 16.269625,
+        "speaker" : "A",
+        "start" : 13.246625
+      },
+      {
+        "end" : 20.139875,
+        "speaker" : "A",
+        "start" : 16.869625
+      },
+      {
+        "end" : 24.31825,
+        "speaker" : "A",
+        "start" : 20.739875
+      },
+      {
+        "end" : 28.2418125,
+        "speaker" : "A",
+        "start" : 24.91825
+      },
+      {
+        "end" : 32.0970625,
+        "speaker" : "A",
+        "start" : 28.8418125
+      }
+    ]
+  },
+  {
+    "duration" : 50.180625,
+    "name" : "two-alternating",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Two speakers alternating, equal level",
+    "turns" : [
+      {
+        "end" : 4.62125,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 9.0426875,
+        "speaker" : "B",
+        "start" : 5.2211875
+      },
+      {
+        "end" : 12.6656875,
+        "speaker" : "A",
+        "start" : 9.6426875
+      },
+      {
+        "end" : 16.923,
+        "speaker" : "B",
+        "start" : 13.2656875
+      },
+      {
+        "end" : 21.101375,
+        "speaker" : "A",
+        "start" : 17.523
+      },
+      {
+        "end" : 25.266125,
+        "speaker" : "B",
+        "start" : 21.701375
+      },
+      {
+        "end" : 29.121375,
+        "speaker" : "A",
+        "start" : 25.866125
+      },
+      {
+        "end" : 33.096125,
+        "speaker" : "B",
+        "start" : 29.721375
+      },
+      {
+        "end" : 36.681375,
+        "speaker" : "A",
+        "start" : 33.696125
+      },
+      {
+        "end" : 41.0995,
+        "speaker" : "B",
+        "start" : 37.281375
+      },
+      {
+        "end" : 45.0516875,
+        "speaker" : "A",
+        "start" : 41.6995
+      },
+      {
+        "end" : 49.430625,
+        "speaker" : "B",
+        "start" : 45.6516875
+      }
+    ]
+  },
+  {
+    "duration" : 50.0264375,
+    "name" : "three-speakers",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Three speakers round robin",
+    "turns" : [
+      {
+        "end" : 4.7718125,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.793,
+        "speaker" : "B",
+        "start" : 5.3718125
+      },
+      {
+        "end" : 12.9505625,
+        "speaker" : "C",
+        "start" : 9.3929375
+      },
+      {
+        "end" : 17.4049375,
+        "speaker" : "A",
+        "start" : 13.5505625
+      },
+      {
+        "end" : 21.00025,
+        "speaker" : "B",
+        "start" : 18.0049375
+      },
+      {
+        "end" : 24.9335,
+        "speaker" : "C",
+        "start" : 21.60025
+      },
+      {
+        "end" : 29.1955,
+        "speaker" : "A",
+        "start" : 25.5335
+      },
+      {
+        "end" : 32.99875,
+        "speaker" : "B",
+        "start" : 29.7955
+      },
+      {
+        "end" : 37.3591875,
+        "speaker" : "C",
+        "start" : 33.59875
+      },
+      {
+        "end" : 41.2256875,
+        "speaker" : "A",
+        "start" : 37.9591875
+      },
+      {
+        "end" : 44.79675,
+        "speaker" : "B",
+        "start" : 41.8256875
+      },
+      {
+        "end" : 49.2764375,
+        "speaker" : "C",
+        "start" : 45.39675
+      }
+    ]
+  },
+  {
+    "duration" : 42.693375,
+    "name" : "same-speaker-returns",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "A speaks first and returns after a long absence",
+    "turns" : [
+      {
+        "end" : 4.68475,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.806,
+        "speaker" : "A",
+        "start" : 5.28475
+      },
+      {
+        "end" : 13.2303125,
+        "speaker" : "B",
+        "start" : 9.4059375
+      },
+      {
+        "end" : 17.2205,
+        "speaker" : "B",
+        "start" : 13.8303125
+      },
+      {
+        "end" : 21.4923125,
+        "speaker" : "C",
+        "start" : 17.8205
+      },
+      {
+        "end" : 26.17275,
+        "speaker" : "C",
+        "start" : 22.0923125
+      },
+      {
+        "end" : 30.33275,
+        "speaker" : "B",
+        "start" : 26.77275
+      },
+      {
+        "end" : 34.787125,
+        "speaker" : "C",
+        "start" : 30.93275
+      },
+      {
+        "end" : 38.358125,
+        "speaker" : "A",
+        "start" : 35.387125
+      },
+      {
+        "end" : 41.943375,
+        "speaker" : "A",
+        "start" : 38.958125
+      }
+    ]
+  },
+  {
+    "duration" : 76.0620625,
+    "name" : "long-silences",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Two speakers with 4–8 s silences",
+    "turns" : [
+      {
+        "end" : 7.8999375,
+        "speaker" : "A",
+        "start" : 4.5
+      },
+      {
+        "end" : 17.672,
+        "speaker" : "B",
+        "start" : 14.3999375
+      },
+      {
+        "end" : 29.2208125,
+        "speaker" : "A",
+        "start" : 25.672
+      },
+      {
+        "end" : 38.1069375,
+        "speaker" : "B",
+        "start" : 34.2208125
+      },
+      {
+        "end" : 45.2349375,
+        "speaker" : "A",
+        "start" : 42.1069375
+      },
+      {
+        "end" : 55.462125,
+        "speaker" : "B",
+        "start" : 51.7349375
+      },
+      {
+        "end" : 66.5535625,
+        "speaker" : "A",
+        "start" : 63.462125
+      },
+      {
+        "end" : 75.3120625,
+        "speaker" : "B",
+        "start" : 71.5535625
+      }
+    ]
+  },
+  {
+    "duration" : 39.96475,
+    "name" : "background-noise",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Two speakers, broadband noise at 10 dB SNR",
+    "turns" : [
+      {
+        "end" : 4.228,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.555125,
+        "speaker" : "B",
+        "start" : 4.8279375
+      },
+      {
+        "end" : 12.2465625,
+        "speaker" : "A",
+        "start" : 9.155125
+      },
+      {
+        "end" : 16.6050625,
+        "speaker" : "B",
+        "start" : 12.8465625
+      },
+      {
+        "end" : 19.88525,
+        "speaker" : "A",
+        "start" : 17.2050625
+      },
+      {
+        "end" : 24.0374375,
+        "speaker" : "B",
+        "start" : 20.48525
+      },
+      {
+        "end" : 27.7325625,
+        "speaker" : "A",
+        "start" : 24.6374375
+      },
+      {
+        "end" : 31.4000625,
+        "speaker" : "B",
+        "start" : 28.3325625
+      },
+      {
+        "end" : 34.921875,
+        "speaker" : "A",
+        "start" : 32.0000625
+      },
+      {
+        "end" : 39.21475,
+        "speaker" : "B",
+        "start" : 35.521875
+      }
+    ]
+  },
+  {
+    "duration" : 39.6965625,
+    "name" : "tonal-background",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Two speakers over a synthetic tonal (music-like) bed at −12 dB",
+    "turns" : [
+      {
+        "end" : 4.1914375,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.5499375,
+        "speaker" : "B",
+        "start" : 4.7914375
+      },
+      {
+        "end" : 11.830125,
+        "speaker" : "A",
+        "start" : 9.1499375
+      },
+      {
+        "end" : 15.9823125,
+        "speaker" : "B",
+        "start" : 12.430125
+      },
+      {
+        "end" : 19.6774375,
+        "speaker" : "A",
+        "start" : 16.5823125
+      },
+      {
+        "end" : 23.3449375,
+        "speaker" : "B",
+        "start" : 20.2774375
+      },
+      {
+        "end" : 26.86675,
+        "speaker" : "A",
+        "start" : 23.9449375
+      },
+      {
+        "end" : 31.159625,
+        "speaker" : "B",
+        "start" : 27.46675
+      },
+      {
+        "end" : 35.0326875,
+        "speaker" : "A",
+        "start" : 31.759625
+      },
+      {
+        "end" : 38.9465625,
+        "speaker" : "B",
+        "start" : 35.6326875
+      }
+    ]
+  },
+  {
+    "duration" : 67.5554375,
+    "name" : "short-interjections",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Long turns from A, one-word replies from B",
+    "turns" : [
+      {
+        "end" : 7.6899375,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.4725,
+        "speaker" : "B",
+        "start" : 8.0899375
+      },
+      {
+        "end" : 16.248875,
+        "speaker" : "A",
+        "start" : 9.0725
+      },
+      {
+        "end" : 17.2046875,
+        "speaker" : "B",
+        "start" : 16.648875
+      },
+      {
+        "end" : 24.2930625,
+        "speaker" : "A",
+        "start" : 17.8046875
+      },
+      {
+        "end" : 25.101875,
+        "speaker" : "B",
+        "start" : 24.6930625
+      },
+      {
+        "end" : 32.3439375,
+        "speaker" : "A",
+        "start" : 25.701875
+      },
+      {
+        "end" : 33.159,
+        "speaker" : "B",
+        "start" : 32.7439375
+      },
+      {
+        "end" : 40.8125,
+        "speaker" : "A",
+        "start" : 33.759
+      },
+      {
+        "end" : 42.0096875,
+        "speaker" : "B",
+        "start" : 41.2125
+      },
+      {
+        "end" : 49.2546875,
+        "speaker" : "A",
+        "start" : 42.6096875
+      },
+      {
+        "end" : 50.4153125,
+        "speaker" : "B",
+        "start" : 49.6546875
+      },
+      {
+        "end" : 57.9399375,
+        "speaker" : "A",
+        "start" : 51.0153125
+      },
+      {
+        "end" : 58.6813125,
+        "speaker" : "B",
+        "start" : 58.3399375
+      },
+      {
+        "end" : 65.9675625,
+        "speaker" : "A",
+        "start" : 59.2813125
+      },
+      {
+        "end" : 66.8054375,
+        "speaker" : "B",
+        "start" : 66.3675625
+      }
+    ]
+  },
+  {
+    "duration" : 49.7209375,
+    "name" : "unequal-volume",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Two speakers, B 18 dB quieter",
+    "turns" : [
+      {
+        "end" : 4.35525,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.3299375,
+        "speaker" : "B",
+        "start" : 4.9551875
+      },
+      {
+        "end" : 11.9151875,
+        "speaker" : "A",
+        "start" : 8.9299375
+      },
+      {
+        "end" : 16.3333125,
+        "speaker" : "B",
+        "start" : 12.5151875
+      },
+      {
+        "end" : 20.2855,
+        "speaker" : "A",
+        "start" : 16.9333125
+      },
+      {
+        "end" : 24.6644375,
+        "speaker" : "B",
+        "start" : 20.8855
+      },
+      {
+        "end" : 28.0220625,
+        "speaker" : "A",
+        "start" : 25.2644375
+      },
+      {
+        "end" : 32.4893125,
+        "speaker" : "B",
+        "start" : 28.6220625
+      },
+      {
+        "end" : 36.627125,
+        "speaker" : "A",
+        "start" : 33.0893125
+      },
+      {
+        "end" : 40.866625,
+        "speaker" : "B",
+        "start" : 37.227125
+      },
+      {
+        "end" : 44.808125,
+        "speaker" : "A",
+        "start" : 41.466625
+      },
+      {
+        "end" : 48.9709375,
+        "speaker" : "B",
+        "start" : 45.408125
+      }
+    ]
+  },
+  {
+    "duration" : 37.8345,
+    "name" : "distance-change",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "One speaker whose level drops 14 dB halfway, as if stepping back",
+    "turns" : [
+      {
+        "end" : 3.9095,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 7.3819375,
+        "speaker" : "A",
+        "start" : 4.5095
+      },
+      {
+        "end" : 11.0828125,
+        "speaker" : "A",
+        "start" : 7.9819375
+      },
+      {
+        "end" : 14.5740625,
+        "speaker" : "A",
+        "start" : 11.68275
+      },
+      {
+        "end" : 17.92425,
+        "speaker" : "A",
+        "start" : 15.1740625
+      },
+      {
+        "end" : 21.7815,
+        "speaker" : "A",
+        "start" : 18.52425
+      },
+      {
+        "end" : 25.47775,
+        "speaker" : "A",
+        "start" : 22.3815
+      },
+      {
+        "end" : 29.0746875,
+        "speaker" : "A",
+        "start" : 26.07775
+      },
+      {
+        "end" : 33.6460625,
+        "speaker" : "A",
+        "start" : 29.6746875
+      },
+      {
+        "end" : 37.0845,
+        "speaker" : "A",
+        "start" : 34.2460625
+      }
+    ]
+  },
+  {
+    "duration" : 42.6413125,
+    "name" : "similar-voices",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Same voice persona in two accents (Eddy US \/ Eddy UK)",
+    "turns" : [
+      {
+        "end" : 4.3840625,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.1474375,
+        "speaker" : "B",
+        "start" : 4.984
+      },
+      {
+        "end" : 11.929375,
+        "speaker" : "A",
+        "start" : 8.7474375
+      },
+      {
+        "end" : 16.23725,
+        "speaker" : "B",
+        "start" : 12.529375
+      },
+      {
+        "end" : 20.5415,
+        "speaker" : "A",
+        "start" : 16.83725
+      },
+      {
+        "end" : 24.384875,
+        "speaker" : "B",
+        "start" : 21.1415
+      },
+      {
+        "end" : 28.8438125,
+        "speaker" : "A",
+        "start" : 24.984875
+      },
+      {
+        "end" : 32.8276875,
+        "speaker" : "B",
+        "start" : 29.4438125
+      },
+      {
+        "end" : 37.3315625,
+        "speaker" : "A",
+        "start" : 33.4276875
+      },
+      {
+        "end" : 41.8913125,
+        "speaker" : "B",
+        "start" : 37.9315625
+      }
+    ]
+  },
+  {
+    "duration" : 41.7545625,
+    "name" : "narrowband",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Two speakers band-limited to 300–3400 Hz (headset\/telephone-like)",
+    "turns" : [
+      {
+        "end" : 4.0218125,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.3146875,
+        "speaker" : "B",
+        "start" : 4.6218125
+      },
+      {
+        "end" : 12.18775,
+        "speaker" : "A",
+        "start" : 8.9146875
+      },
+      {
+        "end" : 16.1015625,
+        "speaker" : "B",
+        "start" : 12.7876875
+      },
+      {
+        "end" : 20.468125,
+        "speaker" : "A",
+        "start" : 16.7015625
+      },
+      {
+        "end" : 24.4273125,
+        "speaker" : "B",
+        "start" : 21.068125
+      },
+      {
+        "end" : 28.6120625,
+        "speaker" : "A",
+        "start" : 25.0273125
+      },
+      {
+        "end" : 33.16725,
+        "speaker" : "B",
+        "start" : 29.2120625
+      },
+      {
+        "end" : 37.0079375,
+        "speaker" : "A",
+        "start" : 33.76725
+      },
+      {
+        "end" : 41.0045625,
+        "speaker" : "B",
+        "start" : 37.6079375
+      }
+    ]
+  },
+  {
+    "duration" : 28.076125,
+    "name" : "overlap",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Two speakers, every turn overlaps the previous by 1 s",
+    "turns" : [
+      {
+        "end" : 4.3730625,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 6.686875,
+        "speaker" : "B",
+        "start" : 3.373
+      },
+      {
+        "end" : 9.4534375,
+        "speaker" : "A",
+        "start" : 5.686875
+      },
+      {
+        "end" : 11.812625,
+        "speaker" : "B",
+        "start" : 8.4534375
+      },
+      {
+        "end" : 14.397375,
+        "speaker" : "A",
+        "start" : 10.812625
+      },
+      {
+        "end" : 17.3525625,
+        "speaker" : "B",
+        "start" : 13.397375
+      },
+      {
+        "end" : 19.59325,
+        "speaker" : "A",
+        "start" : 16.3525625
+      },
+      {
+        "end" : 21.989875,
+        "speaker" : "B",
+        "start" : 18.59325
+      },
+      {
+        "end" : 24.260125,
+        "speaker" : "A",
+        "start" : 20.989875
+      },
+      {
+        "end" : 27.326125,
+        "speaker" : "B",
+        "start" : 23.260125
+      }
+    ]
+  },
+  {
+    "duration" : 42.0336875,
+    "name" : "rapid-turns",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Two speakers with 0.1 s between turns",
+    "turns" : [
+      {
+        "end" : 3.357625,
+        "speaker" : "A",
+        "start" : 0.6
+      },
+      {
+        "end" : 7.324875,
+        "speaker" : "B",
+        "start" : 3.457625
+      },
+      {
+        "end" : 10.962625,
+        "speaker" : "A",
+        "start" : 7.4248125
+      },
+      {
+        "end" : 14.7020625,
+        "speaker" : "B",
+        "start" : 11.0625625
+      },
+      {
+        "end" : 18.1435625,
+        "speaker" : "A",
+        "start" : 14.8020625
+      },
+      {
+        "end" : 21.806375,
+        "speaker" : "B",
+        "start" : 18.2435625
+      },
+      {
+        "end" : 25.294375,
+        "speaker" : "A",
+        "start" : 21.906375
+      },
+      {
+        "end" : 28.591,
+        "speaker" : "B",
+        "start" : 25.394375
+      },
+      {
+        "end" : 31.6931875,
+        "speaker" : "A",
+        "start" : 28.691
+      },
+      {
+        "end" : 35.08,
+        "speaker" : "B",
+        "start" : 31.7931875
+      },
+      {
+        "end" : 37.982,
+        "speaker" : "A",
+        "start" : 35.18
+      },
+      {
+        "end" : 41.2836875,
+        "speaker" : "B",
+        "start" : 38.082
+      }
+    ]
+  },
+  {
+    "duration" : 51.2845625,
+    "name" : "six-speakers",
+    "sampleRate" : 16000,
+    "split" : "test",
+    "summary" : "Six speakers, two turns each",
+    "turns" : [
+      {
+        "end" : 4.4235625,
+        "speaker" : "A",
+        "start" : 1.1
+      },
+      {
+        "end" : 8.5601875,
+        "speaker" : "B",
+        "start" : 5.0235625
+      },
+      {
+        "end" : 12.670375,
+        "speaker" : "C",
+        "start" : 9.1601875
+      },
+      {
+        "end" : 16.3154375,
+        "speaker" : "D",
+        "start" : 13.270375
+      },
+      {
+        "end" : 20.7255625,
+        "speaker" : "E",
+        "start" : 16.9154375
+      },
+      {
+        "end" : 25.167875,
+        "speaker" : "F",
+        "start" : 21.3255625
+      },
+      {
+        "end" : 29.1678125,
+        "speaker" : "A",
+        "start" : 25.767875
+      },
+      {
+        "end" : 33.039875,
+        "speaker" : "B",
+        "start" : 29.7678125
+      },
+      {
+        "end" : 37.899375,
+        "speaker" : "C",
+        "start" : 33.639875
+      },
+      {
+        "end" : 41.96825,
+        "speaker" : "D",
+        "start" : 38.499375
+      },
+      {
+        "end" : 46.2105,
+        "speaker" : "E",
+        "start" : 42.56825
+      },
+      {
+        "end" : 50.5345625,
+        "speaker" : "F",
+        "start" : 46.8105
+      }
+    ]
+  }
+]
