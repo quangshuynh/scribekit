@@ -56,6 +56,30 @@ extension HistoryError: LocalizedError {
     }
 }
 
+/// A transcript as one read found it: its text, and a seal of the exact bytes
+/// that text was decoded from.
+///
+/// Both come from the same read, so the seal describes the text History shows
+/// rather than a second look at a file that might have moved on in between.
+nonisolated struct TranscriptReading: Equatable, Sendable {
+
+    /// The transcript's text, decoded as UTF-8.
+    let text: String
+
+    /// The SHA-256 and length of the bytes `text` was decoded from.
+    let observed: TranscriptSeal
+
+    /// Creates a reading.
+    ///
+    /// - Parameters:
+    ///   - text: The transcript's text.
+    ///   - observed: The seal of the bytes it was decoded from.
+    init(text: String, observed: TranscriptSeal) {
+        self.text = text
+        self.observed = observed
+    }
+}
+
 /// The filesystem operations history needs, and nothing else.
 ///
 /// The boundary is read-only by construction. There is no method here that
@@ -111,7 +135,11 @@ nonisolated protocol HistoryStoring: Sendable {
     ///   there or cannot be examined.
     func fileInfo(at url: URL) -> SessionFileInfo?
 
-    /// Reads a transcript's text.
+    /// Reads a transcript's text and seals the bytes it was read from.
+    ///
+    /// The digest is computed over the buffer the text is decoded from, so a
+    /// transcript is read from disk once and held in memory once however it is
+    /// checked.
     ///
     /// Reading is safe while a meeting is being written: the transcript writer
     /// only ever appends, takes no lock, and never rewrites what is already in
@@ -119,11 +147,11 @@ nonisolated protocol HistoryStoring: Sendable {
     /// document rather than a torn one.
     ///
     /// - Parameter url: The transcript's location.
-    /// - Returns: Its contents.
+    /// - Returns: Its contents and the seal of its bytes.
     /// - Throws: ``HistoryError/transcriptMissing`` when it is not there, or
     ///   ``HistoryError/transcriptUnreadable`` when it cannot be read or
     ///   decoded.
-    func readTranscript(at url: URL) throws -> String
+    func readTranscript(at url: URL) throws -> TranscriptReading
 }
 
 /// Session artifacts as `FileManager` provides them, for reading only.
@@ -172,7 +200,7 @@ nonisolated struct FileManagerHistoryStore: HistoryStoring {
         return SessionFileInfo(byteCount: size, modifiedAt: values.contentModificationDate)
     }
 
-    func readTranscript(at url: URL) throws -> String {
+    func readTranscript(at url: URL) throws -> TranscriptReading {
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
             throw HistoryError.transcriptMissing
         }
@@ -185,6 +213,6 @@ nonisolated struct FileManagerHistoryStore: HistoryStoring {
         guard let text = String(data: data, encoding: .utf8) else {
             throw HistoryError.transcriptUnreadable
         }
-        return text
+        return TranscriptReading(text: text, observed: TranscriptSeal.sealing(data))
     }
 }

@@ -59,8 +59,8 @@ nonisolated enum SessionRecoveryStatus: String, Codable, Sendable, CaseIterable,
 /// is refused rather than misread as this one.
 ///
 /// ``audioRetention``, ``audioPath``, ``pausedAt``, ``capturedDuration``,
-/// ``openGapStartedAt`` and ``captureMode`` were added after version 1 was in
-/// use and the version was deliberately not raised. All are optional and additive:
+/// ``openGapStartedAt``, ``captureMode`` and ``transcriptSeal`` were added after
+/// version 1 was in use and the version was deliberately not raised. All are optional and additive:
 /// a record written before they existed decodes with them absent, which is the
 /// truth about a session that kept no audio, and a build that has never heard
 /// of them ignores the extra keys. Raising the version would have made
@@ -170,6 +170,18 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     /// written before pausing existed.
     let capturedDuration: Double?
 
+    /// What the transcript's bytes were when ScribeKit closed it.
+    ///
+    /// Written only in the record that closes a session, after the transcript
+    /// has been flushed and closed, and only when the closed file could be
+    /// read back. It is evidence about the file and never a replacement for
+    /// it: a transcript that no longer matches is reported as changed, and
+    /// neither it nor this seal is rewritten. `nil` in every record written
+    /// before seals existed, in every session still open, in one recovery
+    /// marked interrupted after a relaunch, and in one whose closed transcript
+    /// could not be read back — none of which is evidence of damage.
+    let transcriptSeal: TranscriptSeal?
+
     /// Creates a record.
     ///
     /// - Parameters:
@@ -192,6 +204,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - pausedAt: When the meeting was paused, while it still is.
     ///   - openGapStartedAt: When an unfinished gap incident began.
     ///   - capturedDuration: Seconds of audio captured so far.
+    ///   - transcriptSeal: What the transcript's bytes were when it was
+    ///     closed.
     init(
         schemaVersion: Int = SessionRecoveryMetadata.currentSchemaVersion,
         sessionID: UUID,
@@ -208,7 +222,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         interruptedAt: Date? = nil,
         pausedAt: Date? = nil,
         openGapStartedAt: Date? = nil,
-        capturedDuration: Double? = nil
+        capturedDuration: Double? = nil,
+        transcriptSeal: TranscriptSeal? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.sessionID = sessionID
@@ -226,6 +241,7 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         self.pausedAt = pausedAt
         self.openGapStartedAt = openGapStartedAt
         self.capturedDuration = capturedDuration
+        self.transcriptSeal = transcriptSeal
     }
 
     /// Whether ScribeKit stopped while this meeting was paused.
@@ -278,12 +294,16 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///     for every session ScribeKit closes rather than only for one that
     ///     was paused. `nil` keeps whatever the record already carries, which
     ///     is what a caller that cannot measure it must pass.
-    /// - Returns: A copy carrying the new status, end time and captured
-    ///   length.
+    ///   - transcriptSeal: What the closed transcript's bytes are, or `nil`
+    ///     when they could not be read back, which records no seal rather
+    ///     than an invented one.
+    /// - Returns: A copy carrying the new status, end time, captured length
+    ///   and seal.
     func closed(
         _ outcome: SessionCompletionOutcome,
         at endedAt: Date,
-        capturedDuration: Double? = nil
+        capturedDuration: Double? = nil,
+        transcriptSeal: TranscriptSeal? = nil
     ) -> SessionRecoveryMetadata {
         // A closed meeting is not paused, whatever it was doing a moment ago,
         // and it is not in the middle of a gap incident either: every path
@@ -298,7 +318,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
             interruptedAt: outcome == .interrupted ? endedAt : interruptedAt,
             pausedAt: .some(nil),
             openGapStartedAt: .some(nil),
-            capturedDuration: capturedDuration
+            capturedDuration: capturedDuration,
+            transcriptSeal: .some(transcriptSeal)
         )
     }
 
@@ -343,6 +364,9 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
     ///   - openGapStartedAt: The new open-gap time, wrapped the same way.
     ///   - capturedDuration: The new captured duration. Defaults to the
     ///     current one.
+    ///   - transcriptSeal: The new seal, wrapped the same way as `pausedAt`.
+    ///     Every copy but the one that closes a session carries the current
+    ///     seal through untouched.
     /// - Returns: The copy.
     private func copy(
         status: SessionRecoveryStatus,
@@ -350,7 +374,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
         interruptedAt: Date?,
         pausedAt: Date?? = nil,
         openGapStartedAt: Date?? = nil,
-        capturedDuration: Double? = nil
+        capturedDuration: Double? = nil,
+        transcriptSeal: TranscriptSeal?? = nil
     ) -> SessionRecoveryMetadata {
         SessionRecoveryMetadata(
             schemaVersion: schemaVersion,
@@ -368,7 +393,8 @@ nonisolated struct SessionRecoveryMetadata: Codable, Equatable, Sendable {
             interruptedAt: interruptedAt,
             pausedAt: pausedAt ?? self.pausedAt,
             openGapStartedAt: openGapStartedAt ?? self.openGapStartedAt,
-            capturedDuration: capturedDuration ?? self.capturedDuration
+            capturedDuration: capturedDuration ?? self.capturedDuration,
+            transcriptSeal: transcriptSeal ?? self.transcriptSeal
         )
     }
 }

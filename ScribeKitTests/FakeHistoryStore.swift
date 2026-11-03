@@ -190,7 +190,7 @@ nonisolated final class FakeHistoryStore: HistoryStoring, @unchecked Sendable {
         state.withLock { $0.files[Self.key(url)] }
     }
 
-    func readTranscript(at url: URL) throws -> String {
+    func readTranscript(at url: URL) throws -> TranscriptReading {
         try state.withLock { state in
             if state.unreadableTranscripts.contains(Self.key(url)) {
                 throw HistoryError.transcriptUnreadable
@@ -199,7 +199,7 @@ nonisolated final class FakeHistoryStore: HistoryStoring, @unchecked Sendable {
                 throw HistoryError.transcriptMissing
             }
             state.reads += 1
-            return text
+            return TranscriptReading(text: text, observed: TranscriptSeal.sealing(Data(text.utf8)))
         }
     }
 

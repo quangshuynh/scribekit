@@ -39,6 +39,39 @@ recorded as **interrupted**, not completed, because a completion additionally
 claims that the meeting ended because someone ended it. See
 [Failure Semantics](../reliability/failure-semantics.md).
 
+## Transcript seal
+
+`transcriptSeal` is evidence about the transcript, recorded once, when the
+meeting closes:
+
+```json
+"transcriptSeal" : {
+  "algorithm" : "sha256",
+  "byteCount" : 4182,
+  "digest" : "9f2c…"
+}
+```
+
+It is written after the transcript has been flushed and closed — and after any
+recording has been finalised — by reading the closed file back in 64 KB chunks,
+and it goes into the same atomic replacement of `session.json` that records how
+the meeting ended. There is therefore no moment at which a record says a
+meeting closed while carrying a checksum for some other version of its file.
+It holds no transcript text, and nothing is added to the Markdown.
+
+It is additive and optional, like `captureMode`: records written by v0.1.0 and
+v0.2.0 decode with it absent and are read as unverified, and an earlier build
+ignores it. The schema version is unchanged. It is absent, too, while a meeting
+is still open, when ScribeKit stopped before the meeting closed and recovery
+marked it interrupted, and when the closed file could not be read back — in
+which case the completion is still recorded and the meeting is not failed for
+it. Absence is never treated as damage.
+
+ScribeKit never updates a seal to match a transcript that has changed, never
+rewrites a transcript to match its seal, and never sends either anywhere. See
+[Transcript integrity](../using/history-and-search.md#transcript-integrity)
+for what the check guarantees.
+
 ## Reading it back
 
 - A session marked in progress at launch is offered for

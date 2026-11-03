@@ -9,8 +9,8 @@ A row states its status only when the meeting did not end normally —
 in a long list. Selecting one shows its details — status, times, sources,
 recognition language, transcript size and whether a recording is beside it —
 with Review, notes and a preview of its transcript, and reveals the transcript
-or the recording in the Finder, or opens the transcript in whichever
-application you use for Markdown.
+or the recording in the Finder, opens the transcript in whichever application
+you use for Markdown, or exports a copy of it.
 
 ## Search
 
@@ -74,6 +74,65 @@ is written. Transcription gaps and interruption notices are not yet a find
 target — they are ScribeKit's structural remarks rather than speech, and the
 preview does not show them.
 
+## Exporting a transcript
+
+**Export…** beside *Open Transcript* saves a copy of the meeting's
+`transcript.md` wherever you choose in a standard save panel, offered under the
+meeting folder's own name. The copy is the file byte for byte: Markdown,
+Unicode, line endings and timestamps arrive exactly as they are in the
+transcript, with nothing summarised, cleaned up or re-encoded on the way.
+
+- The copy is written in one atomic step and read back and compared with the
+  transcript before ScribeKit says it was saved. A copy that does not match is
+  removed rather than left to be mistaken for the transcript.
+- The save panel asks before replacing an existing file. ScribeKit refuses the
+  meeting's own transcript as a destination, and anywhere inside a meeting
+  folder, so an export can never add to or replace a meeting's own files. A
+  copy directly in the save folder, beside the meeting folders, is allowed.
+- A meeting that is still being written cannot be exported until it finishes.
+  A transcript that has gone missing or cannot be read is reported, and
+  nothing is written.
+- The result appears under the actions and is announced to VoiceOver: where the
+  copy went, with **Show in Finder**, or why nothing was written. The button is
+  in the Tab order with the other file actions.
+
+Export is local. The copy goes only to the place you chose; ScribeKit does not
+upload it, share it with another service or log anything about it but its
+length. There is deliberately no Share menu, because its destinations — Mail,
+Messages, AirDrop — send the file off the Mac; share the exported copy from the
+Finder if that is what you want.
+
+## Transcript integrity
+
+When a meeting closes, ScribeKit records a SHA-256 checksum of its finished
+`transcript.md` in the meeting's [session record](../reference/session-metadata.md#transcript-seal).
+History compares the transcript with it every time it reads the folder, and the
+meeting's Details state the result:
+
+- **Verified** — the transcript is byte for byte the file ScribeKit wrote when
+  the meeting closed.
+- **Not verified** — there is no checksum to compare with. This is the ordinary
+  state of every meeting recorded before checksums existed (v0.1.0, v0.2.0 and
+  earlier), of a meeting that is still running, and of one ScribeKit stopped
+  during; it does not mean anything is wrong and is stated quietly.
+- **Changed since ScribeKit closed it** — the transcript's bytes differ from the
+  checksum, with both lengths stated, so a file that has become shorter reads
+  differently from one that was edited. The meeting is still listed, previewed,
+  searched, opened and exported; export warns that the copy is the file as it
+  is now.
+
+A transcript that is not in the folder at all, or cannot be read, is listed
+under *Could Not Be Read* as before.
+
+What it does and does not guarantee: the check detects any change to the
+file's bytes after ScribeKit closed it — truncation, an edit, a re-save that
+only changed line endings. It is not tamper-proofing: the checksum sits in an
+ordinary JSON file beside the transcript, so someone who edits both can make a
+changed transcript verify. It says nothing about whether the recogniser heard
+the meeting correctly, and nothing about a meeting that never closed. ScribeKit
+never repairs or rewrites a changed transcript, and never updates the checksum
+to agree with it.
+
 ## History never writes
 
 Listing, previewing, refreshing and searching leave every transcript,
@@ -109,5 +168,5 @@ the same size took 20 ms per keystroke, and finding within one three-hour
 transcript took under a millisecond; see
 [Performance](../PERFORMANCE.md#interval-31-history-search-and-transcript-find).
 
-There is no editor, no rename, no delete and no export. The files are yours to
-manage in the Finder.
+There is no editor, no rename and no delete. The files are yours to manage in
+the Finder; export writes a copy only where you choose.

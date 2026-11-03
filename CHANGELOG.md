@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### History export and transcript integrity
+
+- **Export a transcript from History.** **Export…** saves an exact,
+  byte-for-byte copy of a meeting's `transcript.md` through a standard save
+  panel. The copy is written atomically and checked against the transcript
+  before it is reported as saved; the meeting's own files, and anywhere inside
+  a meeting folder, are refused as destinations; a meeting still being written
+  cannot be exported. Nothing is uploaded and there is no Share menu.
+- **Transcript integrity.** A meeting that closes now records a SHA-256
+  checksum of its finished transcript in `session.json`, as an optional field
+  that leaves the schema version and every earlier record unchanged. History
+  shows each meeting as *Verified*, *Not verified* — the ordinary state of
+  meetings recorded before this, said quietly — or *Changed since ScribeKit
+  closed it*, and never repairs or rewrites a changed transcript.
+
+### Visual redesign
+
 A visual redesign. Nothing about capture, recognition, transcripts, History's
 search or persistence has changed.
 

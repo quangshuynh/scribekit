@@ -5,6 +5,14 @@ Current working state of the repository. Keep this short and current; see
 
 ## Current milestone
 
+History export and transcript integrity (issues 32 and 35), on
+`feat/history-export-integrity`, unmerged. History exports an exact copy of a
+meeting's `transcript.md`, and a meeting that closes records a SHA-256 seal of
+its finished transcript in `session.json` that History checks on every load.
+See **Transcript seal**, **Transcript integrity** and **Transcript export**
+below. Built and unit-tested in CI only; the save panel, the sandboxed write,
+VoiceOver and keyboard use have not been exercised by hand on a Mac.
+
 Interval 33 — speaker diarization feasibility, on
 `interval/33-speaker-diarization`, unmerged. Research only, decided
 **NO-GO** for the product: no application code, transcript format, session
@@ -77,6 +85,14 @@ observations were not recorded here.
   sidecar and its one write), and `RetainedAudioPlaybackPlan` (the seek, pure) /
   `RetainedAudioPlayer` (`@MainActor @Observable`, `AVPlayer` over an
   `AVURLAsset`, owning a `SecurityScopedLease` for the length of playback).
+- New for issues 32 and 35: `TranscriptSeal` / `TranscriptSealing` /
+  `FileTranscriptSealer` in `Persistence/`; `TranscriptIntegrity`,
+  `TranscriptReading` (what `HistoryStoring.readTranscript` now returns), and
+  `TranscriptExporter` / `TranscriptExportFiling` /
+  `FileManagerTranscriptExportFiles` / `TranscriptExportError` /
+  `TranscriptExportResult` in `History/`. `SessionRecoveryMetadata` gained an
+  optional `transcriptSeal`, `HistorySession` a `transcriptSeal` and an
+  `integrity`, `HistoryModel` an `ExportState` and `exportTranscript(of:)`.
 - `ScribeKit/History/`: `TranscriptDocument` /
   `TranscriptSpan` / `TranscriptHeaderField` (reading a written transcript back,
   no I/O), `HistorySession` / `HistorySessionStatus` / `HistoryAudio` /
@@ -1694,6 +1710,71 @@ fingerprints to be identical; another proves a load adds no file to the folder.
 Live, the nine files of the three Interval 9 validation sessions were hashed
 before and after a full History session and were identical, modification dates
 and sizes included.
+
+## Transcript seal
+
+`SessionRecoveryMetadata.transcriptSeal` — `algorithm` (`"sha256"`),
+lower-case hex `digest`, `byteCount` — is optional and additive at schema
+version 1, the precedent `audioRetention` and `captureMode` set: earlier
+records decode with it absent, earlier builds ignore the key, and an absent
+seal is omitted from the JSON rather than written as null.
+
+`MarkdownTranscriptStore.finishSession` seals after the footer, flush and close
+have succeeded and the review sidecar has been written, by reading the closed
+file back in 64 KB chunks through `TranscriptSealing`, and passes the seal to
+`closed(_:at:capturedDuration:transcriptSeal:)` — so it lands in the same atomic
+`session.json` replacement that records the outcome. Every closing outcome is
+sealed, `failed` included, because the seal describes the file as closed. A
+read-back failure records no seal, logs that it did, and does not fail the
+meeting. Recovery's `markingInterruption` carries a seal through and never
+creates one, so a meeting found unfinished after a relaunch has none.
+
+Rejected: a separate `integrity.json` (a second write that could disagree with
+the completion it describes), hashing appends as they are written (describes
+what ScribeKit meant to write, not what reached the disk), and putting a
+checksum in the Markdown (rewrites the user's document).
+
+## Transcript integrity
+
+`FileManagerHistoryStore.readTranscript` returns a `TranscriptReading`: the
+text and the seal of the same bytes, hashed in place, so a load still reads
+each transcript once and holds it once. `HistorySession.integrity` is
+`verified`, `changed(expectedByteCount:observedByteCount:)`, or
+`unverified(reason)` with `noRecord`, `notRecorded` (v0.1.0 / v0.2.0 records,
+or a failed read-back), `stillOpen`, `interruptedBeforeSealing` (interrupted
+with no `endedAt`, which only recovery writes) or `unsupportedAlgorithm`.
+Missing and unreadable transcripts are not verdicts: they are the existing
+`HistoryError` problems in the listing and `TranscriptExportError` at export.
+
+A verdict never decides whether a meeting is listed, previewed, searched,
+opened or exported. Only `changed` is drawn as a warning; unverified is one
+quiet line. Nothing rewrites the transcript or the seal, and the filesystem
+test fingerprints the folder across two loads with a changed transcript in it.
+
+## Transcript export
+
+`TranscriptExporter` (an actor) reads `transcript.md` as `Data`, never as text,
+under security-scoped access to the save folder for the length of each step,
+and writes the same bytes to the save-panel URL with `Data.write(.atomic)`. It
+reads the copy back and compares it byte for byte; a mismatch removes the copy
+(`verificationFailed`), a copy that cannot be read back is left and reported
+(`couldNotConfirm`). The verdict is recomputed from the exported bytes, so a
+transcript changed after the listing is described as it is now.
+
+Refused before anything is read: an in-progress meeting; a non-file or
+directory URL; the transcript itself; anywhere inside the meeting's folder; and
+anywhere inside another subfolder of the save folder that holds a transcript or
+`.scribekit`. Paths are compared after resolving symbolic links. The save
+folder's own top level is allowed, because History lists directories only. The
+save panel's own replace confirmation is the only way an export replaces a
+file.
+
+No Share menu: its destinations leave the Mac, and a sandboxed share of a
+security-scoped file would have to keep the folder lease open for however long
+another service takes to read it. No keyboard shortcut either: the file
+actions are drawn twice inside `ViewThatFits`, which would register one twice.
+The result is shown under the actions, scoped to the meeting it was for, and
+posted as a VoiceOver announcement. Logs carry only byte counts and outcomes.
 
 ## History UX
 
@@ -3466,8 +3547,13 @@ intervals; the capture observations above were taken through the same path.
   exactly as it is; history does not fall back to reading the transcript beside
   it as a legacy session, because a record that exists is evidence that should
   be read, not routed around.
-- **History is read-only.** No rename, no delete, no export, no editing, no
-  tags and no folders. The files are the user's to manage.
+- **History is read-only.** No rename, no delete, no editing, no tags and no
+  folders. The files are the user's to manage. Export writes an exact copy of a
+  transcript to a location the user picks, and nothing else.
+- **Integrity is evidence, not protection.** The seal sits in `session.json`,
+  so editing both files makes a changed transcript verify; meetings recorded
+  before seals existed, or stopped before they closed, cannot be verified;
+  recordings and sidecars are not sealed.
 - **Playback is for review and nothing else.** History plays the stretch of a
   recording around a flagged passage. It offers no way to play a meeting from
   the top, no scrubber and no waveform, and it still never decodes a recording

@@ -35,6 +35,8 @@ or attaches them.
 ## Getting data out
 
 The only way anything leaves your Mac is you moving it: the files are ordinary
-Markdown and audio in a folder you chose, and there is no export feature to
-route them anywhere. A diagnostic report is the one file ScribeKit writes
-outside that folder, and only to a location you pick in a save panel.
+Markdown and audio in a folder you chose. ScribeKit writes outside that folder
+only to a location you pick in a save panel — a diagnostic report, or an
+exported copy of a transcript — and neither is sent anywhere. Transcript
+integrity checking is local too: the checksum is computed on this Mac, stored
+in the session record, and never uploaded.
