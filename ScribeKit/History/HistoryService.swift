@@ -116,9 +116,11 @@ actor HistoryService {
     /// rather than dropped.
     ///
     /// Nothing is written. Records and transcripts are read, file sizes and
-    /// modification dates are measured, and recordings are neither opened nor
+    /// modification dates are measured, each transcript's bytes are compared
+    /// with the seal its record carries, and recordings are neither opened nor
     /// decoded, so a load leaves every byte of every artifact exactly as it
-    /// found it.
+    /// found it. A transcript that no longer matches its seal is listed with
+    /// that verdict, never dropped and never repaired.
     ///
     /// - Parameter destination: The folder the user chose, restored from its
     ///   security-scoped bookmark.
@@ -172,7 +174,8 @@ actor HistoryService {
 
         let transcriptURL = metadata.transcriptURL(in: directory)
         guard let info = store.fileInfo(at: transcriptURL) else { throw HistoryError.transcriptMissing }
-        let document = TranscriptDocument.parse(try store.readTranscript(at: transcriptURL))
+        let reading = try store.readTranscript(at: transcriptURL)
+        let document = TranscriptDocument.parse(reading.text)
 
         let session = HistorySession(
             directory: directory,
@@ -187,10 +190,11 @@ actor HistoryService {
             transcript: info,
             audioRetention: metadata.audioRetention,
             audio: metadata.audioURL(in: directory).flatMap(audio(at:)),
-            captureMode: metadata.captureMode
+            captureMode: metadata.captureMode,
+            transcriptSeal: metadata.transcriptSeal
         )
         return TranscriptSearchDocument(
-            session: session,
+            session: session.verified(against: reading),
             spans: document.spans,
             review: review(at: layout.reviewURL)
         )
@@ -230,10 +234,10 @@ actor HistoryService {
     ///   a ScribeKit meeting.
     private func legacyDocument(in directory: URL, layout: SessionArtifactLayout) -> TranscriptSearchDocument? {
         guard let info = store.fileInfo(at: layout.transcriptURL),
-              let text = try? store.readTranscript(at: layout.transcriptURL)
+              let reading = try? store.readTranscript(at: layout.transcriptURL)
         else { return nil }
 
-        let document = TranscriptDocument.parse(text)
+        let document = TranscriptDocument.parse(reading.text)
         guard document.isScribeKitTranscript, let title = document.title else { return nil }
 
         let session = HistorySession(
@@ -251,7 +255,7 @@ actor HistoryService {
             audio: legacyAudio(in: layout)
         )
         return TranscriptSearchDocument(
-            session: session,
+            session: session.verified(against: reading),
             spans: document.spans,
             review: review(at: layout.reviewURL)
         )

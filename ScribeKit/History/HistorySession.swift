@@ -192,6 +192,19 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
     /// The retained recording, when one is actually in the folder.
     let audio: HistoryAudio?
 
+    /// The seal the session record carries for the transcript, when it
+    /// carries one.
+    let transcriptSeal: TranscriptSeal?
+
+    /// Whether the transcript, as History read it, is still the file
+    /// ScribeKit closed.
+    ///
+    /// Set from the same read that produced the transcript's text, so it
+    /// describes the words on screen. A verdict is information for the user;
+    /// it never decides whether the meeting is listed, previewed, searched,
+    /// opened or exported.
+    private(set) var integrity: TranscriptIntegrity
+
     /// The directory, which identifies the session uniquely within one scan
     /// and exists for a legacy session that has no recorded identity.
     var id: URL { directory }
@@ -253,6 +266,10 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
     ///   - audio: The retained recording, when one is in the folder.
     ///   - captureMode: Where the meeting's audio came from, when its record
     ///     says.
+    ///   - transcriptSeal: The seal the record carries for the transcript.
+    ///   - integrity: The verdict on the transcript, or `nil` to start from
+    ///     the unverified reason the record implies until
+    ///     ``verified(against:)`` compares it with a reading.
     init(
         directory: URL,
         sessionID: UUID?,
@@ -266,7 +283,9 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
         transcript: SessionFileInfo,
         audioRetention: AudioRetentionMode?,
         audio: HistoryAudio?,
-        captureMode: CaptureMode? = nil
+        captureMode: CaptureMode? = nil,
+        transcriptSeal: TranscriptSeal? = nil,
+        integrity: TranscriptIntegrity? = nil
     ) {
         self.directory = directory
         self.sessionID = sessionID
@@ -281,6 +300,34 @@ nonisolated struct HistorySession: Identifiable, Equatable, Sendable {
         self.transcript = transcript
         self.audioRetention = audioRetention
         self.audio = audio
+        self.transcriptSeal = transcriptSeal
+        // Every stored property needs a value before the record's own reason
+        // for having no seal can be read from it.
+        self.integrity = .unverified(.notRecorded)
+        self.integrity = integrity ?? .unverified(unsealedReason)
+    }
+
+    /// The verdict on a transcript whose current bytes have this seal.
+    ///
+    /// Pure, and deterministic: a session with a seal is compared with it, and
+    /// one without is unverified for the reason its record implies. Missing
+    /// evidence is never reported as a mismatch.
+    ///
+    /// - Parameter observed: The seal of the transcript's bytes now.
+    /// - Returns: The verdict.
+    func integrity(of observed: TranscriptSeal) -> TranscriptIntegrity {
+        guard let transcriptSeal else { return .unverified(unsealedReason) }
+        return TranscriptIntegrity.compare(transcriptSeal, with: observed)
+    }
+
+    /// The same session, with its transcript checked against one reading.
+    ///
+    /// - Parameter reading: The transcript as History read it.
+    /// - Returns: A copy carrying the verdict.
+    func verified(against reading: TranscriptReading) -> HistorySession {
+        var copy = self
+        copy.integrity = integrity(of: reading.observed)
+        return copy
     }
 }
 

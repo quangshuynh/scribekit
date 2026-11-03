@@ -128,6 +128,33 @@ extension HistorySessionStatus {
     nonisolated var isNoteworthy: Bool { self != .completed }
 }
 
+extension TranscriptIntegrity {
+
+    /// The tone an integrity verdict is drawn in.
+    ///
+    /// Proportionate, like review priority: an unverified transcript is the
+    /// ordinary state of every meeting recorded before checksums existed and
+    /// carries no colour, and even a transcript that changed is a warning
+    /// rather than a failure, because the file is still the user's and still
+    /// readable.
+    nonisolated var tone: StatusTone {
+        switch self {
+        case .verified: .positive
+        case .unverified: .neutral
+        case .changed: .warning
+        }
+    }
+
+    /// The symbol drawn beside the verdict.
+    nonisolated var symbolName: String {
+        switch self {
+        case .verified: "checkmark.seal"
+        case .unverified: "seal"
+        case .changed: "exclamationmark.triangle"
+        }
+    }
+}
+
 extension CaptureMode {
 
     /// The symbol drawn beside the mode's name.
