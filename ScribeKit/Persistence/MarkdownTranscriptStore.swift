@@ -49,6 +49,12 @@ import OSLog
 /// begin — and last again when a session ends, after the transcript has been
 /// flushed and closed, so nothing is ever recorded as completed ahead of the
 /// file it describes.
+///
+/// That closing record also carries the transcript's ``TranscriptSeal``: the
+/// closed file is read back once, in chunks, and its SHA-256 is written in the
+/// same atomic replacement that records how the meeting ended. A transcript
+/// that cannot be read back is recorded without a seal rather than failing a
+/// meeting whose file closed cleanly.
 actor MarkdownTranscriptStore: TranscriptPersisting {
 
     /// How many appends are made between flushes to the storage device.
@@ -94,6 +100,7 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
     private let fileStore: any TranscriptFileStoring
     private let recoveryStore: any SessionRecoveryStoring
     private let reviewStore: any SessionReviewStoring
+    private let sealer: any TranscriptSealing
     private let access: any SecurityScopedResourceAccessing
     private let timeZone: TimeZone
     private var current: OpenSession?
@@ -107,6 +114,9 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
     ///     default; tests substitute a double that can fail on demand.
     ///   - reviewStore: How the review sidecar is written. The system by
     ///     default; tests substitute a double that can fail on demand.
+    ///   - sealer: How a closed transcript is read back and sealed. The
+    ///     system by default; tests substitute a double that can fail on
+    ///     demand.
     ///   - access: How security-scoped access is started and stopped.
     ///   - timeZone: The zone session names and clock times are written in.
     ///     The current zone by default, so a meeting is filed and timed as the
@@ -115,12 +125,14 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         fileStore: any TranscriptFileStoring = FileManagerTranscriptFileStore(),
         recoveryStore: any SessionRecoveryStoring = FileManagerSessionRecoveryStore(),
         reviewStore: any SessionReviewStoring = FileManagerSessionReviewStore(),
+        sealer: any TranscriptSealing = FileTranscriptSealer(),
         access: any SecurityScopedResourceAccessing = SystemSecurityScopedResourceAccess(),
         timeZone: TimeZone = .current
     ) {
         self.fileStore = fileStore
         self.recoveryStore = recoveryStore
         self.reviewStore = reviewStore
+        self.sealer = sealer
         self.access = access
         self.timeZone = timeZone
     }
@@ -343,6 +355,7 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
         if let failure { throw TranscriptPersistenceError(.flushFailed, underlying: failure) }
 
         writeReview(for: session)
+        let seal = sealTranscript(of: session)
 
         do {
             // The captured length is recorded for every session ScribeKit
@@ -354,7 +367,8 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
                 session.metadata.closed(
                     outcome,
                     at: endedAt,
-                    capturedDuration: session.capturedDuration
+                    capturedDuration: session.capturedDuration,
+                    transcriptSeal: seal
                 ),
                 to: session.layout
             )
@@ -382,6 +396,28 @@ actor MarkdownTranscriptStore: TranscriptPersisting {
             candidates: session.reviewCandidates
         )
         try? reviewStore.writeReview(metadata, to: session.layout)
+    }
+
+    /// Reads a just-closed transcript back and seals it.
+    ///
+    /// Best effort, for the reason the review sidecar is: the seal is evidence
+    /// a later reader can check, and a meeting whose transcript closed cleanly
+    /// is not failed because that evidence could not be gathered. A session
+    /// without a seal is exactly what every session recorded before seals
+    /// existed is, and History reports it as unverified rather than damaged.
+    /// Nothing about the transcript is logged but the outcome.
+    ///
+    /// - Parameter session: The session that has just been flushed and closed.
+    /// - Returns: The seal, or `nil` when the file could not be read back.
+    private func sealTranscript(of session: OpenSession) -> TranscriptSeal? {
+        do {
+            let seal = try sealer.seal(transcriptAt: session.layout.transcriptURL)
+            ScribeKitLog.persistence.info("Transcript sealed")
+            return seal
+        } catch {
+            ScribeKitLog.persistence.error("Transcript not sealed; the session is recorded without a seal")
+            return nil
+        }
     }
 
     /// Names the session's directory, stepping past names already in use.
