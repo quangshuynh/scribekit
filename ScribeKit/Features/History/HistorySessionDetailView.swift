@@ -53,6 +53,7 @@ struct HistorySessionDetailView: View {
                     VStack(alignment: .leading, spacing: Spacing.large) {
                         heading
                         actions
+                        exportFeedback
                     }
                     facts
                     review
@@ -74,6 +75,14 @@ struct HistorySessionDetailView: View {
                     }
                     .background(.bar)
                 }
+            }
+            .onChange(of: model.exportFeedback(for: session.id)) { _, state in
+                // The outcome appears below the actions without moving focus,
+                // so it is also spoken: someone working by keyboard and
+                // VoiceOver hears whether the copy was written without having
+                // to go looking for it.
+                guard let announcement = Self.exportAnnouncement(for: state) else { return }
+                AccessibilityNotification.Announcement(announcement).post()
             }
             .onChange(of: model.previewAnchor) { _, anchor in
                 guard let anchor else { return }
@@ -172,6 +181,19 @@ struct HistorySessionDetailView: View {
             .accessibilityLabel("Show Transcript in Finder")
             .accessibilityHint("Reveal this meeting's transcript in the Finder")
 
+            Button {
+                Task { await model.exportTranscript(of: session) }
+            } label: {
+                Label("Export…", systemImage: "square.and.arrow.up")
+            }
+            .help(model.canExport(session)
+                  ? "Export Transcript…"
+                  : "Export is available once the meeting has finished")
+            .accessibilityLabel("Export Transcript")
+            .accessibilityHint("Save an exact copy of this meeting's transcript to a location you choose. "
+                               + "The meeting's own files are not changed.")
+            .disabled(!model.canExport(session))
+
             if let audio = session.audio {
                 Button {
                     model.showInFinder(audio.url)
@@ -183,6 +205,83 @@ struct HistorySessionDetailView: View {
             }
         }
         .fixedSize()
+    }
+
+    // MARK: - Export
+
+    /// What the last export of this meeting did, under the actions that
+    /// started it.
+    ///
+    /// Present only while there is something to say. Success names the copy
+    /// and offers to show it; failure says what happened and that the meeting
+    /// is unchanged. Neither quotes the transcript.
+    @ViewBuilder
+    private var exportFeedback: some View {
+        switch model.exportFeedback(for: session.id) {
+        case .idle:
+            EmptyView()
+        case .exporting:
+            HStack(spacing: Spacing.small) {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true)
+                Text("Exporting the transcript…")
+                    .textRole(.secondaryBody)
+            }
+            .accessibilityElement(children: .combine)
+        case let .exported(_, result):
+            NoticeView(
+                tone: result.integrity.isWarning ? .warning : .positive,
+                symbolName: result.integrity.isWarning ? "exclamationmark.triangle" : "checkmark.circle",
+                title: "Transcript exported",
+                message: Self.exportSuccessMessage(for: result)
+            ) {
+                HStack(spacing: Spacing.small) {
+                    Button("Show in Finder") { model.showInFinder(result.destination) }
+                        .accessibilityHint("Reveal the exported copy in the Finder")
+                    Button("Dismiss") { model.dismissExportFeedback() }
+                }
+            }
+        case let .failed(_, message):
+            NoticeView(
+                tone: .warning,
+                symbolName: "exclamationmark.triangle",
+                title: "Transcript not exported",
+                message: message + " The meeting's own files are unchanged."
+            ) {
+                Button("Dismiss") { model.dismissExportFeedback() }
+            }
+        }
+    }
+
+    /// What a confirmed export says about the copy.
+    ///
+    /// - Parameter result: The confirmed copy.
+    /// - Returns: The message.
+    static func exportSuccessMessage(for result: TranscriptExportResult) -> String {
+        let size = Int64(result.byteCount).formatted(.byteCount(style: .file))
+        let base = "An exact copy (\(size)) was saved as “\(result.destination.lastPathComponent)”."
+        switch result.integrity {
+        case .verified:
+            return base + " It matches the checksum ScribeKit recorded when this meeting closed."
+        case .changed:
+            return base + " The transcript had changed since ScribeKit closed it, so the copy matches the file "
+                + "as it is now, not as ScribeKit wrote it."
+        case .unverified:
+            return base
+        }
+    }
+
+    /// What VoiceOver says when an export finishes.
+    ///
+    /// - Parameter state: The export's state.
+    /// - Returns: The announcement, or `nil` when there is nothing to say.
+    static func exportAnnouncement(for state: HistoryModel.ExportState) -> String? {
+        switch state {
+        case .idle, .exporting: nil
+        case let .exported(_, result): "Transcript exported. " + exportSuccessMessage(for: result)
+        case let .failed(_, message): "Transcript not exported. " + message
+        }
     }
 
     // MARK: - Facts
@@ -225,10 +324,13 @@ struct HistorySessionDetailView: View {
                     FactRow(label: "Language", value: locale, isTechnical: true)
                 }
                 FactRow(label: "Transcript", value: Self.byteDescription(session.transcript.byteCount))
+                FactRow(label: "Integrity", value: session.integrity.displayName)
                 FactRow(label: "Audio", value: audioDescription)
                 FactRow(label: "Folder", value: DisplayPath.abbreviated(session.directory), isTechnical: true,
                         truncatesMiddle: true)
             }
+
+            integrityNote
 
             if session.isLegacy {
                 Text("This meeting has no ScribeKit session record, so its start and end times, "
@@ -237,6 +339,29 @@ struct HistorySessionDetailView: View {
                     .textRole(.secondaryBody)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// What the integrity verdict means.
+    ///
+    /// A transcript that differs from what ScribeKit wrote, or cannot be
+    /// reached, is a notice; a verified or unverified one is one quiet line,
+    /// because a meeting recorded before checksums existed has nothing wrong
+    /// with it and should not read as if it had.
+    @ViewBuilder
+    private var integrityNote: some View {
+        let integrity = session.integrity
+        if integrity.isWarning {
+            NoticeView(
+                tone: integrity.tone,
+                symbolName: integrity.symbolName,
+                title: integrity.displayName,
+                message: integrity.explanation
+            )
+        } else {
+            StatusBadge(title: integrity.explanation, symbolName: integrity.symbolName, tone: integrity.tone,
+                        role: .secondaryBody)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

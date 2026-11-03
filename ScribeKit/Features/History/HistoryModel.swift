@@ -5,6 +5,7 @@
 
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 /// Owns the History screen: what was found in the save folder, what the user
 /// typed into the search field, and what matched it.
@@ -43,8 +44,38 @@ final class HistoryModel {
         case unavailable(message: String)
     }
 
+    /// Where the last transcript export stands.
+    ///
+    /// One value, attached to the meeting it was for, so feedback about one
+    /// meeting is never shown against another and an export in flight cannot
+    /// be started twice.
+    enum ExportState: Equatable {
+        /// Nothing has been exported for the meeting on screen.
+        case idle
+
+        /// A copy of a meeting's transcript is being written.
+        case exporting(sessionID: URL)
+
+        /// A copy was written and confirmed.
+        case exported(sessionID: URL, result: TranscriptExportResult)
+
+        /// An export was refused or failed; the message says why.
+        case failed(sessionID: URL, message: String)
+
+        /// The meeting the state is about, or `nil` when idle.
+        var sessionID: URL? {
+            switch self {
+            case .idle: nil
+            case let .exporting(id), let .exported(id, _), let .failed(id, _): id
+            }
+        }
+    }
+
     /// What the screen shows.
     private(set) var state: State = .unloaded
+
+    /// Where the last transcript export stands.
+    private(set) var exportState: ExportState = .idle
 
     /// The save folder the current listing came from.
     private(set) var destination: URL?
@@ -122,6 +153,11 @@ final class HistoryModel {
 
     private let service: HistoryService
     private let saveLocation: SaveLocationPersisting
+    private let exporter: TranscriptExporter
+
+    /// Asks the user where to save a copy, given a suggested filename and
+    /// what the panel should say, and answers `nil` when they cancel.
+    private let chooseExportDestination: @MainActor (String, String) -> URL?
 
     /// The meeting whose derived state is currently attached.
     ///
@@ -145,14 +181,23 @@ final class HistoryModel {
     ///   - derived: Owns the selected meeting's notes and review marks. A
     ///     fresh one by default; a test substitutes one built on a store
     ///     double.
+    ///   - exporter: Copies a transcript to a location the user chose. The
+    ///     default reaches the real filesystem; tests substitute one built on
+    ///     a double.
+    ///   - chooseExportDestination: Asks the user where to save a copy. The
+    ///     default runs a system save panel; tests substitute a decision.
     init(
         service: HistoryService = HistoryService(),
         saveLocation: SaveLocationPersisting = SecurityScopedSaveLocationStore(),
         player: RetainedAudioPlayer? = nil,
-        derived: DerivedSessionModel? = nil
+        derived: DerivedSessionModel? = nil,
+        exporter: TranscriptExporter = TranscriptExporter(),
+        chooseExportDestination: @escaping @MainActor (String, String) -> URL? = HistoryModel.runExportPanel
     ) {
         self.service = service
         self.saveLocation = saveLocation
+        self.exporter = exporter
+        self.chooseExportDestination = chooseExportDestination
         self.player = player ?? RetainedAudioPlayer()
         self.derived = derived ?? DerivedSessionModel()
     }
@@ -255,6 +300,10 @@ final class HistoryModel {
     /// - Parameter id: The selected session's directory, or `nil`.
     func selectSession(_ id: URL?) async {
         selectedSessionID = id
+        // Feedback belongs to the meeting it was about. A reload re-selects
+        // the same meeting and keeps it; choosing another clears it, unless
+        // an export is still being written, whose outcome is still owed.
+        if exportState.sessionID != id, !isExporting { exportState = .idle }
         refreshFind()
         guard let id, let document = document(for: id) else {
             derived.clear()
@@ -282,6 +331,98 @@ final class HistoryModel {
     /// - Parameter url: The transcript to open.
     func openTranscript(_ url: URL) {
         withDestinationAccess { NSWorkspace.shared.open(url) }
+    }
+
+    /// Whether an export is being written right now.
+    var isExporting: Bool {
+        if case .exporting = exportState { return true }
+        return false
+    }
+
+    /// Where the last export stands for one meeting.
+    ///
+    /// - Parameter id: The meeting's directory.
+    /// - Returns: The state, or ``ExportState/idle`` when the last export was
+    ///   about another meeting.
+    func exportFeedback(for id: URL) -> ExportState {
+        exportState.sessionID == id ? exportState : .idle
+    }
+
+    /// Whether a meeting's transcript can be exported.
+    ///
+    /// A meeting that is still open is not: its transcript is still growing,
+    /// and a copy would be a moment's prefix presented as the meeting.
+    ///
+    /// - Parameter session: The meeting.
+    /// - Returns: `true` when Export is offered.
+    func canExport(_ session: HistorySession) -> Bool {
+        session.status != .inProgress && !isExporting
+    }
+
+    /// Asks where to save a copy of a meeting's transcript, and writes one
+    /// there.
+    ///
+    /// Explicit from end to end: nothing is read until the user has chosen a
+    /// destination, a cancelled panel leaves no file and no state, and the
+    /// copy is the transcript's bytes exactly. The meeting folder is only read.
+    ///
+    /// - Parameter session: The meeting to export.
+    func exportTranscript(of session: HistorySession) async {
+        guard canExport(session) else { return }
+        let name = TranscriptExporter.suggestedFilename(for: session)
+        guard let target = chooseExportDestination(name, Self.exportMessage(for: session)) else { return }
+
+        exportState = .exporting(sessionID: session.id)
+        do {
+            let result = try await exporter.export(session, from: destination, to: target)
+            exportState = .exported(sessionID: session.id, result: result)
+        } catch {
+            exportState = .failed(
+                sessionID: session.id,
+                message: (error as? LocalizedError)?.errorDescription
+                    ?? TranscriptExportError.writeFailed.errorDescription ?? ""
+            )
+        }
+    }
+
+    /// Forgets the last export's feedback.
+    func dismissExportFeedback() {
+        guard !isExporting else { return }
+        exportState = .idle
+    }
+
+    /// What the save panel says before anything is written.
+    ///
+    /// - Parameter session: The meeting being exported.
+    /// - Returns: The message.
+    nonisolated static func exportMessage(for session: HistorySession) -> String {
+        let copy = "ScribeKit saves an exact copy of this meeting's transcript. The meeting's own files are "
+            + "not changed, and nothing is uploaded."
+        guard session.integrity.isWarning else { return copy }
+        return "This transcript has changed since ScribeKit closed it. The copy will be exactly what the "
+            + "file holds now. " + copy
+    }
+
+    /// Runs the system save panel for a transcript copy.
+    ///
+    /// The panel asks before replacing an existing file, which is the only way
+    /// an export can replace anything, and only at a location the user chose.
+    ///
+    /// - Parameters:
+    ///   - name: The suggested filename.
+    ///   - message: What the export does.
+    /// - Returns: The chosen destination, or `nil` when the user cancelled.
+    private static func runExportPanel(name: String, message: String) -> URL? {
+        let panel = NSSavePanel()
+        panel.title = "Export Transcript"
+        panel.prompt = "Export"
+        panel.message = message
+        panel.nameFieldStringValue = name
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
     }
 
     /// Plays the retained audio around one review candidate.
