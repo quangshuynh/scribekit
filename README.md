@@ -65,8 +65,9 @@ while the meeting is still running.
   [Details](https://quangshuynh.github.io/scribekit/using/recovery/)
 - **Reads meetings back** through a read-only history, local substring search,
   uncertainty review against retained audio, and Markdown notes kept in a
-  sidecar of their own, with filtering by source and find within a
-  transcript.
+  sidecar of their own, with filtering by source, find within a transcript,
+  byte-for-byte export, and a local checksum that shows whether a transcript
+  changed after ScribeKit closed it.
   [Details](https://quangshuynh.github.io/scribekit/using/history-and-search/)
 - **Retains audio only if you ask.** None by default; optionally raw `.caf` or
   compressed `.m4a`.
@@ -248,9 +249,10 @@ v0.2.0 is deliberately narrow. The ones most likely to matter:
   Apple's recogniser's.
 - An interrupted meeting is preserved but cannot be continued as the same
   session; you start a new one.
-- Transcripts are read-only inside History, with no editing, renaming,
-  deleting or exporting. Changing a transcript's structure outside ScribeKit
-  can stop History parsing it.
+- Transcripts are read-only inside History, with no editing, renaming or
+  deleting; export writes an exact copy. Changing a transcript's structure
+  outside ScribeKit can stop History parsing it, and meetings recorded before
+  checksums existed cannot be integrity-checked.
 - Compressed audio cut short by an abrupt process death may be unreadable.
 - ScribeKit does not encrypt what it writes.
 

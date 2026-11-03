@@ -51,6 +51,11 @@ and the menus cannot disagree about what is currently possible.
   something only a sighted user learns about.
 - **Show in Transcript** on a flagged review passage moves the preview to it
   and moves VoiceOver to that passage.
+- **Export…** sits with the other file actions and is reached with Tab when
+  Keyboard navigation is on; it opens a standard save panel. Whether the copy
+  was saved, or why not, is announced and stays on screen under the actions
+  with **Show in Finder** and **Dismiss**, so the result does not depend on
+  noticing it appear.
 - On the Meeting screen, the microphone **Input** is a standard pop-up button.
   While a meeting runs the screen shows the meeting instead of the setup form,
   and its source — including the microphone it is bound to — is read out with
@@ -85,6 +90,9 @@ shows:
 - **The find field's count** reads as "Match 3 of 12 for deployment" or "No
   matches for …"; the Previous and Next buttons are named as such rather than by
   their chevrons.
+- **A meeting's integrity** is a Details row read as "Integrity, Verified",
+  "Not verified" or "Changed since ScribeKit closed it", followed by the
+  sentence explaining it.
 
 Nothing in ScribeKit signals a state with colour alone. Every status that has
 an icon has the same status in words beside it — a review passage's priority,

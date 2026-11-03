@@ -33,8 +33,14 @@ are consequences of decisions, and several of them are deliberate.
   that were measured could not separate more than two voices, or two similar
   ones, reliably enough to show. ScribeKit also never identifies people by
   voice. See [Speaker Diarization Research](../development/speaker-diarization.md).
-- **No editing, renaming, deleting or exporting.** Transcript history is
-  read-only; the files are yours to manage in the Finder.
+- **No editing, renaming or deleting.** Transcript history is read-only; the
+  files are yours to manage in the Finder. Export writes an exact copy of a
+  transcript where you choose, and there is no Share menu, PDF or other format.
+- **Integrity checking is evidence, not protection.** The checksum ScribeKit
+  records sits beside the transcript in an ordinary file, so editing both makes
+  a changed transcript verify. Meetings recorded before checksums existed, and
+  meetings ScribeKit stopped during, cannot be verified at all. A transcript's
+  recording is not checksummed.
 - **No search over your notes.** History's search runs over titles,
   transcripts and source names.
 - **No filesystem watcher.** History reads the folder when it opens, when you
