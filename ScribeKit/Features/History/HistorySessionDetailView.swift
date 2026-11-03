@@ -344,8 +344,8 @@ struct HistorySessionDetailView: View {
 
     /// What the integrity verdict means.
     ///
-    /// A transcript that differs from what ScribeKit wrote, or cannot be
-    /// reached, is a notice; a verified or unverified one is one quiet line,
+    /// A transcript that differs from what ScribeKit wrote is a notice; a
+    /// verified or unverified one is one quiet line,
     /// because a meeting recorded before checksums existed has nothing wrong
     /// with it and should not read as if it had.
     @ViewBuilder
