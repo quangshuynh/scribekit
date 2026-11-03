@@ -47,7 +47,7 @@ struct TranscriptExportIntegrationTests {
         defer {
             // Restore permissions a test may have removed, so cleanup succeeds.
             if let enumerator = FileManager.default.enumerator(atPath: root.path(percentEncoded: false)) {
-                for case let path as String in enumerator {
+                while let path = enumerator.nextObject() as? String {
                     try? FileManager.default.setAttributes(
                         [.posixPermissions: 0o755],
                         ofItemAtPath: root.appending(path: path).path(percentEncoded: false)

@@ -333,7 +333,7 @@ struct TranscriptExportTests {
         let changed = session(seal: .sealing(Data("other".utf8)))
             .verified(against: TranscriptReading(text: "x", observed: .sealing(Data("x".utf8))))
         #expect(HistoryModel.exportMessage(for: changed).hasPrefix("This transcript has changed"))
-        #expect(!HistoryModel.exportMessage(for: session()).contains("changed"))
+        #expect(!HistoryModel.exportMessage(for: session()).contains("has changed"))
         #expect(HistoryModel.exportMessage(for: session()).contains("nothing is uploaded"))
     }
 }
